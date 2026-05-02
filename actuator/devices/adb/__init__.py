@@ -1,1 +1,0 @@
-from .devices import AdbPlatform as AdbPlatform

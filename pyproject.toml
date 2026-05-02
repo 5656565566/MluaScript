@@ -1,45 +1,68 @@
-[tool.poetry]
-name = "rose-script-actuator"
-version = "0.0.1"
-description = ""
-authors = ["5656565566 <2393963330@qq.com>"]
+[project]
+name = "MluaScript"
+version = "1.0.0"
+description = "MaaFramework-driven script controller"
+authors = [
+    {name = "5656565566", email = "2393963330@qq.com"},
+]
+dependencies = [
+    "maafw>=5.9.2",
+    "loguru>=0.7.2",
+    "textual>=8.1.1",
+    "rich>=13.9.4",
+    "pydantic>=2.12.5",
+    "pyyaml>=6.0.3",
+    "keyboard>=0.13.5",
+    "lupa>=2.4",
+    "pillow>=12.1.1",
+    "fastapi>=0.116.1",
+    "uvicorn>=0.35.0",
+    "pyinstaller>=6.19.0",
+    "plyer>=2.1.0",
+    "httpx>=0.28.1",
+    "playwright>=1.58.0",
+]
+requires-python = "==3.12.*"
 readme = "README.md"
-package-mode = false
+license = {text = "MIT"}
 
-[tool.poetry.dependencies]
-python = "^3.10"
-pyautogui = "^0.9.54"
-adbutils = "^2.7.2"
-opencv-python = "^4.10.0.84"
-paddleocr = "^2.8.0"
-pyyaml = "^6.0.1"
-loguru = "^0.7.2"
-pydantic = "^2.8.2"
-pydantic-core = "^2.20.1"
-annotated-types = "^0.7.0"
-psutil = "^6.0.0"
-httpx = {extras = ["asyncio"], version = "^0.28.1"}
-paddlepaddle = "^2.6.2"
-httpcore = {extras = ["asyncio"], version = "^1.0.7"}
-keyboard = "^0.13.5"
-pydirectinput = "^1.0.4"
-pyperclip = "^1.9.0"
-selenium = "^4.26.1"
-lupa = "^2.4"
-textual = "^1.0.0"
-win32-setctime = "^1.2.0"
-fuzzywuzzy = "^0.18.0"
-
-[tool.poetry.group.test.dependencies]
-pytest = "^8.3.4"
-pytest-cov = "^6.0.0"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0.0",
+    "pytest-mock>=3.14.0",
+]
 
 [tool.pytest.ini_options]
-pythonpath = [".", "actuator"]
-filterwarnings = [
-    "ignore::DeprecationWarning"
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--verbose",
+    "--strict-markers",
+    "--tb=short",
+    "--cov=src/mluascript",
+#    "--cov-report=html",
+    "--cov-report=term-missing",
+#    "--cov-fail-under=70",
 ]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: unit tests",
+]
+
+[project.scripts]
+mluascript = "mluascript.__main__:main"
+
+[tool.coverage.run]
+omit = [
+    "src/mluascript/tui/*",  # 排除整个 tui 目录
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mluascript*"]

@@ -1,2 +1,0 @@
-poetry run pyinstaller -F actuator\__main__.py --icon logo.ico --collect-all paddleocr --collect-all pyclipper --collect-all imghdr --collect-all skimage --collect-all imgaug --collect-all scipy.io --collect-all lmdb --collect-all paddle --collect-all lupa
-copy dist\__main__.exe build\actuator.exe

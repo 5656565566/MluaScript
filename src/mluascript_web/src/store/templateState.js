@@ -1,0 +1,15 @@
+import { ref } from 'vue'
+
+export function createTemplateState() {
+  return {
+    selectedTemplateScript: ref(null),
+    selectedTemplateMeta: ref(null),
+    selectedTemplateConfigPath: ref(''),
+    selectedTemplateSavedConfig: ref(null),
+    templateScriptType: ref(''),
+    templateTaskFormData: ref({}),
+    templateWorkflowFormData: ref({}),
+    selectedTaskKey: ref(''),
+    selectedWorkflowKey: ref(''),
+  }
+}
