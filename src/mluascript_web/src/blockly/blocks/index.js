@@ -191,6 +191,29 @@ export function ensureBlocklyBlocks() {
     },
   }
 
+  Blockly.Blocks.math_number = {
+    init() {
+      this.appendDummyInput()
+        .appendField('\u00A0')
+        .appendField(new Blockly.FieldTextInput('0', (value) => {
+          const text = String(value ?? '').trim()
+          return /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text) ? text : null
+        }), 'NUM')
+        .appendField('\u00A0')
+      this.setOutput(true, 'Number')
+      this.setStyle('math_blocks')
+      this.setColour('#5b67a5')
+      this.setTooltip(Blockly.Msg.MATH_NUMBER_TOOLTIP || '')
+      this.setHelpUrl(Blockly.Msg.MATH_NUMBER_HELPURL || '')
+    },
+  }
+
+  luaGenerator.forBlock.math_number = function(block) {
+    const rawCode = String(block.getFieldValue('NUM') ?? '0').trim()
+    const code = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(rawCode) ? rawCode : '0'
+    return [code, luaGenerator.ORDER_ATOMIC]
+  }
+
   for (const spec of dynamicBlockSpecs) {
     if (spec.type === 'procedure_call_picker') {
       luaGenerator.forBlock[spec.type] = spec.generator

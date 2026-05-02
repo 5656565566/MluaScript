@@ -149,8 +149,8 @@ body,
 }
 
 /* Blockly editable field + dropdown contrast */
-.blocklyEditableText:not(.maa-field-number) > rect,
-.blocklyEditableText:not(.maa-field-number) > .blocklyDropdownRect,
+.blocklyEditableText > rect,
+.blocklyEditableText > .blocklyDropdownRect,
 .blocklyNonEditableText > rect,
 .blocklyNonEditableText > .blocklyDropdownRect {
   fill: rgba(255, 255, 255, 0.16) !important;
@@ -158,9 +158,9 @@ body,
   stroke: rgba(255, 255, 255, 0.24) !important;
 }
 
-.blocklyEditableText:not(.maa-field-number) > text,
-.blocklyEditableText:not(.maa-field-number) > g > text,
-.blocklyEditableText:not(.maa-field-number) tspan,
+.blocklyEditableText > text,
+.blocklyEditableText > g > text,
+.blocklyEditableText tspan,
 .blocklyNonEditableText > text,
 .blocklyNonEditableText > g > text,
 .blocklyNonEditableText tspan,
@@ -168,16 +168,16 @@ body,
   fill: #f8fafc !important;
 }
 
-.blocklyEditableText.editing:not(.maa-field-number) > rect,
-.blocklyEditableText.editing:not(.maa-field-number) > .blocklyDropdownRect {
+.blocklyEditableText.editing > rect,
+.blocklyEditableText.editing > .blocklyDropdownRect {
   fill: rgba(0, 0, 0, 0.28) !important;
   stroke: rgba(255, 255, 255, 0.3) !important;
 }
 
-.blocklyEditableText.editing:not(.maa-field-number) > text,
-.blocklyEditableText.editing:not(.maa-field-number) > g > text,
-.blocklyEditableText.editing:not(.maa-field-number) tspan,
-.blocklyEditableText.editing:not(.maa-field-number) .blocklyDropdownText {
+.blocklyEditableText.editing > text,
+.blocklyEditableText.editing > g > text,
+.blocklyEditableText.editing tspan,
+.blocklyEditableText.editing .blocklyDropdownText {
   fill: transparent !important;
   opacity: 0 !important;
 }
@@ -203,51 +203,8 @@ body,
   box-sizing: border-box !important;
 }
 
-.maa-field-number > rect,
-.maa-field-number > .maa-field-number-rect,
-.maa-field-number.blocklyEditableText > .blocklyFieldRect {
-  fill: #ffffff !important;
-  fill-opacity: 1 !important;
-  stroke: #d1d5db !important;
-}
-
-.maa-field-number > text,
-.maa-field-number > g > text,
-.maa-field-number tspan,
-.maa-field-number-text {
-  fill: #94a3b8 !important;
-}
-
-.blocklyEditableText.editing.maa-field-number > rect,
-.blocklyEditableText.editing.maa-field-number > .maa-field-number-rect,
-.blocklyEditableText.editing.maa-field-number.blocklyEditableText > .blocklyFieldRect {
-  fill: rgba(91, 103, 165, 0.28) !important;
-  stroke: #7c89c8 !important;
-}
-
-.blocklyEditableText.editing.maa-field-number > text,
-.blocklyEditableText.editing.maa-field-number > g > text,
-.blocklyEditableText.editing.maa-field-number tspan,
-.blocklyEditableText.editing.maa-field-number .maa-field-number-text {
-  fill: transparent !important;
-  opacity: 0 !important;
-}
-
-.blockly-embedded-input {
-  width: 100% !important;
-  height: 100% !important;
-  margin: 0 !important;
-  padding: 0 4px !important;
-  border: none !important;
-  outline: none !important;
-  background: transparent !important;
-  color: var(--color-text-primary) !important;
-  text-align: center !important;
-  box-sizing: border-box !important;
-}
-
-.blocklyWidgetDiv .blocklyHtmlInput:not(.maa-field-number-input):focus,
-.blocklyDropDownDiv .blocklyHtmlInput:not(.maa-field-number-input):focus,
+.blocklyWidgetDiv .blocklyHtmlInput:focus,
+.blocklyDropDownDiv .blocklyHtmlInput:focus,
 .blocklyTextInputBubble textarea.blocklyTextarea:focus {
   background-color: rgba(0, 0, 0, 0.28) !important;
   color: #ffffff !important;

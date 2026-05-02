@@ -56,8 +56,6 @@ function buildFilteredVariableFlyout(workspace) {
     const changeBlock = Blockly.utils.xml.createElement('block')
     changeBlock.setAttribute('type', 'math_change')
     changeBlock.setAttribute('gap', Blockly.Blocks.variables_get ? '20' : '8')
-    const valueDom = Blockly.utils.xml.textToDom('<value name="DELTA"><shadow type="math_number"><field name="NUM">1</field></shadow></value>')
-    changeBlock.appendChild(valueDom)
     xmlItems.push(changeBlock)
   }
 
