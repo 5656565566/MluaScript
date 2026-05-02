@@ -13,6 +13,11 @@
 
 MluaScript 是一个结合了 Python 后端运行环境、MaaFramework 自动化能力、以及 Web (Blockly 可视化编程) 和 TUI 前端的脚本执行平台
 
+### TUI 界面截图
+
+![MluaScript TUI 界面](screenshot/tui.png)
+![MluaScript WEB 界面](screenshot/webui.png)
+
 ## 文档规划
 
 随着项目的不断完善，本目录预计将包含以下类型的文档：
