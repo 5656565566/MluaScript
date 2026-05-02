@@ -12,6 +12,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from mluascript.shared.config import config as global_config
 
 from ..image_bridge import RuntimeImageHandle
+from ..utils.table_lua import lua_2_python
 from .client import LLMClient
 from .models import (
     AIDecisionMember,
@@ -331,24 +332,25 @@ class AIDecider:
                 result = member.handler(**arguments)
             else:
                 result = None
-            validated = self._validate_result(member, result)
+            normalized_result = lua_2_python(result)
+            validated = self._validate_result(member, normalized_result)
             return AIToolCallRecord(
-                member_id=member.id,
-                member_kind=member.kind,
-                arguments=arguments,
-                success=validated.is_valid,
-                result=validated.value,
-                result_validation_error=validated.validation_error or "",
-                error="" if validated.is_valid else (validated.validation_error or ""),
+                member.id,
+                member.kind,
+                arguments,
+                validated.is_valid,
+                validated.value,
+                "" if validated.is_valid else (validated.validation_error or ""),
+                validated.validation_error or "",
             )
         except Exception as exc:
             return AIToolCallRecord(
-                member_id=member.id,
-                member_kind=member.kind,
-                arguments=arguments,
-                success=False,
-                result=None,
-                error=str(exc),
+                member.id,
+                member.kind,
+                arguments,
+                False,
+                None,
+                str(exc),
             )
 
     def _extract_message_text(self, data: dict[str, Any]) -> str:

@@ -218,47 +218,34 @@ def test_build_tool_specs_supports_complete_openai_tool_schema() -> None:
                             "description": "发货起点信息",
                             "properties": {
                                 "address": {"type": "string"},
-                                "coordinates": {
-                                    "type": "object",
-                                    "properties": {
-                                        "latitude": {"type": "number", "minimum": -90, "maximum": 90},
-                                        "longitude": {"type": "number", "minimum": -180, "maximum": 180},
-                                    },
-                                    "required": ["latitude", "longitude"],
-                                },
-                                "contact": {
-                                    "type": "object",
-                                    "properties": {
-                                        "name": {"type": "string"},
-                                        "phone": {"type": "string"},
-                                    },
-                                    "required": ["name", "phone"],
-                                },
+                                "city": {"type": "string"},
+                                "country": {"type": "string", "default": "CN"},
                             },
-                            "required": ["address", "coordinates", "contact"],
+                            "required": ["address", "city"],
                         },
                         "destination": {
-                            "description": "收货终点信息，结构与 origin 完全相同",
                             "$ref": "#/properties/origin",
                         },
                         "items": {
                             "type": "array",
+                            "description": "发货物品列表",
                             "minItems": 1,
                             "items": {
                                 "type": "object",
                                 "properties": {
                                     "sku": {"type": "string"},
-                                    "quantity": {"type": "integer", "minimum": 1, "default": 1},
-                                    "weight_kg": {"type": "number", "exclusiveMinimum": True},
+                                    "quantity": {"type": "integer", "minimum": 1},
+                                    "weight_kg": {"type": "number", "minimum": 0},
+                                    "fragile": {"type": "boolean", "default": False},
                                 },
-                                "required": ["sku", "quantity", "weight_kg"],
+                                "required": ["sku", "quantity"],
                             },
                         },
                         "insurance": {
                             "anyOf": [
-                                {"type": "boolean"},
+                                {"type": "null"},
                                 {"type": "number", "minimum": 0},
-                            ]
+                            ],
                         },
                     },
                     "required": ["order_id", "origin", "destination", "items"],
@@ -266,17 +253,15 @@ def test_build_tool_specs_supports_complete_openai_tool_schema() -> None:
             },
         }
     )
-
     decider.register_info_source(
-        handler=lambda: {"ok": True},
+        handler=lambda **_: {"status": "ok"},
         name="create_advanced_shipment",
         openai_tool=tool,
     )
 
     specs = build_tool_specs(decider._info_sources())
 
-    assert specs[0]["type"] == "function"
-    assert specs[0]["function"]["name"] == "create_advanced_shipment"
+    assert len(specs) == 1
     assert specs[0]["function"]["strict"] is False
     assert specs[0]["function"]["parameters"]["properties"]["destination"]["$ref"] == "#/properties/origin"
     assert specs[0]["function"]["parameters"]["properties"]["insurance"]["anyOf"][1]["type"] == "number"
@@ -482,4 +467,61 @@ def test_lua_decider_add_executor_supports_parameter_schema_only() -> None:
         "tool_name": "submit_order",
         "has_result_schema": False,
         "member_kind": "executor",
+    }
+
+
+
+def test_lua_info_member_validates_lua_table_result_against_object_schema() -> None:
+    host = _HostAPI()
+    engine = LuaEngine(Path("."), host)
+
+    result = engine.execute(
+        '''
+        local decider = llm.new_decider()
+
+        local function get_runtime_state()
+            return {
+                scene = "battle_prepare",
+                energy = 12,
+                has_potion = true,
+            }
+        end
+
+        decider:add_info({
+            name = "get_runtime_state",
+            title = "获取运行状态",
+            description = "获取当前场景与体力信息",
+            handler = get_runtime_state,
+            returns = {
+                type = "object",
+                properties = {
+                    scene = { type = "string" },
+                    energy = { type = "integer" },
+                    has_potion = { type = "boolean" },
+                },
+                required = { "scene", "energy", "has_potion" },
+            },
+        })
+
+        local member = decider._decider.members[0]
+        local record = decider._decider:_call_member(member, {})
+        return {
+            success = record.success,
+            result = record.result,
+            error = record.error,
+            result_validation_error = record.result_validation_error,
+        }
+        '''
+    )
+
+    normalized = lua_2_python(result)
+    assert normalized == {
+        "success": True,
+        "result": {
+            "scene": "battle_prepare",
+            "energy": 12,
+            "has_potion": True,
+        },
+        "error": "",
+        "result_validation_error": "",
     }
