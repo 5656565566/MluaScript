@@ -365,6 +365,56 @@ export const deviceBlocks = [
     },
   },
   {
+    type: 'maa_start_app',
+    category: '设备交互',
+    colour: '#059669',
+    definition: {
+      message0: '启动应用/进程 %1',
+      args0: [{ type: 'input_value', name: 'INTENT' }],
+      previousStatement: null,
+      nextStatement: null,
+      tooltip: '调用 maa.start_app() 启动应用',
+      helpUrl: '',
+    },
+    generator(block, generator) {
+      const intent = generator.valueToCode(block, 'INTENT', luaOrder) || "''"
+      return `maa.start_app(${intent})\n`
+    },
+  },
+  {
+    type: 'maa_stop_app',
+    category: '设备交互',
+    colour: '#059669',
+    definition: {
+      message0: '停止应用/进程 %1',
+      args0: [{ type: 'input_value', name: 'INTENT' }],
+      previousStatement: null,
+      nextStatement: null,
+      tooltip: '调用 maa.stop_app() 停止应用',
+      helpUrl: '',
+    },
+    generator(block, generator) {
+      const intent = generator.valueToCode(block, 'INTENT', luaOrder) || "''"
+      return `maa.stop_app(${intent})\n`
+    },
+  },
+  {
+    type: 'maa_shell',
+    category: '设备交互',
+    colour: '#059669',
+    definition: {
+      message0: '执行 Shell %1',
+      args0: [{ type: 'input_value', name: 'COMMAND' }],
+      output: 'String',
+      tooltip: '调用 maa.shell() 执行命令',
+      helpUrl: '',
+    },
+    generator(block, generator) {
+      const command = generator.valueToCode(block, 'COMMAND', luaOrder) || "''"
+      return [`maa.shell(${command})`, luaOrder]
+    },
+  },
+  {
     type: 'maa_screencap',
     category: '设备信息',
     colour: '#0ea5e9',
@@ -418,6 +468,36 @@ export const deviceBlocks = [
     },
     generator() {
       return ['maa.is_connected()', luaOrder]
+    },
+  },
+  {
+    type: 'maa_is_app_alive',
+    category: '设备信息',
+    colour: '#0ea5e9',
+    definition: {
+      message0: '应用/进程 %1 存活?',
+      args0: [{ type: 'input_value', name: 'INTENT' }],
+      output: 'Boolean',
+      tooltip: '调用 maa.is_app_alive()',
+      helpUrl: '',
+    },
+    generator(block, generator) {
+      const intent = generator.valueToCode(block, 'INTENT', luaOrder) || "''"
+      return [`maa.is_app_alive(${intent})`, luaOrder]
+    },
+  },
+  {
+    type: 'maa_get_connection_label',
+    category: '设备信息',
+    colour: '#0ea5e9',
+    definition: {
+      message0: '获取连接标签',
+      output: 'String',
+      tooltip: '调用 maa.get_connection_label() 获取设备连接标识',
+      helpUrl: '',
+    },
+    generator() {
+      return ['maa.get_connection_label()', luaOrder]
     },
   },
   {

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,6 +12,7 @@ from .controllers.gesture import scroll, swipe, touch_down, touch_move, touch_up
 from .controllers.input import click, input_text, key_down, key_up, press_key
 from .controllers.query import get_connection_label, get_resolution, get_uuid
 from .controllers.screen import screencap
+from .controllers.shell import shell
 from .lifecycle.runtime import MaaContext
 from .recognition.color import find_color
 from .recognition.feature import find_feature
@@ -164,6 +167,9 @@ class LuaMaaExports:
     def stop_app(self, intent: str) -> bool:
         return stop_app(self.context, intent)
 
+    def shell(self, command: str) -> str | None:
+        return shell(self.context, command)
+
     def get_resolution(self) -> Any:
         width, height = get_resolution(self.context)
         return python_2_lua(self.lua_runtime, {"width": width, "height": height})
@@ -173,6 +179,27 @@ class LuaMaaExports:
 
     def get_connection_label(self) -> str:
         return get_connection_label(self.context)
+
+    def is_app_alive(self, intent: str) -> bool:
+        label = self.get_connection_label()
+        if label.startswith("ADB:"):
+            res = self.shell(f"pidof {intent}")
+            if res and res.strip():
+                return True
+            return False
+        elif label.startswith("WIN32:"):
+            res = self.shell(f'tasklist /FI "IMAGENAME eq {intent}" /NH')
+            if res and intent.lower() in res.lower():
+                return True
+            
+            try:
+                out = subprocess.check_output(f'tasklist /FI "IMAGENAME eq {intent}" /NH', shell=True, text=True)
+                if intent.lower() in out.lower():
+                    return True
+            except Exception:
+                pass
+            return False
+        return False
 
     def screencap(self) -> RuntimeImageHandle | None:
         image = screencap(self.context)
