@@ -4,21 +4,21 @@ from .base import MaaController, ensure_controller, wait_for
 from ..lifecycle.runtime import MaaContext
 
 
-def swipe(context: MaaContext, x1: int, y1: int, x2: int, y2: int, duration: int = 300) -> bool:
+def swipe(context: MaaContext, x1: int | float, y1: int | float, x2: int | float, y2: int | float, duration: int = 300) -> bool:
     controller: MaaController = ensure_controller(context)
-    wait_for(controller.post_swipe(x1, y1, x2, y2, duration))
+    wait_for(controller.post_swipe(int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)), int(round(duration))))
     return True
 
 
-def touch_down(context: MaaContext, x: int, y: int, contact: int = 0) -> bool:
+def touch_down(context: MaaContext, x: int | float, y: int | float, contact: int = 0) -> bool:
     controller: MaaController = ensure_controller(context)
-    wait_for(controller.post_touch_down(x, y, contact))
+    wait_for(controller.post_touch_down(int(round(x)), int(round(y)), int(round(contact))))
     return True
 
 
-def touch_move(context: MaaContext, x: int, y: int, contact: int = 0) -> bool:
+def touch_move(context: MaaContext, x: int | float, y: int | float, contact: int = 0) -> bool:
     controller: MaaController = ensure_controller(context)
-    wait_for(controller.post_touch_move(x, y, contact))
+    wait_for(controller.post_touch_move(int(round(x)), int(round(y)), int(round(contact))))
     return True
 
 
@@ -28,7 +28,7 @@ def touch_up(context: MaaContext, contact: int = 0) -> bool:
     return True
 
 
-def scroll(context: MaaContext, dx: int, dy: int) -> bool:
+def scroll(context: MaaContext, dx: int | float, dy: int | float) -> bool:
     controller: MaaController = ensure_controller(context)
-    wait_for(controller.post_scroll(dx, dy))
+    wait_for(controller.post_scroll(int(round(dx)), int(round(dy))))
     return True

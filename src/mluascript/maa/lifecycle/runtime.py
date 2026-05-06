@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from maa.library import Library
 from maa.resource import Resource
 from maa.tasker import Tasker
+from maa.controller import Controller
 
 from mluascript.shared.logging import logger
 
@@ -19,10 +19,10 @@ class MaaContext:
 
     paths: MaaPaths
     state: MaaContextState = field(default_factory=MaaContextState)
-    library: Any | None = None
-    resource: Any | None = None
-    tasker: Any | None = None
-    controller: Any | None = None
+    library: Library | None = None
+    resource: Resource | None = None
+    tasker: Tasker | None = None
+    controller: Controller | None = None
 
     def mark_loaded(self) -> None:
         self.state.loaded = True
@@ -73,13 +73,19 @@ def initialize_maa_runtime(context: MaaContext) -> MaaContext:
         except Exception as exc:
             logger.error(f"Maa tasker 绑定 resource 失败: {exc}")
 
-    if context.resource is not None and context.paths.model_dir is not None:
-        ocr_model_dir = context.paths.model_dir / "ocr"
-        if ocr_model_dir.exists():
-            try:
-                context.resource.post_ocr_model(ocr_model_dir).wait()
-            except Exception as exc:
-                logger.error(f"Maa OCR 模型加载失败: {exc}")
+    if context.resource is not None:
+        if context.paths.model_dir is None:
+            logger.warning("Maa OCR 模型未配置: model_dir is None")
+        else:
+            ocr_model_dir = context.paths.model_dir / "ocr"
+            if ocr_model_dir.exists():
+                try:
+                    logger.info(f"加载 Maa OCR 模型目录: {ocr_model_dir}")
+                    context.resource.post_ocr_model(ocr_model_dir).wait()
+                except Exception as exc:
+                    logger.error(f"Maa OCR 模型加载失败: {exc}")
+            else:
+                logger.warning(f"Maa OCR 模型目录不存在: {ocr_model_dir}")
 
     context.mark_loaded()
     return context

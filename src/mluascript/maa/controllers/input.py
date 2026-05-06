@@ -4,9 +4,9 @@ from .base import MaaController, ensure_controller, wait_for
 from ..lifecycle.runtime import MaaContext
 
 
-def click(context: MaaContext, x: int, y: int) -> bool:
+def click(context: MaaContext, x: int | float, y: int | float) -> bool:
     controller: MaaController = ensure_controller(context)
-    wait_for(controller.post_click(x, y))
+    wait_for(controller.post_click(int(round(x)), int(round(y))))
     return True
 
 

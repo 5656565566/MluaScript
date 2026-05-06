@@ -23,6 +23,7 @@ def create_script_run_context(
     maa_context.paths = MaaPaths(
         library_dir=maa_context.paths.library_dir,
         resource_dir=Path(locator.resource_dir),
+        model_dir=maa_context.paths.model_dir,
         adb_path=maa_context.paths.adb_path,
     )
     initialize_maa_runtime(maa_context)
