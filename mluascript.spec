@@ -20,16 +20,17 @@ def build_frontend():
         
         env['NO_COLOR'] = '1'
         env['FORCE_COLOR'] = '0'
+        npm_command = 'npm.cmd' if sys.platform.startswith('win') else 'npm'
         
         result = subprocess.run(
-            ['npm', 'run', 'build'],
+            [npm_command, 'run', 'build'],
             cwd=str(webui_path),
             capture_output=True,
             text=True,
             env=env,
             encoding='utf-8',
             errors='replace',
-            shell=True
+            shell=False
         )
         
         print(result.stdout)
@@ -53,6 +54,8 @@ import maa
 maa_bin_path = os.path.join(os.path.dirname(maa.__file__), 'bin')
 webui_dist_path = os.path.abspath('src/mluascript_web/dist')
 upx_dir = os.path.abspath('dev/upx-5.1.1-win64')
+resolved_upx_dir = upx_dir if os.path.isdir(upx_dir) else None
+resolved_icon = 'logo.ico' if sys.platform.startswith('win') and os.path.exists('logo.ico') else None
 
 a = Analysis(
     ['src/build.py'],
@@ -88,12 +91,12 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    upx_dir=upx_dir,
+    upx=resolved_upx_dir is not None,
+    upx_dir=resolved_upx_dir,
     upx_exclude=['*.dll'],
     runtime_tmpdir=None,
     console=True,
-    icon='logo.ico',
+    icon=resolved_icon,
     compress=True,
     optimize=2,
 )
