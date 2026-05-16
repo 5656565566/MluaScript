@@ -8,7 +8,7 @@ from maa.define import LoggingLevelEnum
 
 from mluascript.maa.config.models import MaaDeviceConfig
 from mluascript.maa.lifecycle.bootstrap import resolve_tasker_stdout_level
-from mluascript.shared.config.manager import load_config
+from mluascript.shared.config.manager import get_runtime_dir, load_config
 from mluascript.shared.config.models import GlobalConfig
 from mluascript.shared.config.registry import config as registry
 
@@ -121,3 +121,20 @@ def test_load_config_supports_maa_stdout_level_override():
         global_cfg = registry.get(GlobalConfig)
         assert global_cfg.maa_stdout_level == "info"
         assert resolve_tasker_stdout_level() == LoggingLevelEnum.Info
+
+
+def test_load_config_uses_runtime_dir_when_path_missing(monkeypatch):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        runtime_dir = Path(temp_dir)
+        monkeypatch.setattr("mluascript.shared.config.manager.get_runtime_dir", lambda: runtime_dir)
+
+        load_config()
+
+        assert (runtime_dir / "config" / "config.yaml").exists()
+
+
+def test_get_runtime_dir_falls_back_to_project_root_for_source_tree():
+    runtime_dir = get_runtime_dir()
+
+    assert (runtime_dir / "pyproject.toml").exists()
+    assert (runtime_dir / "src" / "mluascript").exists()

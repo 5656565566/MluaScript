@@ -1,29 +1,41 @@
 from __future__ import annotations
 
+import platform
+import shutil
 from pathlib import Path
 
 from maa.define import LoggingLevelEnum
 from mluascript.shared.config import GlobalConfig, config
+from mluascript.shared.config.manager import get_runtime_dir
 
 from ..types import MaaPaths
 
 
 def _normalize_adb_path(raw: str) -> Path:
     path = Path(raw)
-    if path.name.lower() not in {"adb", "adb.exe"}:
-        return path / "adb.exe"
-    return path
+    if path.name.lower() in {"adb", "adb.exe"}:
+        return path
+
+    adb_name = "adb.exe" if platform.system().lower() == "windows" else "adb"
+    return path / adb_name
 
 
 def resolve_maa_paths(root_dir: Path | None = None) -> MaaPaths:
     """根据当前配置解析 Maa 运行路径"""
-    base_dir = root_dir or Path.cwd()
+    base_dir = root_dir or get_runtime_dir()
     global_cfg = config.get(GlobalConfig)
 
     library_dir = Path(global_cfg.maa_library_dir) if global_cfg.maa_library_dir else base_dir / "maafw"
     resource_dir = Path(global_cfg.maa_resource_dir) if global_cfg.maa_resource_dir else base_dir / "resource"
     model_dir = Path(global_cfg.maa_model_dir) if global_cfg.maa_model_dir else None
-    adb_path = _normalize_adb_path(global_cfg.maa_adb_dir) if global_cfg.maa_adb_dir else None
+    
+    adb_path = None
+    if global_cfg.maa_adb_dir:
+        adb_path = _normalize_adb_path(global_cfg.maa_adb_dir)
+    elif platform.system().lower() == "linux":
+        sys_adb = shutil.which("adb")
+        if sys_adb:
+            adb_path = Path(sys_adb)
 
     return MaaPaths(
         library_dir=library_dir,

@@ -40,7 +40,7 @@ class DeviceOverview(BaseModel):
     """设备模块面向前端暴露的通用状态聚合"""
 
     adb: DevicePage = Field(default_factory=lambda: DevicePage(summary="尚未搜索 ADB 设备"))
-    win32: DevicePage = Field(default_factory=lambda: DevicePage(summary="尚未搜索 Win32 窗口"))
+    desktop: DevicePage = Field(default_factory=lambda: DevicePage(summary="尚未搜索本地窗口"))
     emulator: DevicePage = Field(default_factory=lambda: DevicePage(summary="暂无已配置模拟器设备"))
     browser: DevicePage = Field(default_factory=lambda: DevicePage(summary="暂无已配置浏览器设备"))
     connection: DeviceConnectionState = Field(default_factory=DeviceConnectionState)

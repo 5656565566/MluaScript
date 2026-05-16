@@ -37,13 +37,16 @@ class AdbConnectionParams(BaseModel):
     mumu: Optional[MuMuConfig] = Field(default=None, description="MuMu 模拟器配置")
 
 
-class Win32ConnectionParams(BaseModel):
+class DesktopWindowConnectionParams(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    hwnd: int = Field(description="窗口句柄")
+    handle: int = Field(default=0, description="平台本地窗口句柄或窗口 ID")
+    platform: str | None = Field(default=None, description="桌面控制后端，例如 windows、macos、wlroots")
+    socket_path: str | None = Field(default=None, description="Linux wlroots/Wayland socket 路径")
     screencap_method: int | None = Field(default=None, description="截图方法")
     mouse_method: int | None = Field(default=None, description="鼠标方法")
     keyboard_method: int | None = Field(default=None, description="键盘方法")
+    input_method: int | None = Field(default=None, description="输入方法")
 
 
 class BrowserConnectionParams(BaseModel):

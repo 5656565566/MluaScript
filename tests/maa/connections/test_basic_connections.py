@@ -7,9 +7,9 @@ import pytest
 
 from mluascript.maa.connections.adb import connect_adb
 from mluascript.maa.connections.browser import connect_browser
+from mluascript.maa.connections.desktop import connect_desktop_window, current_desktop_backend
 from mluascript.maa.connections.discovery import find_adb_devices, find_desktop_windows
-from mluascript.maa.connections.models import AdbConnectionParams, BrowserConnectionParams, Win32ConnectionParams
-from mluascript.maa.connections.win32 import connect_win32
+from mluascript.maa.connections.models import AdbConnectionParams, BrowserConnectionParams, DesktopWindowConnectionParams
 from mluascript.maa.lifecycle.runtime import MaaContext
 from mluascript.maa.types import MaaContextState, MaaPaths
 
@@ -131,7 +131,7 @@ def test_connect_browser_passes_launch_configuration(mocker) -> None:
     assert kwargs["name"] == "Edge-1"
 
 
-def test_connect_win32_marks_context_connected(mocker) -> None:
+def test_connect_desktop_window_uses_windows_backend(mocker) -> None:
     context = build_context()
 
     mock_controller = MagicMock()
@@ -139,15 +139,46 @@ def test_connect_win32_marks_context_connected(mocker) -> None:
     mock_job.succeeded = True
     mock_controller.post_connection.return_value = mock_job
     mock_controller.post_screencap.return_value = mock_job
-    mocker.patch("mluascript.maa.connections.win32.Win32Controller", return_value=mock_controller)
+    mocker.patch("mluascript.maa.connections.desktop.Win32Controller", return_value=mock_controller)
 
-    session = connect_win32(context, Win32ConnectionParams(hwnd=1001))
+    session = connect_desktop_window(context, DesktopWindowConnectionParams(handle=1001, platform="windows"))
 
-    assert session.info.kind == "win32"
-    assert session.info.label == "WIN32:1001"
-    assert session.info.meta == {"hwnd": 1001}
+    assert session.info.kind == "desktop"
+    assert session.info.label == "DESKTOP:windows:1001"
+    assert session.info.meta == {"platform": "windows", "handle": 1001}
     assert context.state.connected is True
-    assert context.state.connection_label == "WIN32:1001"
+    assert context.state.connection_label == "DESKTOP:windows:1001"
+
+
+def test_connect_desktop_window_uses_macos_backend(mocker) -> None:
+    context = build_context()
+
+    mock_controller = MagicMock()
+    mock_job = MagicMock()
+    mock_job.succeeded = True
+    mock_controller.post_connection.return_value = mock_job
+    mock_controller.post_screencap.return_value = mock_job
+    mocker.patch("mluascript.maa.connections.desktop.MacOSController", return_value=mock_controller)
+
+    session = connect_desktop_window(context, DesktopWindowConnectionParams(handle=2002, platform="macos"))
+
+    assert session.info.kind == "desktop"
+    assert session.info.label == "DESKTOP:macos:2002"
+    assert session.info.meta == {"platform": "macos", "handle": 2002}
+
+
+def test_current_desktop_backend_detects_linux_x11(monkeypatch, mocker) -> None:
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+    mocker.patch("mluascript.maa.connections.desktop.platform.system", return_value="Linux")
+
+    assert current_desktop_backend() == "x11"
+
+
+def test_connect_desktop_window_rejects_linux_x11_with_clear_message() -> None:
+    context = build_context()
+
+    with pytest.raises(RuntimeError, match="X11"):
+        connect_desktop_window(context, DesktopWindowConnectionParams(handle=1, platform="x11"))
 
 
 def test_discovery_returns_mocked_results(mocker) -> None:
@@ -226,7 +257,10 @@ def test_discovery_maps_desktop_windows(mocker) -> None:
     assert find_desktop_windows() == [
         {
             "hwnd": 10086,
+            "handle": 10086,
             "class_name": "Notepad",
             "window_name": "无标题 - 记事本",
+            "platform": "windows",
+            "kind": "desktop",
         }
     ]
