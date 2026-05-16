@@ -120,14 +120,14 @@ const pagedWin32Windows = computed(() => paginateDevices(state.win32Windows.valu
         </div>
       </n-tab-pane>
 
-      <n-tab-pane name="win32" tab="Win32窗口">
+      <n-tab-pane name="win32" tab="本地窗口">
         <div class="device-tab-content">
           <n-alert type="default" :show-icon="false" style="margin-bottom: 12px; flex-shrink: 0;">
-            {{ state.win32Windows.value.length ? `共搜索到 ${state.win32Windows.value.length} 个 Win32 窗口` : '尚未搜索 Win32 窗口' }}
+            {{ state.win32Windows.value.length ? `共搜索到 ${state.win32Windows.value.length} 个本地窗口` : '尚未搜索本地窗口' }}
           </n-alert>
           <div class="device-list-scroll">
             <n-list bordered hoverable clickable style="background: transparent; margin: 0;">
-              <n-empty v-if="!state.win32Windows.value.length" description="暂无 Win32 窗口" style="margin-top: 24px;" />
+              <n-empty v-if="!state.win32Windows.value.length" description="暂无本地窗口" style="margin-top: 24px;" />
               <n-list-item v-for="win in pagedWin32Windows" :key="win.hwnd" @click="actions.handleAction(() => actions.connectWin32(win.hwnd))">
                 <n-thing :title="win.window_name || '未命名窗口'" :description="String(win.hwnd)" />
               </n-list-item>
@@ -143,7 +143,7 @@ const pagedWin32Windows = computed(() => paginateDevices(state.win32Windows.valu
             />
           </div>
 
-          <n-button type="primary" block :loading="state.loading.value" @click="actions.handleAction(actions.searchWin32)" style="flex-shrink: 0;">搜索 Win32 窗口</n-button>
+          <n-button type="primary" block :loading="state.loading.value" @click="actions.handleAction(actions.searchWin32)" style="flex-shrink: 0;">搜索本地窗口</n-button>
         </div>
       </n-tab-pane>
 

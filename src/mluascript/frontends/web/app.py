@@ -254,7 +254,7 @@ def _serialize_device_page_items(items: list[dict[str, Any]]) -> list[dict[str, 
 
 def _build_device_items_payload() -> list[dict[str, Any]]:
     overview = get_control_facade().get_device_overview()
-    buckets = [overview.adb.items, overview.emulator.items, overview.browser.items, overview.win32.items]
+    buckets = [overview.adb.items, overview.emulator.items, overview.browser.items, overview.desktop.items]
     items: list[dict[str, Any]] = []
     for bucket in buckets:
         for item in bucket:
@@ -288,8 +288,8 @@ def discover_devices(payload: DeviceDiscoverPayload) -> dict[str, Any]:
     kind = payload.kind.strip().lower()
     if kind == "adb":
         result = facade.find_adb_devices()
-    elif kind == "win32":
-        result = facade.find_win32_windows()
+    elif kind == "desktop":
+        result = facade.find_desktop_windows()
     else:
         raise HTTPException(status_code=400, detail="unsupported device kind")
     if not result.ok:
@@ -395,18 +395,19 @@ def system_bootstrap() -> dict[str, Any]:
         })
     overview["adb"]["items"] = adb_items
     
-    win32_items = []
-    for idx, item in enumerate(facade.device_facade._win32_raw):
-        hwnd = int(item.get("hwnd") or 0)
-        win32_items.append({
-            "id": f"win32:{idx}",
-            "kind": "win32",
+    desktop_items = []
+    for idx, item in enumerate(facade.device_facade._desktop_raw):
+        handle = int(item.get("handle") or item.get("hwnd") or 0)
+        backend = str(item.get("platform") or "desktop")
+        desktop_items.append({
+            "id": f"desktop:{idx}",
+            "kind": "desktop",
             "title": str(item.get("window_name") or "未命名窗口"),
-            "subtitle": f"[{hwnd}] {item.get('class_name') or '未知类名'}",
-            "enabled": hwnd != 0,
+            "subtitle": f"[{backend}:{handle}] {item.get('class_name') or '未知类名'}",
+            "enabled": handle != 0 or backend == "wlroots",
             "tags": [],
         })
-    overview["win32"]["items"] = win32_items
+    overview["desktop"]["items"] = desktop_items
 
     task_views = [item.model_dump() for item in facade.list_task_views()]
     return _ok(

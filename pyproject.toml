@@ -1,6 +1,6 @@
 [project]
 name = "MluaScript"
-version = "1.0.0"
+version = "1.0.1"
 description = "MaaFramework-driven script controller"
 authors = [
     {name = "5656565566", email = "2393963330@qq.com"},

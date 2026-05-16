@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from mluascript.maa.connections import current_desktop_label
+
 from .devices import ConnectAdbRequest, DeviceActionResult, DeviceOverview, get_device_facade
 from .execution.manager import get_execution_manager
 from .state.manager import get_state_manager
@@ -65,17 +67,23 @@ class ControlFacade:
     def _get_friendly_target_name(self, target: str) -> str:
         if not target:
             return "LOCAL"
-        if target.startswith("WIN32:"):
+        if target.startswith("DESKTOP:"):
             try:
-                hwnd = int(target.split(":")[1])
-                for item in self.device_facade._win32_raw:
-                    if int(item.get("hwnd") or 0) == hwnd:
+                parts = target.split(":")
+                backend = parts[1] if len(parts) > 2 else ""
+                handle_text = parts[2] if len(parts) > 2 else parts[-1]
+                handle = int(handle_text) if handle_text.isdigit() else None
+                for item in self.device_facade._desktop_raw:
+                    item_handle = int(item.get("handle") or item.get("hwnd") or 0)
+                    if handle is not None and item_handle == handle:
                         name = item.get("window_name")
                         if name:
-                            return f"窗口: {name}"
+                            return f"{current_desktop_label()}: {name}"
+                if backend:
+                    return f"{backend}:{handle_text}"
             except Exception:
                 pass
-        elif target.startswith("ADB:"):
+        if target.startswith("ADB:"):
             try:
                 address = target.split(":", 1)[1]
                 for item in self.device_facade._adb_raw:
@@ -228,14 +236,14 @@ class ControlFacade:
     def find_adb_devices(self) -> DeviceActionResult:
         return self.device_facade.find_adb()
 
-    def find_win32_windows(self) -> DeviceActionResult:
-        return self.device_facade.find_win32()
+    def find_desktop_windows(self) -> DeviceActionResult:
+        return self.device_facade.find_desktop()
 
     def change_adb_page(self, delta: int) -> DeviceOverview:
         return self.device_facade.change_adb_page(delta)
 
-    def change_win32_page(self, delta: int) -> DeviceOverview:
-        return self.device_facade.change_win32_page(delta)
+    def change_desktop_page(self, delta: int) -> DeviceOverview:
+        return self.device_facade.change_desktop_page(delta)
 
     def connect_adb(self, address: str) -> DeviceActionResult:
         return self.device_facade.connect_adb(ConnectAdbRequest(address=address))

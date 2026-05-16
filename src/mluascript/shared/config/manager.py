@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 from typing import Any, Dict, Type
 
 import yaml
@@ -15,10 +16,14 @@ from mluascript.shared.logging import logger, set_log_level
 
 
 def get_runtime_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "pyproject.toml").exists() and (parent / "src" / "mluascript").exists():
+            return parent
     return Path.cwd()
-
-
-ROOT_DIR = get_runtime_dir()
 
 
 class YamlConfig:
@@ -48,7 +53,7 @@ def load_config(path: str = "") -> None:
     """统一配置加载入口"""
     ensure_config_models_registered()
 
-    file = Path(path) if path else ROOT_DIR / "config" / "config.yaml"
+    file = Path(path) if path else get_runtime_dir() / "config" / "config.yaml"
 
     file.parent.mkdir(parents=True, exist_ok=True)
 

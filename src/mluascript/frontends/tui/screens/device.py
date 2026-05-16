@@ -10,6 +10,7 @@ from textual.widgets import Button, Input, Markdown, Static, TabbedContent, TabP
 
 from mluascript.control.devices import DeviceOverview, DevicePage
 from mluascript.control.facade import get_control_facade
+from mluascript.maa.connections import current_desktop_label
 
 MAX_VISIBLE_DEVICE_ITEMS = 8
 
@@ -117,19 +118,19 @@ class DevicesScreen(Container):
                             btn.display = False
                             yield btn
 
-            with TabPane("Win32窗口"):
+            with TabPane("本地窗口"):
                 with ScrollableContainer(classes="tab-scroll-area"):
-                    yield Static("[dim]尚未搜索 Win32 窗口[/dim]", id="win32-summary", classes="device-summary")
-                    yield Static("[dim]使用分页浏览搜索结果[/dim]", id="win32-page-info", classes="device-summary")
-                    yield Button("Win32 上一页", id="btn-win32-prev", classes="device-btn", disabled=True)
-                    yield Button("Win32 下一页", id="btn-win32-next", classes="device-btn", disabled=True)
-                    with Vertical(id="win32-list-container", classes="device-results"):
+                    yield Static("[dim]尚未搜索本地窗口[/dim]", id="desktop-summary", classes="device-summary")
+                    yield Static("[dim]使用分页浏览搜索结果[/dim]", id="desktop-page-info", classes="device-summary")
+                    yield Button("本地窗口上一页", id="btn-desktop-prev", classes="device-btn", disabled=True)
+                    yield Button("本地窗口下一页", id="btn-desktop-next", classes="device-btn", disabled=True)
+                    with Vertical(id="desktop-list-container", classes="device-results"):
                         for i in range(MAX_VISIBLE_DEVICE_ITEMS):
-                            btn = Button("", classes="device-btn-blue", id=f"btn-win32-{i}", disabled=True)
+                            btn = Button("", classes="device-btn-blue", id=f"btn-desktop-{i}", disabled=True)
                             btn.display = False
                             yield btn
 
-                    yield Button("搜索 Win32 窗口", classes="device-btn-blue", id="btn-find-win32")
+                    yield Button(f"搜索{current_desktop_label()}", classes="device-btn-blue", id="btn-find-desktop")
 
             with TabPane("已连接设备"):
                 with ScrollableContainer(classes="tab-scroll-area"):
@@ -175,12 +176,12 @@ class DevicesScreen(Container):
             label_builder=lambda item: item.title if not item.subtitle else f"{item.title} | {item.subtitle}",
         )
         self._apply_page(
-            page=overview.win32,
-            summary_id="#win32-summary",
-            page_info_id="#win32-page-info",
-            prev_id="#btn-win32-prev",
-            next_id="#btn-win32-next",
-            prefix="btn-win32-",
+            page=overview.desktop,
+            summary_id="#desktop-summary",
+            page_info_id="#desktop-page-info",
+            prev_id="#btn-desktop-prev",
+            next_id="#btn-desktop-next",
+            prefix="btn-desktop-",
             label_builder=lambda item: item.title if not item.subtitle else f"{item.title} | {item.subtitle}",
         )
         self._apply_page(
@@ -245,28 +246,28 @@ class DevicesScreen(Container):
             self._do_find_adb()
         elif btn_id == "btn-connect-adb":
             self._do_connect_adb()
-        elif btn_id == "btn-find-win32":
-            self._do_find_win32()
+        elif btn_id == "btn-find-desktop":
+            self._do_find_desktop()
         elif btn_id == "btn-screencap":
             self._do_screencap()
         elif btn_id == "btn-adb-prev":
             self._apply_overview(self._control.change_adb_page(-1))
         elif btn_id == "btn-adb-next":
             self._apply_overview(self._control.change_adb_page(1))
-        elif btn_id == "btn-win32-prev":
-            self._apply_overview(self._control.change_win32_page(-1))
-        elif btn_id == "btn-win32-next":
-            self._apply_overview(self._control.change_win32_page(1))
+        elif btn_id == "btn-desktop-prev":
+            self._apply_overview(self._control.change_desktop_page(-1))
+        elif btn_id == "btn-desktop-next":
+            self._apply_overview(self._control.change_desktop_page(1))
         elif btn_id.startswith("btn-adb-"):
             idx = int(btn_id.split("-")[-1])
             overview = self._control.get_device_overview()
             if idx < len(overview.adb.items):
                 self._do_connect_device(overview.adb.items[idx].id)
-        elif btn_id.startswith("btn-win32-"):
+        elif btn_id.startswith("btn-desktop-"):
             idx = int(btn_id.split("-")[-1])
             overview = self._control.get_device_overview()
-            if idx < len(overview.win32.items):
-                self._do_connect_device(overview.win32.items[idx].id) 
+            if idx < len(overview.desktop.items):
+                self._do_connect_device(overview.desktop.items[idx].id) 
         elif btn_id.startswith("btn-emulator-"):
             idx = int(btn_id.split("-")[-1])
             overview = self._control.get_device_overview()
@@ -304,8 +305,8 @@ class DevicesScreen(Container):
         self._handle_action_result(result)
 
     @work(thread=True)
-    def _do_find_win32(self) -> None:
-        result = self._control.find_win32_windows()
+    def _do_find_desktop(self) -> None:
+        result = self._control.find_desktop_windows()
         self._handle_action_result(result)
 
     @work(thread=True)

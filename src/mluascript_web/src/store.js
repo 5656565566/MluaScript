@@ -307,11 +307,13 @@ function applyBootstrapState(bootstrap = {}) {
     }))
     : []
 
-  state.win32Windows.value = Array.isArray(deviceOverview.win32?.items)
-    ? deviceOverview.win32.items.map((item) => ({
+  state.win32Windows.value = Array.isArray(deviceOverview.desktop?.items)
+    ? deviceOverview.desktop.items.map((item) => ({
       window_name: item.title,
-      hwnd: item.subtitle || '',
+      hwnd: item.handle || item.subtitle || '',
+      handle: item.handle || item.subtitle || '',
       id: item.id,
+      subtitle: item.subtitle || '',
     }))
     : []
 
@@ -672,17 +674,18 @@ export const actions = {
   },
 
   async searchWin32() {
-    const data = await apiPost('/api/device/discover', { kind: 'win32' })
+    const data = await apiPost('/api/device/discover', { kind: 'desktop' })
     const items = Array.isArray(data?.items) ? data.items : []
     state.win32Windows.value = items
-      .filter((item) => String(item.id || '').startsWith('win32:'))
+      .filter((item) => String(item.id || '').startsWith('desktop:'))
       .map((item) => ({
         window_name: item.title || item.window_name || '未命名窗口',
         hwnd: item.hwnd || item.handle || item.subtitle || '',
+        handle: item.handle || item.hwnd || item.subtitle || '',
         id: item.id,
         subtitle: item.subtitle || '',
       }))
-    actions.setStatus(data.message || `搜索到 ${state.win32Windows.value.length} 个 Win32 窗口`)
+    actions.setStatus(data.message || `搜索到 ${state.win32Windows.value.length} 个本地窗口`)
   },
 
   async connectWin32(hwnd) {
@@ -696,12 +699,12 @@ export const actions = {
       ].filter(Boolean).map((value) => String(value))
       return candidates.some((value) => value === normalizedHwnd || value.includes(normalizedHwnd))
     })
-    if (!device?.id) throw new Error('未找到对应 Win32 窗口')
+    if (!device?.id) throw new Error('未找到对应本地窗口')
     const result = await apiPost('/api/device/connect', { deviceId: device.id })
     const connection = result.connection || {}
     state.sessions.value = connection.label ? [connection] : []
     state.selectedSession.value = connection.label || ''
-    actions.setStatus(result.message || `Win32 已连接: ${connection.label || hwnd}`, 'success')
+    actions.setStatus(result.message || `本地窗口已连接: ${connection.label || hwnd}`, 'success')
   },
 
   async reloadSessions() {

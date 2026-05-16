@@ -12,10 +12,12 @@ from mluascript.maa import MaaFacade
 from mluascript.maa.config import MaaDeviceConfig
 from mluascript.maa.connections import (
     AdbConnectionParams,
-    Win32ConnectionParams,
+    DesktopWindowConnectionParams,
     connect_adb,
     connect_browser,
-    connect_win32,
+    connect_desktop_window,
+    current_desktop_backend,
+    current_desktop_label,
     find_adb_devices,
     find_desktop_windows,
 )
@@ -49,14 +51,14 @@ class DeviceFacade:
             )
         )
         self._adb_raw: list[dict] = []
-        self._win32_raw: list[dict] = []
+        self._desktop_raw: list[dict] = []
         self._adb_page = 0
-        self._win32_page = 0
+        self._desktop_page = 0
 
     def get_overview(self) -> DeviceOverview:
         return DeviceOverview(
             adb=self._build_adb_page(),
-            win32=self._build_win32_page(),
+            desktop=self._build_desktop_page(),
             emulator=self._build_emulator_page(),
             browser=self._build_browser_page(),
             connection=self._build_connection_state(),
@@ -76,20 +78,20 @@ class DeviceFacade:
         except Exception as exc:
             return DeviceActionResult(ok=False, message=f"搜索 ADB 设备失败: {exc}", severity="error", overview=self.get_overview())
 
-    def find_win32(self) -> DeviceActionResult:
+    def find_desktop(self) -> DeviceActionResult:
         try:
-            self._win32_raw = find_desktop_windows()
-            self._win32_page = 0
-            return DeviceActionResult(ok=True, message=f"已搜索到 {len(self._win32_raw)} 个 Win32 窗口", overview=self.get_overview())
+            self._desktop_raw = find_desktop_windows()
+            self._desktop_page = 0
+            return DeviceActionResult(ok=True, message=f"已搜索到 {len(self._desktop_raw)} 个{current_desktop_label()}", overview=self.get_overview())
         except Exception as exc:
-            return DeviceActionResult(ok=False, message=f"搜索 Win32 窗口失败: {exc}", severity="error", overview=self.get_overview())
+            return DeviceActionResult(ok=False, message=f"搜索本地窗口失败: {exc}", severity="error", overview=self.get_overview())
 
     def change_adb_page(self, delta: int) -> DeviceOverview:
         self._adb_page = self._clamp_page(self._adb_page + delta, len(self._adb_raw))
         return self.get_overview()
 
-    def change_win32_page(self, delta: int) -> DeviceOverview:
-        self._win32_page = self._clamp_page(self._win32_page + delta, len(self._win32_raw))
+    def change_desktop_page(self, delta: int) -> DeviceOverview:
+        self._desktop_page = self._clamp_page(self._desktop_page + delta, len(self._desktop_raw))
         return self.get_overview()
 
     def connect_adb(self, request: ConnectAdbRequest) -> DeviceActionResult:
@@ -110,8 +112,8 @@ class DeviceFacade:
     def connect_device(self, action_id: str) -> DeviceActionResult:
         if action_id.startswith("adb:"):
             return self._connect_adb_item(action_id)
-        if action_id.startswith("win32:"):
-            return self._connect_win32_item(action_id)
+        if action_id.startswith("desktop:"):
+            return self._connect_desktop_item(action_id)
         if action_id.startswith("emulator:"):
             return self._connect_emulator_item(action_id)
         if action_id.startswith("browser:"):
@@ -224,23 +226,27 @@ class DeviceFacade:
         except Exception as exc:
             return DeviceActionResult(ok=False, message=f"连接 ADB 设备失败: {exc}", severity="error", overview=self.get_overview())
 
-    def _connect_win32_item(self, action_id: str) -> DeviceActionResult:
-        idx = self._parse_index(action_id, len(self._win32_raw))
+    def _connect_desktop_item(self, action_id: str) -> DeviceActionResult:
+        idx = self._parse_index(action_id, len(self._desktop_raw))
         if idx is None:
-            return DeviceActionResult(ok=False, message="Win32 窗口索引无效", severity="warning", overview=self.get_overview())
+            return DeviceActionResult(ok=False, message="本地窗口索引无效", severity="warning", overview=self.get_overview())
 
-        window = self._win32_raw[idx]
-        hwnd = int(window.get("hwnd") or 0)
-        if hwnd == 0:
+        window = self._desktop_raw[idx]
+        handle = int(window.get("handle") or window.get("hwnd") or 0)
+        backend = str(window.get("platform") or current_desktop_backend()).strip().lower()
+        if backend in {"windows", "macos"} and handle == 0:
             return DeviceActionResult(ok=False, message="当前窗口句柄无效，无法连接", severity="error", overview=self.get_overview())
 
         try:
-            session = connect_win32(self._maa_facade.context, Win32ConnectionParams(hwnd=hwnd))
+            session = connect_desktop_window(
+                self._maa_facade.context,
+                DesktopWindowConnectionParams(handle=handle, platform=backend),
+            )
             self._maa_facade.attach_session(session)
-            window_name = str(window.get("window_name") or hwnd)
-            return DeviceActionResult(ok=True, message=f"已连接 Win32 窗口: {window_name}", overview=self.get_overview())
+            window_name = str(window.get("window_name") or handle or backend)
+            return DeviceActionResult(ok=True, message=f"已连接{current_desktop_label()}: {window_name}", overview=self.get_overview())
         except Exception as exc:
-            return DeviceActionResult(ok=False, message=f"连接 Win32 窗口失败: {exc}", severity="error", overview=self.get_overview())
+            return DeviceActionResult(ok=False, message=f"连接本地窗口失败: {exc}", severity="error", overview=self.get_overview())
 
     def _connect_emulator_item(self, action_id: str) -> DeviceActionResult:
         cfg = self._get_device_config()
@@ -309,23 +315,30 @@ class DeviceFacade:
             )
         return self._build_page(total, page_index, items, empty_summary="未发现可用 ADB 设备", filled_summary=f"共发现 {total} 个 ADB 设备")
 
-    def _build_win32_page(self) -> DevicePage:
+    def _build_desktop_page(self) -> DevicePage:
         items: list[DeviceListItem] = []
-        total = len(self._win32_raw)
-        page_index = self._clamp_page(self._win32_page, total)
-        self._win32_page = page_index
-        for absolute_idx, window in self._slice_page(self._win32_raw, page_index):
-            hwnd = int(window.get("hwnd") or 0)
+        total = len(self._desktop_raw)
+        page_index = self._clamp_page(self._desktop_page, total)
+        self._desktop_page = page_index
+        for absolute_idx, window in self._slice_page(self._desktop_raw, page_index):
+            handle = int(window.get("handle") or window.get("hwnd") or 0)
+            backend = str(window.get("platform") or current_desktop_backend()).lower()
             items.append(
                 DeviceListItem(
-                    id=f"win32:{absolute_idx}",
-                    kind="win32",
+                    id=f"desktop:{absolute_idx}",
+                    kind="desktop",
                     title=str(window.get("window_name") or "未命名窗口"),
-                    subtitle=f"[{hwnd}] {window.get('class_name') or '未知类名'}",
-                    enabled=hwnd != 0,
+                    subtitle=f"[{backend}:{handle}] {window.get('class_name') or '未知类名'}",
+                    enabled=(backend not in {"windows", "macos"}) or handle != 0,
                 )
             )
-        return self._build_page(total, page_index, items, empty_summary="未发现可控 Win32 窗口", filled_summary=f"共发现 {total} 个 Win32 窗口")
+        return self._build_page(
+            total,
+            page_index,
+            items,
+            empty_summary=f"未发现可控{current_desktop_label()}",
+            filled_summary=f"共发现 {total} 个{current_desktop_label()}",
+        )
 
     def _build_emulator_page(self) -> DevicePage:
         cfg = self._get_device_config()

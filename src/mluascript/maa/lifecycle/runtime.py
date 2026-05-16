@@ -6,8 +6,10 @@ from maa.library import Library
 from maa.resource import Resource
 from maa.tasker import Tasker
 from maa.controller import Controller
+from maa.toolkit import Toolkit
 
 from mluascript.shared.logging import logger
+from mluascript.shared.config.manager import get_runtime_dir
 
 from ..types import MaaContextState, MaaPaths
 from .bootstrap import resolve_maa_paths, resolve_tasker_stdout_level
@@ -36,6 +38,11 @@ class MaaContext:
 
 def create_maa_context() -> MaaContext:
     """创建最小 Maa 上下文 不立即触发实际库加载"""
+    try:
+        Toolkit.init_option(str(get_runtime_dir()))
+    except Exception as exc:
+        logger.error(f"Failed to init Toolkit option: {exc}")
+    
     Tasker.set_stdout_level(resolve_tasker_stdout_level())
     return MaaContext(paths=resolve_maa_paths())
 

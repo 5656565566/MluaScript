@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from mluascript.shared.config.manager import load_config
 from mluascript.maa.errors import MaaResourceError
-from mluascript.maa.lifecycle.bootstrap import configure_toolkit_options, resolve_maa_paths
+from mluascript.maa.lifecycle.bootstrap import _normalize_adb_path, configure_toolkit_options, resolve_maa_paths
 from mluascript.maa.lifecycle.resources import get_node_list, load_resource, override_pipeline
 from mluascript.maa.lifecycle.runtime import MaaContext, create_maa_context
 from mluascript.maa.types import MaaContextState, MaaPaths
@@ -59,12 +59,36 @@ def test_resolve_maa_paths_uses_root_defaults_when_config_missing() -> None:
         assert paths.resource_dir == temp_path / "resource"
 
 
+def test_resolve_maa_paths_uses_runtime_dir_when_root_dir_missing(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        runtime_dir = Path(temp_dir)
+        load_config(str(runtime_dir / "config.yaml"))
+        monkeypatch.setattr("mluascript.maa.lifecycle.bootstrap.get_runtime_dir", lambda: runtime_dir)
+
+        paths = resolve_maa_paths()
+
+        assert paths.library_dir == runtime_dir / "maafw"
+        assert paths.resource_dir == runtime_dir / "resource"
+
+
 def test_configure_toolkit_options_contains_adb_path_when_present() -> None:
     paths = MaaPaths(library_dir=Path("."), resource_dir=Path("."), adb_path=Path("adb.exe"))
 
     options = configure_toolkit_options(paths)
 
     assert options == {"adb_path": "adb.exe"}
+
+
+def test_normalize_adb_path_uses_platform_specific_binary_name_for_windows(monkeypatch) -> None:
+    monkeypatch.setattr("mluascript.maa.lifecycle.bootstrap.platform.system", lambda: "Windows")
+
+    assert _normalize_adb_path("C:/tools/platform-tools") == Path("C:/tools/platform-tools/adb.exe")
+
+
+def test_normalize_adb_path_uses_platform_specific_binary_name_for_linux(monkeypatch) -> None:
+    monkeypatch.setattr("mluascript.maa.lifecycle.bootstrap.platform.system", lambda: "Linux")
+
+    assert _normalize_adb_path("/usr/bin") == Path("/usr/bin/adb")
 
 
 def test_load_resource_returns_true_when_resource_missing() -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 from typing import Any
 
 from maa.toolkit import Toolkit
@@ -48,12 +49,16 @@ def find_adb_devices() -> list[dict[str, Any]]:
 def find_desktop_windows() -> list[dict[str, Any]]:
     """发现可用桌面窗口"""
     windows = Toolkit.find_desktop_windows()
+    system = platform.system().lower()
     result = []
     for w in windows:
         result.append({
             "hwnd": int(w.hwnd) if w.hwnd else 0,
+            "handle": int(w.hwnd) if w.hwnd else 0,
             "class_name": w.class_name,
             "window_name": w.window_name,
+            "platform": system,
+            "kind": "desktop",
         })
     logger.info(f"Found {len(result)} desktop windows")
     return result

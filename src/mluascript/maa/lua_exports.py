@@ -187,7 +187,7 @@ class LuaMaaExports:
             if res and res.strip():
                 return True
             return False
-        elif label.startswith("WIN32:"):
+        elif label.startswith("DESKTOP:windows:"):
             res = self.shell(f'tasklist /FI "IMAGENAME eq {intent}" /NH')
             if res and intent.lower() in res.lower():
                 return True
