@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from mluascript.shared.config.manager import load_config
 from mluascript.maa.errors import MaaResourceError
-from mluascript.maa.lifecycle.bootstrap import _normalize_adb_path, configure_toolkit_options, resolve_maa_paths
+from mluascript.maa.lifecycle.bootstrap import (
+    _normalize_adb_path,
+    configure_toolkit_options,
+    resolve_maa_log_dir,
+    resolve_maa_paths,
+)
 from mluascript.maa.lifecycle.resources import get_node_list, load_resource, override_pipeline
 from mluascript.maa.lifecycle.runtime import MaaContext, create_maa_context
 from mluascript.maa.types import MaaContextState, MaaPaths
+from mluascript.shared.logging import configure_file_logging
 
 
 class FakeBundleJob:
@@ -40,6 +49,21 @@ class FakeResource:
         self.override_calls.append(override)
         return True
 
+
+@pytest.fixture(autouse=True)
+def _cleanup_file_logging():
+    yield
+    configure_file_logging(None)
+
+
+@contextmanager
+def temp_runtime_dir():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        try:
+            yield Path(temp_dir)
+        finally:
+            configure_file_logging(None)
+
 def create_fake_maa_context():
     return MaaContext(
         MaaPaths(
@@ -50,8 +74,8 @@ def create_fake_maa_context():
     )
 
 def test_resolve_maa_paths_uses_root_defaults_when_config_missing() -> None:
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir) / "config.yaml"
+    with temp_runtime_dir() as runtime_dir:
+        temp_path = runtime_dir / "config.yaml"
         load_config(str(temp_path))
         paths = resolve_maa_paths(temp_path)
 
@@ -60,8 +84,7 @@ def test_resolve_maa_paths_uses_root_defaults_when_config_missing() -> None:
 
 
 def test_resolve_maa_paths_uses_runtime_dir_when_root_dir_missing(monkeypatch) -> None:
-    with tempfile.TemporaryDirectory() as temp_dir:
-        runtime_dir = Path(temp_dir)
+    with temp_runtime_dir() as runtime_dir:
         load_config(str(runtime_dir / "config.yaml"))
         monkeypatch.setattr("mluascript.maa.lifecycle.bootstrap.get_runtime_dir", lambda: runtime_dir)
 
@@ -69,6 +92,16 @@ def test_resolve_maa_paths_uses_runtime_dir_when_root_dir_missing(monkeypatch) -
 
         assert paths.library_dir == runtime_dir / "maafw"
         assert paths.resource_dir == runtime_dir / "resource"
+
+
+def test_resolve_maa_log_dir_uses_runtime_dir_default(monkeypatch) -> None:
+    with temp_runtime_dir() as runtime_dir:
+        load_config(str(runtime_dir / "config.yaml"))
+        monkeypatch.setattr("mluascript.maa.lifecycle.bootstrap.get_runtime_dir", lambda: runtime_dir)
+
+        log_dir = resolve_maa_log_dir()
+
+        assert log_dir == (runtime_dir / "logs" / "maa").resolve()
 
 
 def test_configure_toolkit_options_contains_adb_path_when_present() -> None:
@@ -153,3 +186,31 @@ def test_get_node_list_reads_resource_node_list() -> None:
     context.resource = resource
 
     assert get_node_list(context) == ["node_a", "node_b"]
+
+
+def test_create_maa_context_enables_tasker_log_dir(monkeypatch) -> None:
+    with temp_runtime_dir() as runtime_dir:
+        load_config(str(runtime_dir / "config.yaml"))
+
+        calls: dict[str, object] = {}
+
+        monkeypatch.setattr("mluascript.maa.lifecycle.runtime.get_runtime_dir", lambda: runtime_dir)
+        monkeypatch.setattr("mluascript.maa.lifecycle.bootstrap.get_runtime_dir", lambda: runtime_dir)
+        monkeypatch.setattr(
+            "mluascript.maa.lifecycle.runtime.Toolkit",
+            SimpleNamespace(init_option=lambda path: calls.setdefault("toolkit_init_option", path)),
+        )
+        monkeypatch.setattr(
+            "mluascript.maa.lifecycle.runtime.Tasker",
+            SimpleNamespace(
+                set_log_dir=lambda path: calls.setdefault("set_log_dir", Path(path)) or True,
+                set_stdout_level=lambda level: calls.setdefault("set_stdout_level", level) or True,
+            ),
+        )
+
+        context = create_maa_context()
+
+        assert context.paths.library_dir == runtime_dir / "maafw"
+        assert calls["toolkit_init_option"] == str(runtime_dir)
+        assert calls["set_log_dir"] == (runtime_dir / "logs" / "maa").resolve()
+        assert "set_stdout_level" in calls

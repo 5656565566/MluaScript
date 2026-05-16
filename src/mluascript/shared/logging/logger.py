@@ -6,6 +6,7 @@ import logging
 import sys
 from collections import deque
 from dataclasses import dataclass, field
+from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -22,6 +23,7 @@ _DEFAULT_BUFFER_LIMIT = 2000
 _DEFAULT_BUCKET_LIMIT = 500
 _sink_ids: dict[str, int] = {}
 _stdout_enabled = False
+_file_log_dir: Path | None = None
 
 
 @dataclass(slots=True)
@@ -260,6 +262,25 @@ def enable_stdout_sink() -> None:
     logger_id = _sink_ids.get("stdout")
 
 
+def configure_file_logging(log_dir: Path | str | None) -> None:
+    global _file_log_dir
+    if not log_dir:
+        remove_sink("file")
+        _file_log_dir = None
+        return
+
+    target_dir = Path(log_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    register_sink(
+        "file",
+        str(target_dir / "mluascript.log"),
+        level=0,
+        diagnose=False,
+        colorize=False,
+    )
+    _file_log_dir = target_dir
+
+
 
 def disable_stdout_sink() -> None:
     global _stdout_enabled, logger_id
@@ -334,6 +355,8 @@ def configure_logging(*, stdout: bool = True) -> None:
         enable_stdout_sink()
     else:
         disable_stdout_sink()
+    if _file_log_dir is not None:
+        configure_file_logging(_file_log_dir)
 
 
 configure_logging(stdout=True)

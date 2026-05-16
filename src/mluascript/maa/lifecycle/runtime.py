@@ -12,7 +12,7 @@ from mluascript.shared.logging import logger
 from mluascript.shared.config.manager import get_runtime_dir
 
 from ..types import MaaContextState, MaaPaths
-from .bootstrap import resolve_maa_paths, resolve_tasker_stdout_level
+from .bootstrap import resolve_maa_log_dir, resolve_maa_paths, resolve_tasker_stdout_level
 
 
 @dataclass(slots=True)
@@ -42,8 +42,21 @@ def create_maa_context() -> MaaContext:
         Toolkit.init_option(str(get_runtime_dir()))
     except Exception as exc:
         logger.error(f"Failed to init Toolkit option: {exc}")
-    
-    Tasker.set_stdout_level(resolve_tasker_stdout_level())
+
+    maa_log_dir = resolve_maa_log_dir()
+    try:
+        maa_log_dir.mkdir(parents=True, exist_ok=True)
+        if Tasker.set_log_dir(maa_log_dir):
+            logger.info(f"MAA 底层日志已启用: {maa_log_dir}")
+        else:
+            logger.warning(f"MAA 底层日志目录设置失败: {maa_log_dir}")
+    except Exception as exc:
+        logger.error(f"MAA 底层日志启用失败: {exc}")
+
+    try:
+        Tasker.set_stdout_level(resolve_tasker_stdout_level())
+    except Exception as exc:
+        logger.error(f"MAA stdout 日志级别设置失败: {exc}")
     return MaaContext(paths=resolve_maa_paths())
 
 

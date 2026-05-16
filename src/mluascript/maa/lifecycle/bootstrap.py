@@ -6,7 +6,7 @@ from pathlib import Path
 
 from maa.define import LoggingLevelEnum
 from mluascript.shared.config import GlobalConfig, config
-from mluascript.shared.config.manager import get_runtime_dir
+from mluascript.shared.config.manager import get_runtime_dir, resolve_path_from_runtime
 
 from ..types import MaaPaths
 
@@ -64,3 +64,9 @@ def resolve_tasker_stdout_level() -> LoggingLevelEnum:
         "trace": LoggingLevelEnum.Trace,
     }
     return level_map.get(global_cfg.maa_stdout_level, LoggingLevelEnum.Off)
+
+
+def resolve_maa_log_dir(root_dir: Path | None = None) -> Path:
+    base_dir = root_dir or get_runtime_dir()
+    global_cfg = config.get(GlobalConfig)
+    return resolve_path_from_runtime(global_cfg.maa_log_dir, base_dir)

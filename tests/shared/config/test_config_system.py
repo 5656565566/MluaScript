@@ -1,4 +1,5 @@
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -8,9 +9,10 @@ from maa.define import LoggingLevelEnum
 
 from mluascript.maa.config.models import MaaDeviceConfig
 from mluascript.maa.lifecycle.bootstrap import resolve_tasker_stdout_level
-from mluascript.shared.config.manager import get_runtime_dir, load_config
+from mluascript.shared.config.manager import get_runtime_dir, load_config, resolve_path_from_runtime
 from mluascript.shared.config.models import GlobalConfig
 from mluascript.shared.config.registry import config as registry
+from mluascript.shared.logging import configure_file_logging
 
 
 @registry.registry()
@@ -19,10 +21,25 @@ class MockConfig(BaseModel):
     value_int: int = Field(default=42)
 
 
+@pytest.fixture(autouse=True)
+def _cleanup_file_logging():
+    yield
+    configure_file_logging(None)
+
+
+@contextmanager
+def temp_runtime_dir():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        try:
+            yield Path(temp_dir)
+        finally:
+            configure_file_logging(None)
+
+
 
 def test_config_registry_and_loading():
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir) / "config.yaml"
+    with temp_runtime_dir() as runtime_dir:
+        temp_path = runtime_dir / "config.yaml"
 
         registry._is_loaded = False
         with pytest.raises(RuntimeError):
@@ -80,8 +97,8 @@ def test_config_registry_and_loading():
 
 
 def test_load_config_registers_maa_device_config():
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir) / "config.yaml"
+    with temp_runtime_dir() as runtime_dir:
+        temp_path = runtime_dir / "config.yaml"
 
         load_config(str(temp_path))
 
@@ -99,20 +116,22 @@ def test_load_config_registers_maa_device_config():
 
 
 def test_load_config_supports_maa_stdout_level_default_off():
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir) / "config.yaml"
+    with temp_runtime_dir() as runtime_dir:
+        temp_path = runtime_dir / "config.yaml"
 
         load_config(str(temp_path))
 
         global_cfg = registry.get(GlobalConfig)
+        assert global_cfg.log_dir == "./logs/app"
+        assert global_cfg.maa_log_dir == "./logs/maa"
         assert global_cfg.maa_stdout_level == "off"
         assert resolve_tasker_stdout_level() == LoggingLevelEnum.Off
 
 
 
 def test_load_config_supports_maa_stdout_level_override():
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir) / "config.yaml"
+    with temp_runtime_dir() as runtime_dir:
+        temp_path = runtime_dir / "config.yaml"
         with open(temp_path, "w", encoding="utf-8") as f:
             yaml.safe_dump({"GlobalConfig": {"maa_stdout_level": "info"}}, f, allow_unicode=True)
 
@@ -124,8 +143,7 @@ def test_load_config_supports_maa_stdout_level_override():
 
 
 def test_load_config_uses_runtime_dir_when_path_missing(monkeypatch):
-    with tempfile.TemporaryDirectory() as temp_dir:
-        runtime_dir = Path(temp_dir)
+    with temp_runtime_dir() as runtime_dir:
         monkeypatch.setattr("mluascript.shared.config.manager.get_runtime_dir", lambda: runtime_dir)
 
         load_config()
@@ -138,3 +156,11 @@ def test_get_runtime_dir_falls_back_to_project_root_for_source_tree():
 
     assert (runtime_dir / "pyproject.toml").exists()
     assert (runtime_dir / "src" / "mluascript").exists()
+
+
+def test_resolve_path_from_runtime_supports_relative_path():
+    runtime_dir = Path("F:/demo/runtime")
+
+    resolved = resolve_path_from_runtime("./logs/app", runtime_dir)
+
+    assert resolved == (runtime_dir / "logs" / "app").resolve()

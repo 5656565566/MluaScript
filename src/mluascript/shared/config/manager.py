@@ -12,7 +12,7 @@ from pydantic import BaseModel, ValidationError
 from mluascript.shared.config.bootstrap import ensure_config_models_registered
 from mluascript.shared.config.models import GlobalConfig
 from mluascript.shared.config.registry import config as registry
-from mluascript.shared.logging import logger, set_log_level
+from mluascript.shared.logging import configure_file_logging, logger, set_log_level
 
 
 def get_runtime_dir() -> Path:
@@ -49,11 +49,19 @@ class YamlConfig:
             logger.error(f"Error writing YAML file: {e}")
 
 
+def resolve_path_from_runtime(raw_path: str, runtime_dir: Path) -> Path:
+    candidate = Path(raw_path).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    return (runtime_dir / candidate).resolve()
+
+
 def load_config(path: str = "") -> None:
     """统一配置加载入口"""
     ensure_config_models_registered()
 
-    file = Path(path) if path else get_runtime_dir() / "config" / "config.yaml"
+    runtime_dir = get_runtime_dir()
+    file = Path(path) if path else runtime_dir / "config" / "config.yaml"
 
     file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -88,5 +96,7 @@ def load_config(path: str = "") -> None:
     global_cfg = instances.get(GlobalConfig)
     if isinstance(global_cfg, GlobalConfig):
         set_log_level(global_cfg.log_level)
+        base_dir = file.parent if path else runtime_dir
+        configure_file_logging(resolve_path_from_runtime(global_cfg.log_dir, base_dir))
 
     logger.info(f"成功载入配置文件: {file}")
