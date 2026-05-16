@@ -25,6 +25,7 @@ from mluascript.maa.controllers.screen import screencap
 from mluascript.maa.lifecycle.runtime import MaaContext
 from mluascript.maa.types import MaaPaths
 from mluascript.shared.config import GlobalConfig, config, load_config
+from mluascript.shared.logging import logger
 
 from .models import (
     ConnectAdbRequest,
@@ -76,6 +77,7 @@ class DeviceFacade:
             self._adb_page = 0
             return DeviceActionResult(ok=True, message=f"已搜索到 {len(self._adb_raw)} 个 ADB 设备", overview=self.get_overview())
         except Exception as exc:
+            logger.error(f"Device operation failed: {exc}", exc_info=True)
             return DeviceActionResult(ok=False, message=f"搜索 ADB 设备失败: {exc}", severity="error", overview=self.get_overview())
 
     def find_desktop(self) -> DeviceActionResult:
@@ -84,6 +86,7 @@ class DeviceFacade:
             self._desktop_page = 0
             return DeviceActionResult(ok=True, message=f"已搜索到 {len(self._desktop_raw)} 个{current_desktop_label()}", overview=self.get_overview())
         except Exception as exc:
+            logger.error(f"Device operation failed: {exc}", exc_info=True)
             return DeviceActionResult(ok=False, message=f"搜索本地窗口失败: {exc}", severity="error", overview=self.get_overview())
 
     def change_adb_page(self, delta: int) -> DeviceOverview:
@@ -107,6 +110,7 @@ class DeviceFacade:
             self._maa_facade.attach_session(session)
             return DeviceActionResult(ok=True, message=f"已连接 ADB 设备: {address}", overview=self.get_overview())
         except Exception as exc:
+            logger.error(f"Device operation failed: {exc}", exc_info=True)
             return DeviceActionResult(ok=False, message=f"连接 ADB 失败: {exc}", severity="error", overview=self.get_overview())
 
     def connect_device(self, action_id: str) -> DeviceActionResult:
@@ -125,6 +129,7 @@ class DeviceFacade:
             self._maa_facade.clear_session()
             return DeviceActionResult(ok=True, message="已断开当前设备连接", overview=self.get_overview())
         except Exception as exc:
+            logger.error(f"Device operation failed: {exc}", exc_info=True)
             return DeviceActionResult(ok=False, message=f"断开设备连接失败: {exc}", severity="error", overview=self.get_overview())
 
     def _capture_current_screenshot_result(self) -> DeviceActionResult:
@@ -168,6 +173,8 @@ class DeviceFacade:
             )
 
         except Exception as exc:
+
+            logger.error(f"Device operation failed: {exc}", exc_info=True)
             return DeviceActionResult(
                 ok=False,
                 message=f"截图处理时发生异常: {exc}",
@@ -193,6 +200,7 @@ class DeviceFacade:
             result.saved_path = screenshot_path.as_posix()
             return result
         except Exception as exc:
+            logger.error(f"Device operation failed: {exc}", exc_info=True)
             return DeviceActionResult(
                 ok=False,
                 message=f"截图保存时发生异常: {exc}",
@@ -224,6 +232,7 @@ class DeviceFacade:
             self._maa_facade.attach_session(session)
             return DeviceActionResult(ok=True, message=f"已连接 ADB 设备: {params.address}", overview=self.get_overview())
         except Exception as exc:
+            logger.error(f"Device operation failed: {exc}", exc_info=True)
             return DeviceActionResult(ok=False, message=f"连接 ADB 设备失败: {exc}", severity="error", overview=self.get_overview())
 
     def _connect_desktop_item(self, action_id: str) -> DeviceActionResult:
@@ -246,6 +255,7 @@ class DeviceFacade:
             window_name = str(window.get("window_name") or handle or backend)
             return DeviceActionResult(ok=True, message=f"已连接{current_desktop_label()}: {window_name}", overview=self.get_overview())
         except Exception as exc:
+            logger.error(f"Device operation failed: {exc}", exc_info=True)
             return DeviceActionResult(ok=False, message=f"连接本地窗口失败: {exc}", severity="error", overview=self.get_overview())
 
     def _connect_emulator_item(self, action_id: str) -> DeviceActionResult:
@@ -271,6 +281,7 @@ class DeviceFacade:
             self._maa_facade.attach_session(session)
             return DeviceActionResult(ok=True, message=f"已连接模拟器设备: {device.name}", overview=self.get_overview())
         except Exception as exc:
+            logger.error(f"Device operation failed: {exc}", exc_info=True)
             return DeviceActionResult(ok=False, message=f"连接模拟器设备失败: {exc}", severity="error", overview=self.get_overview())
 
     def _build_connection_state(self) -> DeviceConnectionState:
@@ -401,6 +412,7 @@ class DeviceFacade:
             self._maa_facade.attach_session(session)
             return DeviceActionResult(ok=True, message=f"已连接浏览器设备: {device.name}", overview=self.get_overview())
         except Exception as exc:
+            logger.error(f"Device operation failed: {exc}", exc_info=True)
             return DeviceActionResult(ok=False, message=f"连接浏览器设备失败: {exc}", severity="error", overview=self.get_overview())
 
     def _get_device_config(self) -> MaaDeviceConfig:
