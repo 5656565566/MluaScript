@@ -1,4 +1,4 @@
-"""LLM Lua bridge。"""
+"""LLM Lua bridge"""
 
 from __future__ import annotations
 

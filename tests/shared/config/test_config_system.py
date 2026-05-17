@@ -10,7 +10,7 @@ from maa.define import LoggingLevelEnum
 from mluascript.maa.config.models import MaaDeviceConfig
 from mluascript.maa.lifecycle.bootstrap import resolve_tasker_stdout_level
 from mluascript.shared.config.manager import get_runtime_dir, load_config, resolve_path_from_runtime
-from mluascript.shared.config.models import GlobalConfig
+from mluascript.shared.config.models import GlobalConfig, WebServerConfig
 from mluascript.shared.config.registry import config as registry
 from mluascript.shared.logging import configure_file_logging
 
@@ -126,6 +126,25 @@ def test_load_config_supports_maa_stdout_level_default_off():
         assert global_cfg.maa_log_dir == "./logs/maa.log"
         assert global_cfg.maa_stdout_level == "off"
         assert resolve_tasker_stdout_level() == LoggingLevelEnum.Off
+
+
+def test_load_config_generates_default_web_login_secret():
+    with temp_runtime_dir() as runtime_dir:
+        temp_path = runtime_dir / "config.yaml"
+
+        load_config(str(temp_path))
+
+        web_cfg = registry.get(WebServerConfig)
+        assert web_cfg.username == "admin"
+        assert len(web_cfg.password) == 16
+        assert len(web_cfg.session_secret) == 16
+
+        with open(temp_path, "r", encoding="utf-8") as f:
+            saved_data = yaml.safe_load(f)
+
+        assert saved_data["WebServerConfig"]["username"] == "admin"
+        assert saved_data["WebServerConfig"]["password"] == web_cfg.password
+        assert saved_data["WebServerConfig"]["session_secret"] == web_cfg.session_secret
 
 
 

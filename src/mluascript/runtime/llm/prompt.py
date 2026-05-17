@@ -1,4 +1,4 @@
-"""LLM prompt 拼装。"""
+"""LLM prompt 拼装"""
 
 from __future__ import annotations
 

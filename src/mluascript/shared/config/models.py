@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import secrets
+import string
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -9,6 +11,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from mluascript.shared.config.registry import config
 
 MaaStdoutLogLevel = Literal["off", "error", "warning", "info", "debug", "trace"]
+
+
+def _random_config_secret() -> str:
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(16))
 
 
 @config.registry()
@@ -19,6 +26,10 @@ class WebServerConfig(BaseModel):
 
     host: str = Field(default="127.0.0.1", description="MluaScript Web 监听地址")
     port: int = Field(default=18080, ge=1, le=65535, description="MluaScript Web 监听端口")
+    username: str = Field(default="admin", description="MluaScript Web 登录用户名")
+    password: str = Field(default_factory=_random_config_secret, min_length=1, description="MluaScript Web 登录密码")
+    session_secret: str = Field(default_factory=_random_config_secret, min_length=16, description="MluaScript Web 登录会话签名密钥")
+    session_max_age_seconds: int = Field(default=604800, ge=60, description="MluaScript Web 登录有效期 秒")
 
 
 

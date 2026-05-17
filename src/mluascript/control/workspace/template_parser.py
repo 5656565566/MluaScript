@@ -13,7 +13,7 @@ _TEMPLATE_END = "-- @mlua-template:end"
 
 
 class TemplateParseError(ValueError):
-    """模板解析异常。"""
+    """模板解析异常"""
 
 
 @dataclass(slots=True)
@@ -27,7 +27,7 @@ class TemplateSource:
 
 
 def extract_template_block(script_text: str) -> TemplateSource | None:
-    """从 Lua 脚本中提取模板注释块。"""
+    """从 Lua 脚本中提取模板注释块"""
     lines = script_text.splitlines()
     start_idx = -1
     end_idx = -1
@@ -64,7 +64,7 @@ def extract_template_block(script_text: str) -> TemplateSource | None:
 
 
 def parse_template_meta(script_text: str, *, script_path: str = "") -> TemplateSource | None:
-    """从脚本中提取并标准化模板元数据。"""
+    """从脚本中提取并标准化模板元数据"""
     source = extract_template_block(script_text)
     if source is None:
         return None
@@ -93,7 +93,7 @@ def load_template_meta_from_file(path: str | Path) -> TemplateSource | None:
 
 
 def dump_template_block(meta: TemplateMeta | dict[str, Any], *, indent: int = 2) -> str:
-    """将模板对象编码为 Lua 注释块。"""
+    """将模板对象编码为 Lua 注释块"""
     normalized = meta if isinstance(meta, TemplateMeta) else normalize_template_meta(meta)
     text = json.dumps(normalized.model_dump(by_alias=True, exclude_none=True), ensure_ascii=False, indent=indent)
     comment_lines = ["-- @mlua-template:start"]
@@ -103,7 +103,7 @@ def dump_template_block(meta: TemplateMeta | dict[str, Any], *, indent: int = 2)
 
 
 def replace_template_block(script_text: str, meta: TemplateMeta | dict[str, Any], *, indent: int = 2) -> str:
-    """替换或插入脚本模板注释块。"""
+    """替换或插入脚本模板注释块"""
     new_block = dump_template_block(meta, indent=indent)
     source = extract_template_block(script_text)
     if source is None:

@@ -153,7 +153,7 @@ class TuiApp(App[None]):
     async def action_quit(self) -> None:
         if self._has_running_tasks():
             self.notify(
-                "当前仍有脚本或任务在运行。请先停止任务；如需强制退出，请按 Ctrl+Q。",
+                "当前仍有脚本或任务在运行 请先停止任务\n如需强制退出 请按 Ctrl+Q",
                 title="拒绝直接退出",
                 severity="warning",
             )

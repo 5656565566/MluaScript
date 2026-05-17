@@ -41,7 +41,7 @@ PAGE_SIZE = 8
 
 
 class DeviceFacade:
-    """设备域高层入口，向 frontends 提供通用应用层模型。"""
+    """设备域高层入口 向 frontends 提供通用应用层模型"""
 
     def __init__(self) -> None:
         try:

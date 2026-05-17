@@ -1,4 +1,4 @@
-"""LLM 运行时数据模型。"""
+"""LLM 运行时数据模型"""
 
 from __future__ import annotations
 

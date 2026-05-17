@@ -3,6 +3,9 @@ import { ref } from 'vue'
 export function createUiState() {
   return {
     loading: ref(false),
+    authChecked: ref(false),
+    authenticated: ref(false),
+    currentUser: ref(''),
     statusText: ref('准备就绪'),
     activeView: ref('blockly'),
     editorLayout: ref('split'),

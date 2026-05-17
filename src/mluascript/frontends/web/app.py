@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
+import secrets
 import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,8 +17,10 @@ from pydantic import BaseModel, Field
 
 from mluascript.control.facade import get_control_facade
 from mluascript.control.workspace import TemplateSavedConfig, get_template_store
+from mluascript.shared.config import WebServerConfig, config
 from mluascript.shared.logging import get_logs, get_logs_by_channel, get_logs_by_session
 
+auth_router = APIRouter(prefix="/api/auth")
 device_router = APIRouter(prefix="/api/device")
 editor_router = APIRouter(prefix="/api/editor")
 logs_router = APIRouter(prefix="/api/logs")
@@ -96,6 +102,11 @@ class RunTemplatePayload(BaseModel):
     runtime: dict[str, Any] = Field(default_factory=dict)
 
 
+class LoginPayload(BaseModel):
+    username: str = ""
+    password: str = ""
+
+
 _EDITOR_SESSION: dict[str, Any] = {
     "blocklyDocument": {
         "xml": "",
@@ -123,6 +134,100 @@ def _ok(data: Any, message: str = "", meta: dict[str, Any] | None = None) -> dic
         "message": message,
         "meta": meta or {},
     }
+
+
+_AUTH_COOKIE_NAME = "mluascript_session"
+
+
+def _get_web_config() -> WebServerConfig:
+    return config.get(WebServerConfig)
+
+
+def _sign_session(username: str, issued_at: int, secret: str) -> str:
+    payload = f"{username}:{issued_at}"
+    return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _encode_session_token(username: str, issued_at: int, secret: str) -> str:
+    signature = _sign_session(username, issued_at, secret)
+    raw = f"{username}:{issued_at}:{signature}".encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def _decode_session_token(token: str, cfg: WebServerConfig) -> str | None:
+    try:
+        raw = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
+        username, issued_at_text, signature = raw.rsplit(":", 2)
+        issued_at = int(issued_at_text)
+    except Exception:
+        return None
+
+    if username != cfg.username:
+        return None
+    if time.time() - issued_at > cfg.session_max_age_seconds:
+        return None
+
+    expected = _sign_session(username, issued_at, cfg.session_secret)
+    if not hmac.compare_digest(signature, expected):
+        return None
+    return username
+
+
+def _get_authenticated_user(request: Request) -> str | None:
+    token = request.cookies.get(_AUTH_COOKIE_NAME, "")
+    if not token:
+        return None
+    return _decode_session_token(token, _get_web_config())
+
+
+def require_authenticated_user(request: Request) -> str:
+    username = _get_authenticated_user(request)
+    if username is None:
+        raise HTTPException(status_code=401, detail="未登录")
+    return username
+
+
+def _set_auth_cookie(response: JSONResponse, username: str) -> None:
+    cfg = _get_web_config()
+    token = _encode_session_token(username, int(time.time()), cfg.session_secret)
+    response.set_cookie(
+        _AUTH_COOKIE_NAME,
+        token,
+        max_age=cfg.session_max_age_seconds,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+    )
+
+
+def _clear_auth_cookie(response: JSONResponse) -> None:
+    response.delete_cookie(_AUTH_COOKIE_NAME, httponly=True, samesite="lax")
+
+
+@auth_router.get("/status")
+def auth_status(request: Request) -> dict[str, Any]:
+    username = _get_authenticated_user(request)
+    return _ok({"authenticated": username is not None, "username": username or ""})
+
+
+@auth_router.post("/login")
+def auth_login(payload: LoginPayload) -> JSONResponse:
+    cfg = _get_web_config()
+    username_ok = secrets.compare_digest(payload.username, cfg.username)
+    password_ok = secrets.compare_digest(payload.password, cfg.password)
+    if not username_ok or not password_ok:
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    response = JSONResponse(_ok({"authenticated": True, "username": cfg.username}, message="登录成功"))
+    _set_auth_cookie(response, cfg.username)
+    return response
+
+
+@auth_router.post("/logout")
+def auth_logout() -> JSONResponse:
+    response = JSONResponse(_ok({"authenticated": False}, message="已退出登录"))
+    _clear_auth_cookie(response)
+    return response
 
 
 def _editor_root() -> Path:
@@ -817,12 +922,15 @@ def create_web_app(dist_dir: Path) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.include_router(device_router)
-    app.include_router(system_router)
-    app.include_router(editor_router)
-    app.include_router(logs_router)
-    app.include_router(streams_router)
-    app.include_router(run_router)
+
+    app.include_router(auth_router)
+    protected_dependencies = [Depends(require_authenticated_user)]
+    app.include_router(device_router, dependencies=protected_dependencies)
+    app.include_router(system_router, dependencies=protected_dependencies)
+    app.include_router(editor_router, dependencies=protected_dependencies)
+    app.include_router(logs_router, dependencies=protected_dependencies)
+    app.include_router(streams_router, dependencies=protected_dependencies)
+    app.include_router(run_router, dependencies=protected_dependencies)
 
     assets_dir = dist_dir / "assets"
     if assets_dir.exists():

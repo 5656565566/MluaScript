@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onBeforeUnmount, computed } from 'vue'
+import { onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { NConfigProvider, NGlobalStyle, NMessageProvider, NDialogProvider, NNotificationProvider, NLayout, NLayoutContent, darkTheme } from 'naive-ui'
 import { state, actions } from './store'
 import { setupNaiveDiscreteApi } from './naiveDiscreteApi'
@@ -14,6 +14,7 @@ import TemplateRunnerView from './components/TemplateRunnerView.vue'
 import ScreenshotFloat from './components/ScreenshotFloat.vue'
 import ModalHost from './components/ModalHost.vue'
 import TemplateEditorModal from './components/TemplateEditorModal.vue'
+import LoginView from './components/LoginView.vue'
 
 let pollTimer = null
 
@@ -22,6 +23,13 @@ function startPolling() {
   pollTimer = window.setInterval(() => {
     actions.pollRuntime()
   }, 2000)
+}
+
+async function initializeAuthenticatedApp() {
+  await actions.loadState()
+  await actions.refreshLogs()
+  startPolling()
+  actions.placeScreenshotDock()
 }
 
 const theme = computed(() => {
@@ -33,16 +41,14 @@ const theme = computed(() => {
 onMounted(async () => {
   setupNaiveDiscreteApi()
   try {
-    await actions.loadState()
-    await actions.refreshLogs()
     actions.applyTheme()
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
       if (state.appTheme.value === 'system') actions.applyTheme()
     })
-    startPolling()
-    actions.placeScreenshotDock()
+    await actions.checkAuth()
   } catch (error) {
     console.error(error)
+    state.authChecked.value = true
     actions.setStatus(error.message || '初始化页面失败')
   }
 })
@@ -50,6 +56,20 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (pollTimer) window.clearInterval(pollTimer)
   actions.stopAllDevicePreviewLoops()
+})
+
+watch(() => state.authenticated.value, (authenticated) => {
+  if (!authenticated) {
+    if (pollTimer) {
+      window.clearInterval(pollTimer)
+      pollTimer = null
+    }
+    return
+  }
+  initializeAuthenticatedApp().catch((error) => {
+    console.error(error)
+    actions.setStatus(error.message || '初始化页面失败', 'error')
+  })
 })
 </script>
 
@@ -59,7 +79,8 @@ onBeforeUnmount(() => {
     <n-message-provider>
       <n-dialog-provider>
         <n-notification-provider>
-  <n-layout has-sider class="app-shell">
+  <LoginView v-if="state.authChecked.value && !state.authenticated.value" />
+  <n-layout v-else-if="state.authenticated.value" has-sider class="app-shell">
     <Sidebar />
     <div class="mobile-overlay" :class="{ 'active': !state.sidebarCollapsed.value }" @click="state.sidebarCollapsed.value = true"></div>
     <n-layout content-style="display: flex; flex-direction: column; min-height: 100vh;" class="main-content">

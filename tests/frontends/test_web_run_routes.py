@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -19,10 +20,59 @@ class FakeControlFacade:
         self.stopped_pipelines.append(task_id)
 
 
+def _test_web_config() -> SimpleNamespace:
+    return SimpleNamespace(
+        username="admin",
+        password="secret-pass",
+        session_secret="0123456789abcdef",
+        session_max_age_seconds=3600,
+    )
+
+
+def _authenticated_client(monkeypatch, tmp_path: Path) -> TestClient:
+    monkeypatch.setattr(web_app, "_get_web_config", _test_web_config)
+    client = TestClient(web_app.create_web_app(tmp_path))
+    response = client.post("/api/auth/login", json={"username": "admin", "password": "secret-pass"})
+    assert response.status_code == 200
+    return client
+
+
+def test_api_routes_require_login(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(web_app, "_get_web_config", _test_web_config)
+    client = TestClient(web_app.create_web_app(tmp_path))
+
+    response = client.get("/api/system/health")
+
+    assert response.status_code == 401
+
+
+def test_login_and_logout_update_auth_status(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(web_app, "_get_web_config", _test_web_config)
+    client = TestClient(web_app.create_web_app(tmp_path))
+
+    assert client.get("/api/auth/status").json()["data"]["authenticated"] is False
+    login_response = client.post("/api/auth/login", json={"username": "admin", "password": "secret-pass"})
+    assert login_response.status_code == 200
+    assert client.get("/api/auth/status").json()["data"] == {"authenticated": True, "username": "admin"}
+    logout_response = client.post("/api/auth/logout", json={})
+
+    assert logout_response.status_code == 200
+    assert client.get("/api/auth/status").json()["data"]["authenticated"] is False
+
+
+def test_login_rejects_wrong_password(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(web_app, "_get_web_config", _test_web_config)
+    client = TestClient(web_app.create_web_app(tmp_path))
+
+    response = client.post("/api/auth/login", json={"username": "admin", "password": "bad"})
+
+    assert response.status_code == 401
+
+
 def test_stop_script_route_delegates_to_script_stop(monkeypatch, tmp_path: Path) -> None:
     facade = FakeControlFacade()
     monkeypatch.setattr(web_app, "get_control_facade", lambda: facade)
-    client = TestClient(web_app.create_web_app(tmp_path))
+    client = _authenticated_client(monkeypatch, tmp_path)
 
     response = client.post("/api/run/script/script-1/stop", json={})
 
@@ -35,7 +85,7 @@ def test_stop_script_route_delegates_to_script_stop(monkeypatch, tmp_path: Path)
 def test_stop_pipeline_route_delegates_to_pipeline_stop(monkeypatch, tmp_path: Path) -> None:
     facade = FakeControlFacade()
     monkeypatch.setattr(web_app, "get_control_facade", lambda: facade)
-    client = TestClient(web_app.create_web_app(tmp_path))
+    client = _authenticated_client(monkeypatch, tmp_path)
 
     response = client.post("/api/run/pipeline/pipeline-1/stop", json={})
 

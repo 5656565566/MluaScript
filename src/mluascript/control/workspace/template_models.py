@@ -11,7 +11,7 @@ TemplateType = Literal["str", "int", "num", "bool", "enum", "json", "list", "obj
 
 
 class TemplateCondition(BaseModel):
-    """字段显示/生效条件。"""
+    """字段显示/生效条件"""
 
     k: str = Field(default="", description="依赖字段 key")
     eq: TemplateValue = Field(default=None, description="等于指定值时生效")
@@ -25,7 +25,7 @@ class TemplateCondition(BaseModel):
 
 
 class TemplateOptionDef(BaseModel):
-    """枚举选项定义。"""
+    """枚举选项定义"""
 
     v: TemplateValue = Field(default=None, description="选项值")
     t: str = Field(default="", description="显示标题")
@@ -38,9 +38,9 @@ class TemplateOptionDef(BaseModel):
 
 
 class TemplateVarDef(BaseModel):
-    """模板字段定义。"""
+    """模板字段定义"""
 
-    k: str = Field(default="", description="字段 key；在 vars 字典上下文中可省略")
+    k: str = Field(default="", description="字段 key 在 vars 字典上下文中可省略")
     t: str = Field(default="", description="标题")
     d: str = Field(default="", description="说明")
     tp: TemplateType = Field(default="str", description="字段类型")
@@ -78,7 +78,7 @@ class TemplateVarDef(BaseModel):
 
 
 class TemplateTaskDef(BaseModel):
-    """任务原型定义。"""
+    """任务原型定义"""
 
     k: str = Field(default="", description="任务 key")
     t: str = Field(default="", description="标题")
@@ -96,7 +96,7 @@ class TemplateTaskDef(BaseModel):
 
 
 class TemplateStepDef(BaseModel):
-    """工作流步骤定义。"""
+    """工作流步骤定义"""
 
     k: str = Field(default="", description="步骤 key")
     t: str = Field(default="", description="标题")
@@ -117,7 +117,7 @@ class TemplateStepDef(BaseModel):
 
 
 class TemplateFlowDef(BaseModel):
-    """工作流定义。"""
+    """工作流定义"""
 
     k: str = Field(default="", description="工作流 key")
     t: str = Field(default="", description="标题")
@@ -134,7 +134,7 @@ class TemplateFlowDef(BaseModel):
 
 
 class TemplateEntryDef(BaseModel):
-    """模板默认入口。"""
+    """模板默认入口"""
 
     flow: str = Field(default="", description="默认工作流 key")
     task: str = Field(default="", description="默认任务 key")
@@ -145,7 +145,7 @@ class TemplateEntryDef(BaseModel):
 
 
 class TemplateMeta(BaseModel):
-    """标准化后的模板元数据。"""
+    """标准化后的模板元数据"""
 
     v: int = Field(default=1, description="模板版本")
     id: str = Field(default="", description="模板 id")

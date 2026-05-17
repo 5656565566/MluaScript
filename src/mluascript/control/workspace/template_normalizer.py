@@ -25,11 +25,11 @@ _TOP_LEVEL_ALIASES = {
 
 
 class TemplateNormalizeError(ValueError):
-    """模板标准化异常。"""
+    """模板标准化异常"""
 
 
 def normalize_template_meta(raw_meta: dict[str, Any] | TemplateMeta | None) -> TemplateMeta:
-    """将作者层模板声明标准化为系统内部扁平结构。"""
+    """将作者层模板声明标准化为系统内部扁平结构"""
     if raw_meta is None:
         return TemplateMeta()
     if isinstance(raw_meta, TemplateMeta):

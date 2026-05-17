@@ -1,5 +1,5 @@
 import { computed } from 'vue'
-import { apiGet, apiPost, editorApi, logApi, systemApi, templateApi } from './api'
+import { apiGet, apiPost, authApi, editorApi, logApi, systemApi, templateApi } from './api'
 import { workspaceToLua, workspaceToXml, updateBlocklyTheme } from './blockly'
 import { openModal, closeModal } from './modalStore'
 import { pickerActions } from './store/pickerState'
@@ -381,6 +381,32 @@ function createPreviewWindow(sessionLabel) {
 }
 
 export const actions = {
+  async checkAuth() {
+    const data = await authApi.status()
+    state.authenticated.value = Boolean(data.authenticated)
+    state.currentUser.value = data.username || ''
+    state.authChecked.value = true
+    return state.authenticated.value
+  },
+
+  async login(username, password) {
+    const data = await authApi.login({ username, password })
+    state.authenticated.value = Boolean(data.authenticated)
+    state.currentUser.value = data.username || username
+    state.authChecked.value = true
+    actions.setStatus('登录成功', 'success')
+  },
+
+  async logout() {
+    await authApi.logout()
+    state.authenticated.value = false
+    state.currentUser.value = ''
+    actions.stopAllDevicePreviewLoops()
+    state.tasks.value = []
+    state.logs.value = []
+    actions.setStatus('已退出登录', 'info')
+  },
+
   setStatus(text, type = 'info') {
     state.statusText.value = text
     const messageApi = window.$message
