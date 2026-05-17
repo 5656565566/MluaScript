@@ -761,6 +761,18 @@ def stop_all_tasks() -> dict[str, Any]:
     return _ok({"stoppedThreads": stopped}, message=f"已停止 {stopped} 个任务")
 
 
+@run_router.post("/script/{task_id}/stop")
+def stop_script_task(task_id: str) -> dict[str, Any]:
+    get_control_facade().stop_script(task_id)
+    return _ok({"taskId": task_id}, message=f"已停止任务: {task_id}")
+
+
+@run_router.post("/pipeline/{task_id}/stop")
+def stop_pipeline_task(task_id: str) -> dict[str, Any]:
+    get_control_facade().stop_pipeline(task_id)
+    return _ok({"taskId": task_id}, message=f"已停止任务: {task_id}")
+
+
 @logs_router.get("")
 def get_structured_logs(
     limit: int = 200,

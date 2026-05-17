@@ -224,7 +224,7 @@ watch(orderedTasks, (tasks) => {
                 
                 <div style="margin-top: 16px;">
                   <n-space>
-                    <n-button type="error" secondary @click="actions.stopTask(taskDetail.task_id)" :disabled="!taskDetail.capabilities?.can_stop">停止任务</n-button>
+                    <n-button type="error" secondary @click="actions.stopTask(taskDetail.task_id, taskDetail.kind)" :disabled="!taskDetail.capabilities?.can_stop">停止任务</n-button>
                     <n-button type="error" secondary @click="actions.removeTask(taskDetail.task_id)" :disabled="!taskDetail.capabilities?.can_remove">删除记录</n-button>
                     <n-button type="info" secondary @click="activeTab = 'task-output'" :disabled="taskDetail.kind !== 'script'">查看输出</n-button>
                     <n-button type="info" secondary @click="activeTab = 'task-log'" :disabled="taskDetail.kind !== 'script'">查看日志</n-button>

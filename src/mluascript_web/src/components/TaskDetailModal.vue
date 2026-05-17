@@ -70,7 +70,7 @@ function formatValue(value) {
         <n-space>
           <n-button :disabled="!task.capabilities?.has_logs" @click="actions.openTaskLogsModal(task.task_id)">查看日志</n-button>
           <n-button :disabled="!task.capabilities?.has_output" @click="actions.openTaskOutputModal(task.task_id)">查看输出</n-button>
-          <n-button :disabled="!task.capabilities?.can_stop" @click="actions.handleAction(() => actions.stopTask(task.task_id))">停止</n-button>
+          <n-button :disabled="!task.capabilities?.can_stop" @click="actions.handleAction(() => actions.stopTask(task.task_id, task.kind))">停止</n-button>
           <n-button type="error" :disabled="!task.capabilities?.can_remove" @click="actions.handleAction(() => actions.removeTask(task.task_id))">删除</n-button>
         </n-space>
       </div>

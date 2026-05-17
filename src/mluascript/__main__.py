@@ -1,4 +1,5 @@
 import ctypes
+import importlib
 from platform import system
 import keyboard
 
@@ -6,8 +7,17 @@ from mluascript.shared.config import load_config
 from mluascript.shared.config import config as config_registry
 from mluascript.shared.config.models import GlobalConfig
 from mluascript.shared.logging import configure_logging, logger
-from mluascript.frontends.tui import TuiApp
-from mluascript.control.facade import get_control_facade
+from mluascript.maa.lifecycle.bootstrap import prepare_maa_runtime_environment
+
+
+def _load_tui_app_class():
+    module = importlib.import_module("mluascript.frontends.tui")
+    return module.TuiApp
+
+
+def _load_control_facade_getter():
+    module = importlib.import_module("mluascript.control.facade")
+    return module.get_control_facade
 
 def main() -> None:
     if system() == "Windows":
@@ -15,7 +25,10 @@ def main() -> None:
 
     configure_logging(stdout=False)
     load_config()
+    prepare_maa_runtime_environment()
 
+    TuiApp = _load_tui_app_class()
+    get_control_facade = _load_control_facade_getter()
     app = TuiApp()
 
     def _stop_all_tasks() -> None:
@@ -55,7 +68,10 @@ def main() -> None:
     except Exception as e:
         logger.warning(f"无法注册快捷键: {e}")
 
-    app.run()
+    try:
+        app.run()
+    finally:
+        importlib.import_module("mluascript.maa.lifecycle.runtime").cleanup_maa_runtime_artifacts()
 
 
 if __name__ == "__main__":

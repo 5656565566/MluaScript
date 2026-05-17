@@ -4,6 +4,7 @@ import numpy as np
 import io
 import time
 import base64
+import shutil
 from math import ceil
 from pathlib import Path
 from PIL import Image
@@ -22,8 +23,8 @@ from mluascript.maa.connections import (
     find_desktop_windows,
 )
 from mluascript.maa.controllers.screen import screencap
-from mluascript.maa.lifecycle.runtime import MaaContext
-from mluascript.maa.types import MaaPaths
+from mluascript.maa.lifecycle.bootstrap import resolve_maa_paths
+from mluascript.maa.lifecycle.runtime import initialize_maa_runtime
 from mluascript.shared.config import GlobalConfig, config, load_config
 from mluascript.shared.logging import logger
 
@@ -43,14 +44,11 @@ class DeviceFacade:
     """设备域高层入口，向 frontends 提供通用应用层模型。"""
 
     def __init__(self) -> None:
-        self._maa_facade = MaaFacade(
-            MaaContext(
-                paths=MaaPaths(
-                    library_dir=Path("."),
-                    resource_dir=Path("."),
-                )
-            )
-        )
+        try:
+            self._get_global_config()
+        except Exception:
+            load_config()
+        self._maa_facade = MaaFacade.create_default()
         self._adb_raw: list[dict] = []
         self._desktop_raw: list[dict] = []
         self._adb_page = 0
@@ -66,7 +64,12 @@ class DeviceFacade:
         )
 
     def initialize(self) -> DeviceActionResult:
-        return DeviceActionResult(ok=True, message="已初始化 MAA 控制上下文", overview=self.get_overview())
+        try:
+            self._ensure_runtime_ready()
+            return DeviceActionResult(ok=True, message="已初始化 MAA 控制上下文", overview=self.get_overview())
+        except Exception as exc:
+            logger.error(f"Device operation failed: {exc}", exc_info=True)
+            return DeviceActionResult(ok=False, message=f"初始化 MAA 控制上下文失败: {exc}", severity="error", overview=self.get_overview())
 
     def refresh(self) -> DeviceOverview:
         return self.get_overview()
@@ -102,10 +105,11 @@ class DeviceFacade:
         if not address:
             return DeviceActionResult(ok=False, message="请先输入 ADB 地址", severity="warning", overview=self.get_overview())
 
-        global_cfg = self._get_global_config()
-        adb_path = str(global_cfg.maa_adb_dir or "").strip() or "adb.exe"
+        adb_path = self._resolve_default_adb_path()
+        logger.info(f"Manual ADB connect requested: address={address}, adb_path={adb_path}")
         params = AdbConnectionParams(adb_path=adb_path, address=address)
         try:
+            self._ensure_runtime_ready()
             session = connect_adb(self._maa_facade.context, params)
             self._maa_facade.attach_session(session)
             return DeviceActionResult(ok=True, message=f"已连接 ADB 设备: {address}", overview=self.get_overview())
@@ -215,8 +219,7 @@ class DeviceFacade:
             return DeviceActionResult(ok=False, message="ADB 设备索引无效", severity="warning", overview=self.get_overview())
 
         device = self._adb_raw[idx]
-        global_cfg = self._get_global_config()
-        fallback_adb_path = str(global_cfg.maa_adb_dir or "").strip() or "adb.exe"
+        fallback_adb_path = self._resolve_default_adb_path()
         params = AdbConnectionParams(
             adb_path=str(device.get("adb_path") or fallback_adb_path),
             address=str(device.get("address") or ""),
@@ -228,6 +231,7 @@ class DeviceFacade:
             return DeviceActionResult(ok=False, message="ADB 设备缺少地址信息", severity="error", overview=self.get_overview())
 
         try:
+            self._ensure_runtime_ready()
             session = connect_adb(self._maa_facade.context, params)
             self._maa_facade.attach_session(session)
             return DeviceActionResult(ok=True, message=f"已连接 ADB 设备: {params.address}", overview=self.get_overview())
@@ -247,6 +251,7 @@ class DeviceFacade:
             return DeviceActionResult(ok=False, message="当前窗口句柄无效，无法连接", severity="error", overview=self.get_overview())
 
         try:
+            self._ensure_runtime_ready()
             session = connect_desktop_window(
                 self._maa_facade.context,
                 DesktopWindowConnectionParams(handle=handle, platform=backend),
@@ -266,8 +271,7 @@ class DeviceFacade:
             return DeviceActionResult(ok=False, message="模拟器设备索引无效", severity="warning", overview=self.get_overview())
 
         device = devices[idx]
-        global_cfg = self._get_global_config()
-        adb_path = str(global_cfg.maa_adb_dir or "").strip() or "adb.exe"
+        adb_path = self._resolve_default_adb_path()
         params = AdbConnectionParams(
             adb_path=adb_path,
             address=device.address,
@@ -277,6 +281,7 @@ class DeviceFacade:
             return DeviceActionResult(ok=False, message="模拟器设备缺少地址信息", severity="error", overview=self.get_overview())
 
         try:
+            self._ensure_runtime_ready()
             session = connect_adb(self._maa_facade.context, params)
             self._maa_facade.attach_session(session)
             return DeviceActionResult(ok=True, message=f"已连接模拟器设备: {device.name}", overview=self.get_overview())
@@ -408,6 +413,7 @@ class DeviceFacade:
         device = devices[idx]
         params = device.to_connection_params()
         try:
+            self._ensure_runtime_ready()
             session = connect_browser(self._maa_facade.context, params)
             self._maa_facade.attach_session(session)
             return DeviceActionResult(ok=True, message=f"已连接浏览器设备: {device.name}", overview=self.get_overview())
@@ -428,6 +434,26 @@ class DeviceFacade:
         except RuntimeError:
             load_config()
             return config.get(GlobalConfig)
+
+    def _resolve_default_adb_path(self) -> str:
+        self._get_global_config()
+        paths = resolve_maa_paths()
+        if paths.adb_path is not None:
+            candidate = Path(paths.adb_path)
+            if candidate.exists():
+                return str(candidate)
+            system_adb = shutil.which("adb")
+            if system_adb:
+                logger.warning(f"Configured adb path not found, fallback to system adb: {candidate} -> {system_adb}")
+                return system_adb
+        global_cfg = self._get_global_config()
+        configured = str(global_cfg.maa_adb_dir or "").strip()
+        if configured:
+            return configured
+        return "adb"
+
+    def _ensure_runtime_ready(self) -> None:
+        initialize_maa_runtime(self._maa_facade.context)
 
     def _build_page(self, total: int, page_index: int, items: list[DeviceListItem], *, empty_summary: str, filled_summary: str) -> DevicePage:
         if total == 0:

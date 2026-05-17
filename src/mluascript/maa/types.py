@@ -11,6 +11,7 @@ class MaaPaths:
 
     library_dir: Path
     resource_dir: Path
+    plugin_dir: Path | None = None
     model_dir: Path | None = None
     adb_path: Path | None = None
 

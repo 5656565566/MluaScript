@@ -4,6 +4,23 @@ import sys
 import subprocess
 from pathlib import Path
 
+
+def _safe_print(text):
+    if text is None:
+        return
+    if not isinstance(text, str):
+        text = str(text)
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        stream = getattr(sys.stdout, "buffer", None)
+        if stream is not None:
+            stream.write(text.encode("utf-8", errors="replace"))
+            if not text.endswith("\n"):
+                stream.write(b"\n")
+        else:
+            print(text.encode("utf-8", errors="replace").decode("utf-8", errors="replace"))
+
 def build_frontend():
     """构建前端项目"""
     webui_path = Path('src/mluascript_web')
@@ -33,14 +50,14 @@ def build_frontend():
             shell=False
         )
         
-        print(result.stdout)
+        _safe_print(result.stdout)
         if result.stderr:
-            print(result.stderr)
+            _safe_print(result.stderr)
             
         return result.returncode == 0
         
     except Exception as e:
-        print(f"Build error: {e}")
+        _safe_print(f"Build error: {e}")
         return False
 
 # 构建前端
@@ -62,11 +79,16 @@ a = Analysis(
     pathex=['src'],
     binaries=[],
     datas=[
+        (maa_bin_path, '.'),
         (maa_bin_path, 'maa/bin'),
         (webui_dist_path, 'mluascript_web/dist'),
         ('src/mluascript/runtime/inject_lua/*.lua', 'mluascript/runtime/inject_lua'),
     ],
     hiddenimports=[
+        'mluascript.frontends',
+        'mluascript.frontends.tui',
+        'mluascript.control.facade',
+        'mluascript.maa.lifecycle.runtime',
         'textual.widgets._tab',
         'textual.widgets._tabs',
         'textual.widgets._tab_pane',

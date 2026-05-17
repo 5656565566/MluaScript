@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .bootstrap import configure_toolkit_options, resolve_maa_paths
+from .bootstrap import configure_toolkit_options, prepare_maa_runtime_environment, resolve_maa_paths
 from .binding import bind_controller
 from .resources import get_node_list, load_resource, override_pipeline
 from .runtime import MaaContext, create_maa_context, initialize_maa_runtime
@@ -14,5 +14,6 @@ __all__ = [
     "initialize_maa_runtime",
     "load_resource",
     "override_pipeline",
+    "prepare_maa_runtime_environment",
     "resolve_maa_paths",
 ]

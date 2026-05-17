@@ -122,8 +122,8 @@ def test_load_config_supports_maa_stdout_level_default_off():
         load_config(str(temp_path))
 
         global_cfg = registry.get(GlobalConfig)
-        assert global_cfg.log_dir == "./logs/app"
-        assert global_cfg.maa_log_dir == "./logs/maa"
+        assert global_cfg.log_dir == "./logs/app.log"
+        assert global_cfg.maa_log_dir == "./logs/maa.log"
         assert global_cfg.maa_stdout_level == "off"
         assert resolve_tasker_stdout_level() == LoggingLevelEnum.Off
 
@@ -161,6 +161,6 @@ def test_get_runtime_dir_falls_back_to_project_root_for_source_tree():
 def test_resolve_path_from_runtime_supports_relative_path():
     runtime_dir = Path("F:/demo/runtime")
 
-    resolved = resolve_path_from_runtime("./logs/app", runtime_dir)
+    resolved = resolve_path_from_runtime("./logs/app.log", runtime_dir)
 
-    assert resolved == (runtime_dir / "logs" / "app").resolve()
+    assert resolved == (runtime_dir / "logs" / "app.log").resolve()

@@ -29,7 +29,7 @@ class GlobalConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     log_level: str = Field(default="DEBUG", description="日志级别")
-    log_dir: str = Field(default="./logs/app", description="宿主程序日志目录")
+    log_dir: str = Field(default="./logs/app.log", description="宿主程序日志文件路径")
     stop_key: str = Field(default="F9", description="停止所有任务快捷键")
     start_key: str = Field(default="F10", description="启动上一个任务快捷键")
     scripts_path: list[str] = Field(default_factory=list, description="脚本路径列表")
@@ -38,6 +38,6 @@ class GlobalConfig(BaseModel):
     maa_resource_dir: str = Field(default="", description="MAA 资源目录路径")
     maa_model_dir: str = Field(default="./model", description="MAA 模型目录路径")
     maa_adb_dir: str = Field(default="", description="MAA ADB 目录路径")
-    maa_log_dir: str = Field(default="./logs/maa", description="MAA 底层日志目录")
+    maa_log_dir: str = Field(default="./logs/maa.log", description="MAA 底层日志文件路径")
     maa_stdout_level: MaaStdoutLogLevel = Field(default="off", description="MAA 底层 stdout 日志级别")
     extra: dict[str, Any] = Field(default_factory=dict, description="其他扩展配置")
