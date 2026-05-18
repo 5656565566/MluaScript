@@ -148,6 +148,42 @@ def test_load_config_generates_default_web_login_secret():
 
 
 
+def test_load_config_preserves_web_settings_while_forcing_missing_passwords():
+    with temp_runtime_dir() as runtime_dir:
+        temp_path = runtime_dir / "config.yaml"
+        with open(temp_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(
+                {
+                    "WebServerConfig": {
+                        "host": "0.0.0.0",
+                        "port": 19090,
+                        "username": "admin",
+                        "password": "",
+                        "session_secret": "",
+                    }
+                },
+                f,
+                allow_unicode=True,
+            )
+
+        load_config(str(temp_path))
+
+        web_cfg = registry.get(WebServerConfig)
+        assert web_cfg.host == "0.0.0.0"
+        assert web_cfg.port == 19090
+        assert web_cfg.username == "admin"
+        assert len(web_cfg.password) == 16
+        assert len(web_cfg.session_secret) == 16
+
+        with open(temp_path, "r", encoding="utf-8") as f:
+            saved_data = yaml.safe_load(f)
+
+        assert saved_data["WebServerConfig"]["host"] == "0.0.0.0"
+        assert saved_data["WebServerConfig"]["port"] == 19090
+        assert saved_data["WebServerConfig"]["password"] == web_cfg.password
+        assert saved_data["WebServerConfig"]["session_secret"] == web_cfg.session_secret
+
+
 def test_load_config_supports_maa_stdout_level_override():
     with temp_runtime_dir() as runtime_dir:
         temp_path = runtime_dir / "config.yaml"

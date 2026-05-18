@@ -10,7 +10,7 @@ import yaml
 from pydantic import BaseModel, ValidationError
 
 from mluascript.shared.config.bootstrap import ensure_config_models_registered
-from mluascript.shared.config.models import GlobalConfig
+from mluascript.shared.config.models import GlobalConfig, WebServerConfig
 from mluascript.shared.config.registry import config as registry
 from mluascript.shared.logging import configure_file_logging, logger, set_log_level
 
@@ -56,6 +56,19 @@ def resolve_path_from_runtime(raw_path: str, runtime_dir: Path) -> Path:
     return (runtime_dir / candidate).resolve()
 
 
+def _prepare_web_server_config_node(node_data: dict[str, Any]) -> dict[str, Any]:
+    prepared = dict(node_data)
+
+    # 首次初始化或缺失敏感字段时 强制补齐随机凭据 但保留已有的 host/port 等配置
+    if not str(prepared.get("password") or "").strip():
+        prepared["password"] = WebServerConfig.model_fields["password"].get_default(call_default_factory=True)
+
+    if not str(prepared.get("session_secret") or "").strip():
+        prepared["session_secret"] = WebServerConfig.model_fields["session_secret"].get_default(call_default_factory=True)
+
+    return prepared
+
+
 def load_config(path: str = "") -> None:
     """统一配置加载入口"""
     ensure_config_models_registered()
@@ -79,6 +92,9 @@ def load_config(path: str = "") -> None:
         if not isinstance(node_data, dict):
             logger.warning(f"配置节点 '{yaml_key}' 应该是字典，重置为默认。")
             node_data = {}
+
+        if model_cls is WebServerConfig:
+            node_data = _prepare_web_server_config_node(node_data)
 
         try:
             instance = model_cls(**node_data)
