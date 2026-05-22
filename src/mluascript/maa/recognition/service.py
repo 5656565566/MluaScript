@@ -41,16 +41,11 @@ def run_recognition_direct(
         job.wait()
 
         detail = None
-        try:
-            detail = context.tasker.get_recognition_detail(job.job_id)
-        except Exception:
-            detail = None
-        if detail is None:
-            task_detail = context.tasker.get_task_detail(job.job_id)
-            node_ids = getattr(task_detail, "node_id_list", None) if task_detail is not None else None
-            if node_ids:
-                node_detail = context.tasker.get_node_detail(node_ids[-1])
-                detail = getattr(node_detail, "recognition", None) if node_detail is not None else None
+        task_detail = context.tasker.get_task_detail(job.job_id)
+        node_ids = getattr(task_detail, "node_id_list", None) if task_detail is not None else None
+        if node_ids:
+            node_detail = context.tasker.get_node_detail(node_ids[-1])
+            detail = getattr(node_detail, "recognition", None) if node_detail is not None else None
 
         if detail is None:
             return RecognitionResult(hit=False, entry=entry, results=[] if all_results else [])
