@@ -380,6 +380,16 @@ function createPreviewWindow(sessionLabel) {
   }
 }
 
+async function syncSelectedTaskRuntimeData() {
+  const selectedTaskId = state.selectedTaskId.value
+  if (!selectedTaskId) return null
+  return await Promise.all([
+    actions.fetchTaskDetail(selectedTaskId),
+    actions.fetchTaskLogs(selectedTaskId),
+    actions.fetchTaskOutput(selectedTaskId),
+  ])
+}
+
 export const actions = {
   async checkAuth() {
     const data = await authApi.status()
@@ -516,14 +526,20 @@ export const actions = {
   },
 
   async refreshTaskManagerData() {
-    const [tasksPayload, detail, logs, output] = await Promise.all([
-      apiGet('/api/system/tasks'),
-      state.selectedTaskId.value ? actions.fetchTaskDetail(state.selectedTaskId.value) : Promise.resolve(null),
-      state.selectedTaskId.value ? actions.fetchTaskLogs(state.selectedTaskId.value) : Promise.resolve(null),
-      state.selectedTaskId.value ? actions.fetchTaskOutput(state.selectedTaskId.value) : Promise.resolve(null),
-    ])
+    const tasksPayload = await apiGet('/api/system/tasks')
     state.tasks.value = tasksPayload.items || tasksPayload.data?.items || []
-    return { detail, logs, output }
+    if (state.selectedTaskId.value && !state.tasks.value.some(item => item.task_id === state.selectedTaskId.value)) {
+      state.selectedTaskId.value = ''
+    }
+    if (!state.selectedTaskId.value && state.tasks.value.length) {
+      state.selectedTaskId.value = state.tasks.value[state.tasks.value.length - 1].task_id
+    }
+    const synced = await syncSelectedTaskRuntimeData()
+    return {
+      detail: synced?.[0] || null,
+      logs: synced?.[1] || null,
+      output: synced?.[2] || null,
+    }
   },
 
   async openTaskDetailModal(taskId) {
@@ -621,6 +637,7 @@ export const actions = {
     state.luaFiles.value = luaFilesPayload.items || []
     state.tasks.value = tasksPayload.items || []
     state.availableScripts.value = scriptsPayload.items || []
+    await syncSelectedTaskRuntimeData()
   },
 
   async refreshLogs(logOrigin = state.logOrigin.value) {
@@ -633,7 +650,7 @@ export const actions = {
   async pollRuntime() {
     if (!state.autoRefresh.value) return
     try {
-      await Promise.all([actions.loadState(), actions.refreshLogs()])
+      await actions.loadState()
     } catch (error) {
       console.error(error)
     }

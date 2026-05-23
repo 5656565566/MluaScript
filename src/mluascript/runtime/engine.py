@@ -71,6 +71,9 @@ class LuaEngine:
         globals_table["log_message"] = self.lua_log_handler
         globals_table["stop"] = self.stop_handler
         globals_table["check_stop"] = self.host_api.check_stop
+        globals_table["clear_output"] = self.host_api.clear_output
+        globals_table["set_output_limit"] = self.host_api.set_output_limit
+        globals_table["get_output_limit"] = self.host_api.get_output_limit
 
     def _capture_runtime_globals_snapshot(self, lua: LuaRuntime) -> dict[str, Any]:
         """捕获受限 globals 快照 仅保留可安全继承的全局"""

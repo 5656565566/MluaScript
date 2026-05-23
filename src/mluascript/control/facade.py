@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from mluascript.maa.connections import current_desktop_label
+from mluascript.runtime.output_buffer import TaskOutputBuffer
 
 from .devices import ConnectAdbRequest, DeviceActionResult, DeviceOverview, get_device_facade
 from .execution.manager import get_execution_manager
@@ -175,7 +176,16 @@ class ControlFacade:
             return None
         raw_items = task.print_buffer
         items = [str(item) for item in raw_items] if isinstance(raw_items, list) else []
-        return TaskOutputView(task_id=task_id, items=items)
+        max_lines = raw_items.max_lines if isinstance(raw_items, TaskOutputBuffer) else len(items) or 300
+        total_lines = raw_items.total_lines if isinstance(raw_items, TaskOutputBuffer) else len(items)
+        version = raw_items.version if isinstance(raw_items, TaskOutputBuffer) else 0
+        return TaskOutputView(
+            task_id=task_id,
+            items=items,
+            max_lines=max_lines,
+            total_lines=total_lines,
+            version=version,
+        )
 
     def remove_task(self, task_id: str) -> bool:
         """删除任务记录"""

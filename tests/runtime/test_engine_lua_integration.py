@@ -10,6 +10,7 @@ from mluascript.runtime.engine import LuaEngine
 from mluascript.runtime.image_bridge import build_runtime_image_handle
 from mluascript.runtime.llm.decider import AIDecider
 from mluascript.runtime.llm.models import OpenAITool
+from mluascript.runtime.output_buffer import TaskOutputBuffer
 from mluascript.runtime.llm.prompt import build_decision_messages, build_tool_specs
 from mluascript.runtime.threading import RuntimeThreadManager, build_thread_exports
 from mluascript.runtime.utils.table_lua import lua_2_python
@@ -21,18 +22,28 @@ class _HostAPI:
     def __init__(self) -> None:
         self.logs: list[tuple[str, str]] = []
         self.stop_checks = 0
+        self.output = TaskOutputBuffer()
 
     def log(self, level: str, message: str) -> None:
         self.logs.append((level, message))
 
     def print(self, message: str) -> None:
-        _ = message
+        self.output.append(message)
 
     def notify(self, message: str) -> None:
         _ = message
 
     def check_stop(self) -> None:
         self.stop_checks += 1
+
+    def clear_output(self) -> None:
+        self.output.clear()
+
+    def set_output_limit(self, max_lines: int) -> int:
+        return self.output.set_max_lines(max_lines)
+
+    def get_output_limit(self) -> int:
+        return self.output.max_lines
 
 
 class ShipmentCreated(BaseModel):

@@ -5,24 +5,35 @@ from pathlib import Path
 from lupa.lua54 import LuaRuntime
 
 from mluascript.runtime.engine import LuaEngine, python_namespace_to_lua
+from mluascript.runtime.output_buffer import TaskOutputBuffer
 
 
 class _HostAPI:
     def __init__(self) -> None:
         self.logs: list[tuple[str, str]] = []
         self.stop_checks = 0
+        self.output = TaskOutputBuffer()
 
     def log(self, level: str, message: str) -> None:
         self.logs.append((level, message))
 
     def print(self, message: str) -> None:
-        _ = message
+        self.output.append(message)
 
     def notify(self, message: str) -> None:
         _ = message
 
     def check_stop(self) -> None:
         self.stop_checks += 1
+
+    def clear_output(self) -> None:
+        self.output.clear()
+
+    def set_output_limit(self, max_lines: int) -> int:
+        return self.output.set_max_lines(max_lines)
+
+    def get_output_limit(self) -> int:
+        return self.output.max_lines
 
 
 def test_python_namespace_to_lua_builds_table() -> None:
@@ -52,6 +63,9 @@ def test_engine_registers_host_globals() -> None:
     assert callable(globals_table["log_message"])
     assert callable(globals_table["stop"])
     assert callable(globals_table["check_stop"])
+    assert callable(globals_table["clear_output"])
+    assert callable(globals_table["set_output_limit"])
+    assert callable(globals_table["get_output_limit"])
     assert globals_table["path"] == Path(".").as_posix()
 
 
@@ -137,3 +151,37 @@ def test_engine_lua_print_handler_formats_lua_table_readably() -> None:
     assert '"name": "mlua"' in host.printed[0]
     assert '"items": [' in host.printed[0]
     assert '<Lua table at' not in host.printed[0]
+
+
+def test_task_output_buffer_trims_lines_by_limit() -> None:
+    buffer = TaskOutputBuffer(max_lines=3)
+
+    buffer.append("1")
+    buffer.append("2")
+    buffer.append("3")
+    buffer.append("4")
+
+    assert list(buffer) == ["2", "3", "4"]
+    assert buffer.total_lines == 4
+
+
+def test_engine_global_output_helpers_control_output_buffer() -> None:
+    host = _HostAPI()
+    engine = LuaEngine(Path("."), host)
+
+    result = engine.execute(
+        '''
+        print("keep-1")
+        print("keep-2")
+        clear_output()
+        set_output_limit(2)
+        print("after-1")
+        print("after-2")
+        print("after-3")
+        return get_output_limit()
+        '''
+    )
+
+    assert result == 2
+    assert list(host.output) == ["after-2", "after-3"]
+    assert host.output.max_lines == 2

@@ -25,3 +25,15 @@ class HostAPI(Protocol):
     def check_stop(self) -> None:
         """检查停止信号 若需要终止执行 应抛出运行时退出异常"""
         ...
+
+    def clear_output(self) -> None:
+        """清空当前任务输出缓冲"""
+        ...
+
+    def set_output_limit(self, max_lines: int) -> int:
+        """设置当前任务输出缓冲最大保留行数"""
+        ...
+
+    def get_output_limit(self) -> int:
+        """获取当前任务输出缓冲最大保留行数"""
+        ...

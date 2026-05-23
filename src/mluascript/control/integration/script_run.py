@@ -60,3 +60,12 @@ class RuntimeHostPlaceholder:
 
     def check_stop(self) -> None:
         return
+
+    def clear_output(self) -> None:
+        return
+
+    def set_output_limit(self, max_lines: int) -> int:
+        return int(max_lines)
+
+    def get_output_limit(self) -> int:
+        return 300

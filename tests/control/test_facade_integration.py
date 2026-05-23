@@ -13,6 +13,7 @@ from mluascript.control.workspace.models import PipelineRunLocator, ScriptAsset,
 from mluascript.maa.config import MaaDeviceConfig
 from mluascript.maa.lifecycle.runtime import MaaContext
 from mluascript.maa.types import MaaContextState, MaaPaths
+from mluascript.runtime.output_buffer import TaskOutputBuffer
 from mluascript.runtime.exception import LuaExitException
 from mluascript.runtime.stopper import Stopper
 from mluascript.runtime.threading.manager import RuntimeThreadManager
@@ -261,6 +262,29 @@ def test_control_facade_task_view_entrypoints() -> None:
     assert [item.message for item in logs.items] == ["started", "warn line"]
     assert output is not None
     assert output.items == ["hello", "123"]
+
+
+def test_control_facade_task_output_view_exposes_limit_metadata() -> None:
+    facade = build_facade(script_runtime_factory=lambda: FakeRuntime(result={"ok": True}))
+
+    task_id = facade.run_script("scripts/demo.lua", "return 1", "ADB:1")
+    task = facade.get_task_info(task_id)
+
+    assert task is not None
+    buffer = TaskOutputBuffer(max_lines=3)
+    buffer.append("1")
+    buffer.append("2")
+    buffer.append("3")
+    buffer.append("4")
+    task.print_buffer = buffer
+
+    output = facade.get_task_output(task_id)
+
+    assert output is not None
+    assert output.items == ["2", "3", "4"]
+    assert output.max_lines == 3
+    assert output.total_lines == 4
+    assert output.version > 0
 
 
 def test_control_facade_run_pipeline_updates_task_and_result() -> None:

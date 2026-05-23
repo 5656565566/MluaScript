@@ -81,6 +81,9 @@ class TaskOutputView(BaseModel):
 
     task_id: str
     items: list[str] = Field(default_factory=list)
+    max_lines: int = 300
+    total_lines: int = 0
+    version: int = 0
 
 
 class SystemState(BaseModel):
