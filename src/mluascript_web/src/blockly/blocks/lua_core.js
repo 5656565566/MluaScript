@@ -41,6 +41,52 @@ export const luaCoreBlocks = [
     },
   },
   {
+    type: 'lua_clear_output',
+    category: '调试 / 输出',
+    colour: '#4f46e5',
+    definition: {
+      message0: '清除历史输出',
+      previousStatement: null,
+      nextStatement: null,
+      tooltip: '调用 clear_output 清除当前任务的所有历史输出',
+      helpUrl: '',
+    },
+    generator() {
+      return 'clear_output()\n'
+    },
+  },
+  {
+    type: 'lua_set_output_limit',
+    category: '调试 / 输出',
+    colour: '#4f46e5',
+    definition: {
+      message0: '设置历史输出最大长度 %1',
+      args0: [{ type: 'input_value', name: 'LIMIT', check: 'Number' }],
+      previousStatement: null,
+      nextStatement: null,
+      tooltip: '调用 set_output_limit 设置保留的最大输出条数',
+      helpUrl: '',
+    },
+    generator(block, generator) {
+      const limit = generator.valueToCode(block, 'LIMIT', luaOrder) || '300'
+      return `set_output_limit(${limit})\n`
+    },
+  },
+  {
+    type: 'lua_get_output_limit',
+    category: '调试 / 输出',
+    colour: '#4f46e5',
+    definition: {
+      message0: '获取历史输出最大长度',
+      output: 'Number',
+      tooltip: '调用 get_output_limit 获取当前设置的输出长度上限',
+      helpUrl: '',
+    },
+    generator() {
+      return ['get_output_limit()', luaOrder]
+    },
+  },
+  {
     type: 'lua_log',
     category: '调试 / 输出',
     colour: '#4f46e5',
