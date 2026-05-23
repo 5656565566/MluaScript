@@ -351,6 +351,23 @@ def _build_log_items(limit: int, channel: str | None, session_label: str | None)
     return get_logs(limit=limit)
 
 
+def _sse_event(event_name: str, data: Any) -> str:
+    return f"event: {event_name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _task_logs_signature(item: Any) -> tuple[int, str, str]:
+    payload = item.model_dump() if hasattr(item, "model_dump") else {}
+    entries = payload.get("items", []) if isinstance(payload, dict) else []
+    if not entries:
+        return (0, "", "")
+    last = entries[-1] if isinstance(entries[-1], dict) else {}
+    return (
+        len(entries),
+        str(last.get("level") or ""),
+        str(last.get("message") or ""),
+    )
+
+
 
 def _serialize_device_page_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return items
@@ -894,21 +911,69 @@ def stream_logs(
     sessionLabel: str | None = None,
     replay: int = 50,
 ) -> StreamingResponse:
-    def event(event_name: str, data: Any) -> str:
-        return f"event: {event_name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
     def generate():
         snapshot = _build_log_items(limit=max(0, replay), channel=channel, session_label=sessionLabel)
-        yield event("snapshot", {"items": snapshot})
+        yield _sse_event("snapshot", {"items": snapshot})
         sent = {item.get("formatted") for item in snapshot}
         while True:
             items = _build_log_items(limit=max(50, replay), channel=channel, session_label=sessionLabel)
             latest = [item for item in items if item.get("formatted") not in sent]
             for item in latest:
                 sent.add(item.get("formatted"))
-                yield event("log", item)
-            yield event("heartbeat", {"ts": int(time.time())})
+                yield _sse_event("log", item)
+            yield _sse_event("heartbeat", {"ts": int(time.time())})
             time.sleep(1.5)
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@streams_router.get("/tasks/{task_id}/logs")
+def stream_task_logs(task_id: str) -> StreamingResponse:
+    facade = get_control_facade()
+
+    def generate():
+        current = facade.get_task_logs(task_id)
+        if current is None:
+            yield _sse_event("not_found", {"taskId": task_id})
+            return
+        yield _sse_event("snapshot", current.model_dump())
+        signature = _task_logs_signature(current)
+        while True:
+            latest = facade.get_task_logs(task_id)
+            if latest is None:
+                yield _sse_event("not_found", {"taskId": task_id})
+                return
+            next_signature = _task_logs_signature(latest)
+            if next_signature != signature:
+                signature = next_signature
+                yield _sse_event("update", latest.model_dump())
+            yield _sse_event("heartbeat", {"ts": int(time.time())})
+            time.sleep(1.0)
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@streams_router.get("/tasks/{task_id}/output")
+def stream_task_output(task_id: str) -> StreamingResponse:
+    facade = get_control_facade()
+
+    def generate():
+        current = facade.get_task_output(task_id)
+        if current is None:
+            yield _sse_event("not_found", {"taskId": task_id})
+            return
+        yield _sse_event("snapshot", current.model_dump())
+        version = current.version
+        while True:
+            latest = facade.get_task_output(task_id)
+            if latest is None:
+                yield _sse_event("not_found", {"taskId": task_id})
+                return
+            if latest.version != version:
+                version = latest.version
+                yield _sse_event("update", latest.model_dump())
+            yield _sse_event("heartbeat", {"ts": int(time.time())})
+            time.sleep(0.75)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 

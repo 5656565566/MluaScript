@@ -245,4 +245,12 @@ export const streamApi = {
     const url = buildUrl('/api/streams/logs', params)
     return new EventSource(url)
   },
+  createTaskLogsStream(taskId) {
+    const url = buildUrl(`/api/streams/tasks/${encodeURIComponent(taskId)}/logs`)
+    return new EventSource(url)
+  },
+  createTaskOutputStream(taskId) {
+    const url = buildUrl(`/api/streams/tasks/${encodeURIComponent(taskId)}/output`)
+    return new EventSource(url)
+  },
 }

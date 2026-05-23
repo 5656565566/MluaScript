@@ -1,5 +1,5 @@
 import { computed } from 'vue'
-import { apiGet, apiPost, authApi, editorApi, logApi, systemApi, templateApi } from './api'
+import { apiGet, apiPost, authApi, editorApi, logApi, streamApi, systemApi, templateApi } from './api'
 import { workspaceToLua, workspaceToXml, updateBlocklyTheme } from './blockly'
 import { openModal, closeModal } from './modalStore'
 import { pickerActions } from './store/pickerState'
@@ -23,6 +23,42 @@ export const state = {
 }
 
 const devicePreviewTimers = new Map()
+let runtimeLogsStream = null
+let runtimeLogsReconnectTimer = null
+let selectedTaskLogsStream = null
+let selectedTaskOutputStream = null
+let selectedTaskStreamsTaskId = ''
+let selectedTaskReconnectTimer = null
+
+function closeEventSource(source) {
+  if (source) source.close()
+}
+
+function scheduleReconnect(kind, factory) {
+  const timerRef = kind === 'runtime' ? runtimeLogsReconnectTimer : selectedTaskReconnectTimer
+  if (timerRef) return
+  const timer = window.setTimeout(() => {
+    if (kind === 'runtime') runtimeLogsReconnectTimer = null
+    else selectedTaskReconnectTimer = null
+    factory()
+  }, 2000)
+  if (kind === 'runtime') runtimeLogsReconnectTimer = timer
+  else selectedTaskReconnectTimer = timer
+}
+
+function applyTaskLogsSnapshot(taskId, payload) {
+  state.taskLogsById.value = {
+    ...state.taskLogsById.value,
+    [taskId]: payload,
+  }
+}
+
+function applyTaskOutputSnapshot(taskId, payload) {
+  state.taskOutputById.value = {
+    ...state.taskOutputById.value,
+    [taskId]: payload,
+  }
+}
 
 export const getters = {
   imageUrl: computed(() => state.screenshotBase64.value ? `data:image/png;base64,${state.screenshotBase64.value}` : ''),
@@ -383,11 +419,24 @@ function createPreviewWindow(sessionLabel) {
 async function syncSelectedTaskRuntimeData() {
   const selectedTaskId = state.selectedTaskId.value
   if (!selectedTaskId) return null
-  return await Promise.all([
-    actions.fetchTaskDetail(selectedTaskId),
-    actions.fetchTaskLogs(selectedTaskId),
-    actions.fetchTaskOutput(selectedTaskId),
+  return await actions.fetchTaskDetail(selectedTaskId)
+}
+
+async function refreshRuntimeSummary() {
+  const [tasksPayload, scriptsPayload] = await Promise.all([
+    apiGet('/api/system/tasks'),
+    systemApi.listScripts(),
   ])
+  state.tasks.value = tasksPayload.items || tasksPayload.data?.items || []
+  state.availableScripts.value = scriptsPayload.items || []
+  if (state.selectedTaskId.value && !state.tasks.value.some(item => item.task_id === state.selectedTaskId.value)) {
+    actions.stopSelectedTaskStreams()
+    state.selectedTaskId.value = ''
+  }
+  if (!state.selectedTaskId.value && state.tasks.value.length) {
+    state.selectedTaskId.value = state.tasks.value[state.tasks.value.length - 1].task_id
+  }
+  return await syncSelectedTaskRuntimeData()
 }
 
 export const actions = {
@@ -411,6 +460,8 @@ export const actions = {
     await authApi.logout()
     state.authenticated.value = false
     state.currentUser.value = ''
+    actions.stopRuntimeStreams()
+    actions.stopSelectedTaskStreams()
     actions.stopAllDevicePreviewLoops()
     state.tasks.value = []
     state.logs.value = []
@@ -493,21 +544,119 @@ export const actions = {
   async fetchTaskLogs(taskId) {
     if (!taskId) return null
     const data = await apiGet(`/api/system/tasks/${encodeURIComponent(taskId)}/logs`)
-    state.taskLogsById.value = {
-      ...state.taskLogsById.value,
-      [taskId]: data.data || data,
-    }
+    applyTaskLogsSnapshot(taskId, data.data || data)
     return state.taskLogsById.value[taskId]
   },
 
   async fetchTaskOutput(taskId) {
     if (!taskId) return null
     const data = await apiGet(`/api/system/tasks/${encodeURIComponent(taskId)}/output`)
-    state.taskOutputById.value = {
-      ...state.taskOutputById.value,
-      [taskId]: data.data || data,
-    }
+    applyTaskOutputSnapshot(taskId, data.data || data)
     return state.taskOutputById.value[taskId]
+  },
+
+  stopRuntimeStreams() {
+    closeEventSource(runtimeLogsStream)
+    runtimeLogsStream = null
+    if (runtimeLogsReconnectTimer) {
+      window.clearTimeout(runtimeLogsReconnectTimer)
+      runtimeLogsReconnectTimer = null
+    }
+  },
+
+  startRuntimeStreams() {
+    actions.stopRuntimeStreams()
+    if (!state.authenticated.value) return
+    const source = streamApi.createLogsStream(state.logOrigin.value ? { channel: state.logOrigin.value } : {})
+    runtimeLogsStream = source
+    source.addEventListener('snapshot', (event) => {
+      const payload = JSON.parse(event.data || '{}')
+      state.logs.value = Array.isArray(payload.items) ? payload.items : []
+    })
+    source.addEventListener('log', (event) => {
+      const payload = JSON.parse(event.data || '{}')
+      state.logs.value = [...state.logs.value, payload]
+    })
+    source.addEventListener('heartbeat', () => {})
+    source.onerror = () => {
+      if (runtimeLogsStream !== source) return
+      closeEventSource(source)
+      runtimeLogsStream = null
+      scheduleReconnect('runtime', () => actions.startRuntimeStreams())
+    }
+  },
+
+  stopSelectedTaskStreams() {
+    closeEventSource(selectedTaskLogsStream)
+    closeEventSource(selectedTaskOutputStream)
+    selectedTaskLogsStream = null
+    selectedTaskOutputStream = null
+    selectedTaskStreamsTaskId = ''
+    if (selectedTaskReconnectTimer) {
+      window.clearTimeout(selectedTaskReconnectTimer)
+      selectedTaskReconnectTimer = null
+    }
+  },
+
+  startSelectedTaskStreams(taskId = state.selectedTaskId.value) {
+    if (!taskId) {
+      actions.stopSelectedTaskStreams()
+      return
+    }
+    if (selectedTaskStreamsTaskId === taskId && selectedTaskLogsStream && selectedTaskOutputStream) return
+
+    actions.stopSelectedTaskStreams()
+    selectedTaskStreamsTaskId = taskId
+
+    const ensureCurrentTask = () => state.selectedTaskId.value === taskId && selectedTaskStreamsTaskId === taskId
+    const reconnect = () => {
+      if (!ensureCurrentTask()) return
+      scheduleReconnect('task', () => actions.startSelectedTaskStreams(taskId))
+    }
+
+    const logsSource = streamApi.createTaskLogsStream(taskId)
+    selectedTaskLogsStream = logsSource
+    logsSource.addEventListener('snapshot', (event) => {
+      if (!ensureCurrentTask()) return
+      applyTaskLogsSnapshot(taskId, JSON.parse(event.data || '{}'))
+    })
+    logsSource.addEventListener('update', (event) => {
+      if (!ensureCurrentTask()) return
+      applyTaskLogsSnapshot(taskId, JSON.parse(event.data || '{}'))
+    })
+    logsSource.addEventListener('not_found', () => {
+      if (!ensureCurrentTask()) return
+      actions.stopSelectedTaskStreams()
+    })
+    logsSource.addEventListener('heartbeat', () => {})
+    logsSource.onerror = () => {
+      if (selectedTaskLogsStream !== logsSource) return
+      closeEventSource(logsSource)
+      selectedTaskLogsStream = null
+      reconnect()
+    }
+
+    const outputSource = streamApi.createTaskOutputStream(taskId)
+    selectedTaskOutputStream = outputSource
+    outputSource.addEventListener('snapshot', (event) => {
+      if (!ensureCurrentTask()) return
+      applyTaskOutputSnapshot(taskId, JSON.parse(event.data || '{}'))
+    })
+    outputSource.addEventListener('update', (event) => {
+      if (!ensureCurrentTask()) return
+      applyTaskOutputSnapshot(taskId, JSON.parse(event.data || '{}'))
+    })
+    outputSource.addEventListener('not_found', () => {
+      if (!ensureCurrentTask()) return
+      actions.stopSelectedTaskStreams()
+    })
+    outputSource.addEventListener('heartbeat', () => {})
+    outputSource.onerror = () => {
+      if (selectedTaskOutputStream !== outputSource) return
+      closeEventSource(outputSource)
+      selectedTaskOutputStream = null
+      reconnect()
+    }
   },
 
   async removeTask(taskId) {
@@ -526,26 +675,15 @@ export const actions = {
   },
 
   async refreshTaskManagerData() {
-    const tasksPayload = await apiGet('/api/system/tasks')
-    state.tasks.value = tasksPayload.items || tasksPayload.data?.items || []
-    if (state.selectedTaskId.value && !state.tasks.value.some(item => item.task_id === state.selectedTaskId.value)) {
-      state.selectedTaskId.value = ''
-    }
-    if (!state.selectedTaskId.value && state.tasks.value.length) {
-      state.selectedTaskId.value = state.tasks.value[state.tasks.value.length - 1].task_id
-    }
-    const synced = await syncSelectedTaskRuntimeData()
-    return {
-      detail: synced?.[0] || null,
-      logs: synced?.[1] || null,
-      output: synced?.[2] || null,
-    }
+    const detail = await refreshRuntimeSummary()
+    return { detail: detail || null }
   },
 
   async openTaskDetailModal(taskId) {
     if (!taskId) return null
     state.selectedTaskId.value = taskId
     await actions.fetchTaskDetail(taskId)
+    actions.startSelectedTaskStreams(taskId)
     return openModal({
       type: 'task-detail',
       component: TaskDetailModal,
@@ -562,7 +700,11 @@ export const actions = {
   async openTaskLogsModal(taskId) {
     if (!taskId) return null
     state.selectedTaskId.value = taskId
-    await actions.fetchTaskLogs(taskId)
+    await Promise.all([
+      actions.fetchTaskDetail(taskId),
+      actions.fetchTaskLogs(taskId),
+    ])
+    actions.startSelectedTaskStreams(taskId)
     return openModal({
       type: 'task-logs',
       component: TaskTraceModal,
@@ -579,7 +721,11 @@ export const actions = {
   async openTaskOutputModal(taskId) {
     if (!taskId) return null
     state.selectedTaskId.value = taskId
-    await actions.fetchTaskOutput(taskId)
+    await Promise.all([
+      actions.fetchTaskDetail(taskId),
+      actions.fetchTaskOutput(taskId),
+    ])
+    actions.startSelectedTaskStreams(taskId)
     return openModal({
       type: 'task-output',
       component: TaskTraceModal,
@@ -638,19 +784,19 @@ export const actions = {
     state.tasks.value = tasksPayload.items || []
     state.availableScripts.value = scriptsPayload.items || []
     await syncSelectedTaskRuntimeData()
+    actions.startRuntimeStreams()
+    actions.startSelectedTaskStreams()
   },
 
   async refreshLogs(logOrigin = state.logOrigin.value) {
     state.logOrigin.value = logOrigin
-    const params = logOrigin ? { channel: logOrigin } : {}
-    const data = await logApi.list(params)
-    state.logs.value = data.items || []
+    actions.startRuntimeStreams()
   },
 
   async pollRuntime() {
     if (!state.autoRefresh.value) return
     try {
-      await actions.loadState()
+      await refreshRuntimeSummary()
     } catch (error) {
       console.error(error)
     }

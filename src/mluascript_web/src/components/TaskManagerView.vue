@@ -133,9 +133,10 @@ function getLevelType(level) {
 watch(() => state.selectedTaskId.value, (newId) => {
   if (newId) {
     actions.fetchTaskDetail(newId)
-    actions.fetchTaskLogs(newId)
-    actions.fetchTaskOutput(newId)
+    actions.startSelectedTaskStreams(newId)
+    return
   }
+  actions.stopSelectedTaskStreams()
 }, { immediate: true })
 
 watch(orderedTasks, (tasks) => {

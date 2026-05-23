@@ -22,12 +22,11 @@ function startPolling() {
   if (pollTimer) window.clearInterval(pollTimer)
   pollTimer = window.setInterval(() => {
     actions.pollRuntime()
-  }, 2000)
+  }, 5000)
 }
 
 async function initializeAuthenticatedApp() {
   await actions.loadState()
-  await actions.refreshLogs()
   startPolling()
   actions.placeScreenshotDock()
 }
@@ -55,6 +54,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (pollTimer) window.clearInterval(pollTimer)
+  actions.stopRuntimeStreams()
+  actions.stopSelectedTaskStreams()
   actions.stopAllDevicePreviewLoops()
 })
 
@@ -64,6 +65,8 @@ watch(() => state.authenticated.value, (authenticated) => {
       window.clearInterval(pollTimer)
       pollTimer = null
     }
+    actions.stopRuntimeStreams()
+    actions.stopSelectedTaskStreams()
     return
   }
   initializeAuthenticatedApp().catch((error) => {
