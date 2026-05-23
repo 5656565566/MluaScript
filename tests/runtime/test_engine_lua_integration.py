@@ -134,6 +134,46 @@ def test_engine_executes_real_lua_with_dynamic_namespace_in_main_and_subruntime(
     }
 
 
+def test_engine_subthread_maa_namespace_failure_does_not_break_main_runtime() -> None:
+    host = _HostAPI()
+    engine = LuaEngine(Path("."), host)
+
+    def _explode() -> str:
+        raise RuntimeError("maa namespace exploded")
+
+    engine.register_namespace(
+        "maa",
+        lambda _: {
+            "explode": _explode,
+            "device_name": lambda: "demo-device",
+        },
+    )
+
+    result = engine.execute(
+        '''
+        function worker_task()
+            return maa.explode()
+        end
+
+        local task = thread.spawn("worker_task")
+        task:join(1.0)
+        return {
+            child_error = task:error(),
+            child_result = task:result(),
+            main = maa.device_name(),
+            status = task:status(),
+        }
+        '''
+    )
+
+    normalized = lua_2_python(result)
+    assert "child_result" not in normalized, normalized
+    assert "maa namespace exploded" in str(normalized["child_error"]), normalized
+    assert normalized["status"]["done"] is True, normalized
+    assert normalized["status"]["alive"] is False, normalized
+    assert normalized["main"] == "demo-device", normalized
+
+
 
 def test_build_thread_exports_with_engine_subruntime_builder() -> None:
     host = _HostAPI()
@@ -164,6 +204,47 @@ def test_thread_exports_missing_named_function_reports_error() -> None:
 
     with pytest.raises(ValueError):
         exports.spawn("missing_function")
+
+
+def test_engine_main_runtime_busy_loop_stops_after_host_request() -> None:
+    import threading
+    import time
+
+    class _StopHostAPI(_HostAPI):
+        def __init__(self) -> None:
+            super().__init__()
+            self.stop_requested = False
+
+        def check_stop(self) -> None:
+            self.stop_checks += 1
+            if self.stop_requested:
+                raise RuntimeError("stop requested")
+
+    host = _StopHostAPI()
+    engine = LuaEngine(Path("."), host)
+    outcome: dict[str, object] = {}
+
+    def worker() -> None:
+        try:
+            engine.execute(
+                '''
+                local n = 0
+                while true do
+                    n = n + 1
+                end
+                '''
+            )
+        except Exception as exc:
+            outcome["error"] = str(exc)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    time.sleep(0.1)
+    host.stop_requested = True
+    thread.join(0.3)
+
+    assert thread.is_alive() is False
+    assert "stop requested" in str(outcome.get("error", ""))
 
 
 

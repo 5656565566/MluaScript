@@ -288,3 +288,29 @@ def test_thread_spawn_captures_error() -> None:
     assert isinstance(normalized, dict)
     assert "boom" in str(normalized.get("debug_error", "")), normalized
     assert normalized.get("debug_result") is None, normalized
+
+
+def test_thread_spawn_reports_subthread_chunk_failure() -> None:
+    engine = _make_engine()
+
+    result = engine.execute(
+        '''
+        function thread_test_bad_chunk()
+            local broken = load("local x =")
+            return broken()
+        end
+
+        local task = thread.spawn("thread_test_bad_chunk")
+        task:join(1.0)
+        return {
+            debug_error = task:error(),
+            debug_result = task:result(),
+            debug_status = task:status(),
+        }
+        '''
+    )
+
+    normalized = lua_2_python(result)
+    assert isinstance(normalized, dict)
+    assert normalized.get("debug_result") is None, normalized
+    assert "attempt to call a nil value" in str(normalized.get("debug_error", "")), normalized

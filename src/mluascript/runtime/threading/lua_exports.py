@@ -72,6 +72,8 @@ class LuaThreadExports:
 
     manager: RuntimeThreadManager
     build_subruntime: Callable[[], LuaRuntime]
+    capture_subruntime_snapshot: Callable[[], Any] | None
+    build_subruntime_from_snapshot: Callable[[Any], LuaRuntime] | None
     lupa: LuaRuntime
 
     def spawn(self, function_name: str, name: str | None = None, *args) -> LuaTaskHandle:
@@ -87,22 +89,16 @@ class LuaThreadExports:
         
         string_dump = globals_table["safe_dump"]
         bytecode = string_dump(function_ref) # type: ignore
-        subruntime = self.build_subruntime()
-
         safe_args = [lua_2_python(arg) for arg in args]
+        snapshot = self.capture_subruntime_snapshot() if self.capture_subruntime_snapshot is not None else None
 
         def target(cancel_event: Event) -> Any:
+            if self.build_subruntime_from_snapshot is not None:
+                subruntime = self.build_subruntime_from_snapshot(snapshot)
+            else:
+                subruntime = self.build_subruntime()
             globals_table = subruntime.globals()
             globals_table["is_cancelled"] = cancel_event.is_set
-            subruntime.execute(
-                """
-                debug.sethook(function()
-                    if type(is_cancelled) == 'function' and is_cancelled() then
-                        error('THREAD_FORCE_KILLED', 0)
-                    end
-                end, '', 5000)
-                """
-            )
             load_func = subruntime.eval("safe_load")
             sub_function_ref = load_func(bytecode) # type: ignore
             if sub_function_ref is None:
@@ -142,6 +138,8 @@ def build_thread_exports(
     manager: RuntimeThreadManager,
     *,
     build_subruntime: Callable[[], LuaRuntime] | None = None,
+    capture_subruntime_snapshot: Callable[[], Any] | None = None,
+    build_subruntime_from_snapshot: Callable[[Any], LuaRuntime] | None = None,
 ) -> LuaThreadExports:
     """构建 thread 命名空间导出"""
     if build_subruntime is None:
@@ -149,5 +147,7 @@ def build_thread_exports(
     return LuaThreadExports(
         manager=manager,
         build_subruntime=build_subruntime,
+        capture_subruntime_snapshot=capture_subruntime_snapshot,
+        build_subruntime_from_snapshot=build_subruntime_from_snapshot,
         lupa=lupa
     )

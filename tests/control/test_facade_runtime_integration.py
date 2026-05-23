@@ -78,6 +78,27 @@ def test_control_facade_stop_script_stops_real_lua_runtime(tmp_path: Path) -> No
     assert task.status == "stopped"
 
 
+def test_control_facade_stop_script_stops_real_lua_busy_loop(tmp_path: Path) -> None:
+    project_dir = tmp_path / "demo"
+    project_dir.mkdir()
+    script_path = project_dir / "busy.lua"
+    code = "local n = 0; while true do n = n + 1 end"
+    script_path.write_text(code, encoding="utf-8")
+
+    facade = _build_real_facade(tmp_path)
+
+    task_id = facade.run_script("demo/busy.lua", code, "ADB:busy-stop")
+    time.sleep(0.15)
+    facade.stop_script(task_id)
+
+    status = _wait_for_terminal_status(facade, task_id)
+    task = facade.get_task_info(task_id)
+
+    assert status == "stopped"
+    assert task is not None
+    assert task.status == "stopped"
+
+
 def test_control_facade_run_script_uses_real_workspace_locator_for_relative_resource(tmp_path: Path) -> None:
     project_dir = tmp_path / "demo"
     project_dir.mkdir()

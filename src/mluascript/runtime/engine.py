@@ -114,6 +114,8 @@ class LuaEngine:
                 lua,
                 self.thread_manager,
                 build_subruntime=self._build_subruntime,
+                capture_subruntime_snapshot=lambda: self._capture_runtime_globals_snapshot(lua),
+                build_subruntime_from_snapshot=self._build_subruntime_from_snapshot,
             ),
         )
         globals_table["llm"] = python_namespace_to_lua(
@@ -152,12 +154,23 @@ class LuaEngine:
             '''
         )
 
+    def _install_stop_hook(self, lua: LuaRuntime, *, instruction_interval: int = 5000) -> None:
+        """安装统一 stop hook，保证纯 Lua 计算也能响应宿主停止请求"""
+        lua.execute(
+            f"""
+            debug.sethook(function()
+                check_stop()
+            end, '', {instruction_interval})
+            """
+        )
+
     def inject(self) -> LuaRuntime:
         """构建并注入运行时环境"""
         lua = self._create_runtime()
         self._register_host_globals(lua)
         self._configure_lua_package_path(lua)
         build_lua_runtime_inject(lua)
+        self._install_stop_hook(lua)
         self.lupa = lua
         self._register_all_namespaces(lua)
         return self.lupa
@@ -166,11 +179,16 @@ class LuaEngine:
         """构建线程子运行时 并应用主运行时环境快照"""
         if self.lupa is None:
             raise RuntimeError("Main LuaRuntime not initialized")
+        snapshot = self._capture_runtime_globals_snapshot(self.lupa)
+        return self._build_subruntime_from_snapshot(snapshot)
+
+    def _build_subruntime_from_snapshot(self, snapshot: dict[str, Any]) -> LuaRuntime:
+        """根据预先捕获的主运行时快照构建线程子运行时"""
         subruntime = self._create_runtime()
         self._register_host_globals(subruntime)
         self._configure_lua_package_path(subruntime)
         build_lua_runtime_inject(subruntime)
-        snapshot = self._capture_runtime_globals_snapshot(self.lupa)
+        self._install_stop_hook(subruntime)
         self._apply_runtime_globals_snapshot(subruntime, snapshot)
         self._register_all_namespaces(subruntime)
         return subruntime
