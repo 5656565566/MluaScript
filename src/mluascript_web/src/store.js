@@ -60,6 +60,34 @@ function applyTaskOutputSnapshot(taskId, payload) {
   }
 }
 
+function rememberEditorSessionSnapshot(editorSession = {}) {
+  const blocklyDocument = editorSession.blocklyDocument || {}
+  const luaDocument = editorSession.luaDocument || {}
+  state.lastSessionBlocklyXml.value = String(blocklyDocument.xml || '')
+  state.lastSessionBlocklyFilename.value = String(blocklyDocument.filename || '')
+  state.lastSessionBlocklyPath.value = String(blocklyDocument.path || '')
+  state.lastSessionLuaCode.value = String(luaDocument.content || '')
+  state.lastSessionLuaFilename.value = String(luaDocument.filename || '')
+  state.lastSessionLuaPath.value = String(luaDocument.path || '')
+  state.editorSessionHydrated.value = true
+}
+
+function hasUnsyncedBlocklyDraft() {
+  return (
+    state.blocklyXml.value !== state.lastSessionBlocklyXml.value
+    || state.blocklyFilename.value !== state.lastSessionBlocklyFilename.value
+    || state.blocklySavePath.value !== state.lastSessionBlocklyPath.value
+  )
+}
+
+function hasUnsyncedLuaDraft() {
+  return (
+    state.luaCode.value !== state.lastSessionLuaCode.value
+    || state.filename.value !== state.lastSessionLuaFilename.value
+    || state.savePath.value !== state.lastSessionLuaPath.value
+  )
+}
+
 export const getters = {
   imageUrl: computed(() => state.screenshotBase64.value ? `data:image/png;base64,${state.screenshotBase64.value}` : ''),
   pipelineTasks: computed(() => state.tasks.value.filter((item) => item.type === 'maa')),
@@ -275,19 +303,27 @@ function buildWorkflowDefaults(meta, savedConfig) {
 function applyEditorSession(editorSession = {}) {
   const blocklyDocument = editorSession.blocklyDocument || {}
   const luaDocument = editorSession.luaDocument || {}
+  const shouldApplyBlockly = !state.editorSessionHydrated.value || !hasUnsyncedBlocklyDraft()
+  const shouldApplyLua = !state.editorSessionHydrated.value || !hasUnsyncedLuaDraft()
 
-  state.blocklyXml.value = String(blocklyDocument.xml || '')
-  state.luaCode.value = String(luaDocument.content || '')
-  state.lastSavedBlocklyXml.value = String(blocklyDocument.xml || '')
+  if (shouldApplyBlockly) {
+    state.blocklyXml.value = String(blocklyDocument.xml || '')
+    state.lastSavedBlocklyXml.value = String(blocklyDocument.xml || '')
+    state.blocklyFilename.value = String(blocklyDocument.filename || state.blocklyFilename.value || 'blockly.xml')
+    state.blocklySavePath.value = String(blocklyDocument.path || state.blocklySavePath.value || '')
+    state.blocklyDocumentMtime.value = blocklyDocument.mtime ?? null
+    state.blocklySaveMode.value = String(blocklyDocument.saveMode || state.blocklySaveMode.value || 'create')
+  }
 
-  state.blocklyFilename.value = String(blocklyDocument.filename || state.blocklyFilename.value || 'blockly.xml')
-  state.filename.value = String(luaDocument.filename || state.filename.value || 'script.lua')
-  state.savePath.value = String(luaDocument.path || state.savePath.value || '')
-  state.blocklySavePath.value = String(blocklyDocument.path || state.blocklySavePath.value || '')
-  state.blocklyDocumentMtime.value = blocklyDocument.mtime ?? null
-  state.luaDocumentMtime.value = luaDocument.mtime ?? null
-  state.blocklySaveMode.value = String(blocklyDocument.saveMode || state.blocklySaveMode.value || 'create')
-  state.luaSaveMode.value = String(luaDocument.saveMode || state.luaSaveMode.value || 'create')
+  if (shouldApplyLua) {
+    state.luaCode.value = String(luaDocument.content || '')
+    state.filename.value = String(luaDocument.filename || state.filename.value || 'script.lua')
+    state.savePath.value = String(luaDocument.path || state.savePath.value || '')
+    state.luaDocumentMtime.value = luaDocument.mtime ?? null
+    state.luaSaveMode.value = String(luaDocument.saveMode || state.luaSaveMode.value || 'create')
+  }
+
+  rememberEditorSessionSnapshot(editorSession)
 }
 
 function applyBootstrapState(bootstrap = {}) {
@@ -416,6 +452,15 @@ function createPreviewWindow(sessionLabel) {
   }
 }
 
+function replaceFilenameInPath(path, filename) {
+  const normalizedPath = String(path || '').replace(/\\/g, '/')
+  const normalizedFilename = String(filename || '')
+  if (!normalizedPath) return normalizedFilename
+  const parts = normalizedPath.split('/')
+  parts[parts.length - 1] = normalizedFilename
+  return parts.filter((part, index) => part || index === 0).join('/')
+}
+
 async function syncSelectedTaskRuntimeData() {
   const selectedTaskId = state.selectedTaskId.value
   if (!selectedTaskId) return null
@@ -460,6 +505,13 @@ export const actions = {
     await authApi.logout()
     state.authenticated.value = false
     state.currentUser.value = ''
+    state.editorSessionHydrated.value = false
+    state.lastSessionBlocklyXml.value = ''
+    state.lastSessionBlocklyFilename.value = ''
+    state.lastSessionBlocklyPath.value = ''
+    state.lastSessionLuaCode.value = ''
+    state.lastSessionLuaFilename.value = ''
+    state.lastSessionLuaPath.value = ''
     actions.stopRuntimeStreams()
     actions.stopSelectedTaskStreams()
     actions.stopAllDevicePreviewLoops()
@@ -755,7 +807,7 @@ export const actions = {
   async syncWorkspace() {
     if (!state.blocklyEditor.value) return
     actions.rebuildLuaCode()
-    await editorApi.syncSession({
+    const payload = {
       blocklyDocument: {
         xml: state.blocklyXml.value,
         filename: state.blocklyFilename.value,
@@ -766,7 +818,9 @@ export const actions = {
         filename: state.filename.value,
         path: state.savePath.value,
       },
-    })
+    }
+    await editorApi.syncSession(payload)
+    rememberEditorSessionSnapshot(payload)
   },
 
   async loadState() {
@@ -1024,25 +1078,22 @@ export const actions = {
   async saveLuaScript() {
     actions.rebuildLuaCode()
     const currentFilename = state.filename.value || 'script.lua'
-    const savedPathFilename = state.savePath.value ? state.savePath.value.split('/').pop() : ''
-    const filenameChanged = state.luaSaveMode.value === 'update' && savedPathFilename && savedPathFilename !== currentFilename
+    const previousPath = state.savePath.value || ''
+    const savedPathFilename = previousPath ? previousPath.split('/').pop() : ''
+    const hasPersistedFile = state.luaSaveMode.value === 'update' && Boolean(previousPath)
+    const filenameChanged = hasPersistedFile && savedPathFilename && savedPathFilename !== currentFilename
 
-    let effectiveSaveMode = state.luaSaveMode.value
-    let effectivePath = state.savePath.value || currentFilename
-    let effectiveMtime = state.luaDocumentMtime.value
-
-    if (filenameChanged) {
-      effectiveSaveMode = 'create'
-      effectivePath = currentFilename
-      effectiveMtime = null
-    }
+    const effectivePath = filenameChanged
+      ? replaceFilenameInPath(previousPath, currentFilename)
+      : (previousPath || currentFilename)
 
     const payload = {
       path: effectivePath,
       content: state.luaCode.value,
-      expectedMtime: effectiveMtime,
+      expectedMtime: state.luaDocumentMtime.value,
+      previousPath: filenameChanged ? previousPath : null,
     }
-    const data = effectiveSaveMode === 'update'
+    const data = hasPersistedFile
       ? await editorApi.updateLuaFile(payload)
       : await editorApi.createLuaFile({ path: payload.path, content: payload.content })
 
@@ -1051,31 +1102,29 @@ export const actions = {
     state.luaDocumentMtime.value = data.mtime ?? null
     state.luaSaveMode.value = 'update'
     await actions.syncWorkspace()
+    await actions.loadLuaFiles()
     actions.setStatus(`Lua 文件已保存到 ${state.savePath.value}`, 'success')
   },
 
   async saveBlocklyWorkspace(showStatus = true) {
     actions.rebuildLuaCode()
     const currentFilename = state.blocklyFilename.value || 'blockly.xml'
-    const savedPathFilename = state.blocklySavePath.value ? state.blocklySavePath.value.split('/').pop() : ''
-    const filenameChanged = state.blocklySaveMode.value === 'update' && savedPathFilename && savedPathFilename !== currentFilename
+    const previousPath = state.blocklySavePath.value || ''
+    const savedPathFilename = previousPath ? previousPath.split('/').pop() : ''
+    const hasPersistedFile = state.blocklySaveMode.value === 'update' && Boolean(previousPath)
+    const filenameChanged = hasPersistedFile && savedPathFilename && savedPathFilename !== currentFilename
 
-    let effectiveSaveMode = state.blocklySaveMode.value
-    let effectivePath = state.blocklySavePath.value || currentFilename
-    let effectiveMtime = state.blocklyDocumentMtime.value
-
-    if (filenameChanged) {
-      effectiveSaveMode = 'create'
-      effectivePath = currentFilename
-      effectiveMtime = null
-    }
+    const effectivePath = filenameChanged
+      ? replaceFilenameInPath(previousPath, currentFilename)
+      : (previousPath || currentFilename)
 
     const payload = {
       path: effectivePath,
       xml: state.blocklyXml.value,
-      expectedMtime: effectiveMtime,
+      expectedMtime: state.blocklyDocumentMtime.value,
+      previousPath: filenameChanged ? previousPath : null,
     }
-    const data = effectiveSaveMode === 'update'
+    const data = hasPersistedFile
       ? await editorApi.updateBlocklyFile(payload)
       : await editorApi.createBlocklyFile({ path: payload.path, xml: payload.xml })
 
@@ -1086,6 +1135,7 @@ export const actions = {
     state.blocklySaveMode.value = 'update'
     state.lastSavedBlocklyXml.value = state.blocklyXml.value
     await actions.syncWorkspace()
+    await actions.reloadBlocklyFiles()
     if (showStatus) actions.setStatus(`Blockly 已保存到 ${state.blocklySavePath.value}`, 'success')
   },
 
@@ -1133,6 +1183,7 @@ export const actions = {
     state.blocklyDocumentMtime.value = data.mtime ?? null
     state.blocklySaveMode.value = 'update'
     state.lastSavedBlocklyXml.value = state.blocklyXml.value
+    await actions.syncWorkspace()
     await actions.reloadBlocklyFiles()
     actions.setStatus(`已创建 Blockly 文件: ${state.blocklyFilename.value}`, 'success')
     return data

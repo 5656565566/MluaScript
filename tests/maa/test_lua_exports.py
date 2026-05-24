@@ -294,6 +294,16 @@ def test_build_maa_exports_returns_result_table_for_find_all_ocr(mocker) -> None
 
 
 
+def test_build_maa_exports_accepts_legacy_string_roi_for_find_all_ocr(mocker) -> None:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    exports = build_maa_exports(lua, build_context(FakeController()))
+    mock_find_ocr_all = mocker.patch("mluascript.maa.lua_exports.find_ocr_all", return_value={"hit": False, "entry": "ocr_all_node"})
+
+    lua_2_python(exports.find_all_ocr("ocr_all_node", "确认", "[680,440,230,80]"))
+
+    assert mock_find_ocr_all.call_args.kwargs["roi"] == [680, 440, 230, 80]
+
+
 def test_build_maa_exports_returns_empty_result_table_for_unhit_recognition(mocker) -> None:
     lua = LuaRuntime(unpack_returned_tuples=True)
     exports = build_maa_exports(lua, build_context(FakeController()))

@@ -27,6 +27,19 @@ from ..runtime.utils.table_lua import python_2_lua
 def _normalize_roi(roi: Any) -> list[int] | None:
     if roi is None:
         return None
+    if isinstance(roi, str):
+        text = roi.strip()
+        if not text:
+            return None
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+        parts = [part.strip() for part in text.split(",")]
+        if len(parts) != 4:
+            return None
+        try:
+            return [int(part) for part in parts]
+        except Exception:
+            return None
     if isinstance(roi, (list, tuple)):
         return [int(item) for item in roi]
     if hasattr(roi, "keys") and hasattr(roi, "__getitem__"):

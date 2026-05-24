@@ -5,6 +5,7 @@ export const MAA_RESULT_TYPE = 'Result'
 export const MAA_ITEMS_TYPE = 'Items'
 export const MAA_ITEM_TYPE = 'Item'
 export const MAA_BOX_TYPE = 'Box'
+export const MAA_ROI_TYPE = 'Roi'
 
 export const luaOrder = luaGenerator.ORDER_ATOMIC || 0
 

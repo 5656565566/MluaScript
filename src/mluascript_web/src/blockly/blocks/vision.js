@@ -1,4 +1,4 @@
-import { luaOrder, MAA_RESULT_TYPE, MAA_ITEMS_TYPE, MAA_ITEM_TYPE, MAA_BOX_TYPE } from '../constants'
+import { luaOrder, MAA_RESULT_TYPE, MAA_ITEMS_TYPE, MAA_ITEM_TYPE, MAA_BOX_TYPE, MAA_ROI_TYPE } from '../constants'
 
 export const visionBlocks = [
   {
@@ -13,7 +13,7 @@ export const visionBlocks = [
         { type: 'input_value', name: 'W', check: 'Number' },
         { type: 'input_value', name: 'H', check: 'Number' },
       ],
-      output: 'String',
+      output: MAA_ROI_TYPE,
       tooltip: '从屏幕左上角开始，指定一块查找范围。',
       helpUrl: '',
     },
@@ -22,7 +22,7 @@ export const visionBlocks = [
       const y = generator.valueToCode(block, 'Y', luaOrder) || '0'
       const w = generator.valueToCode(block, 'W', luaOrder) || '0'
       const h = generator.valueToCode(block, 'H', luaOrder) || '0'
-      return [`("[" .. ${x} .. "," .. ${y} .. "," .. ${w} .. "," .. ${h} .. "]")`, luaOrder]
+      return [`{${x}, ${y}, ${w}, ${h}}`, luaOrder]
     },
   },
   {
@@ -31,12 +31,12 @@ export const visionBlocks = [
     colour: '#ef4444',
     definition: {
       message0: '全屏范围',
-      output: 'String',
+      output: MAA_ROI_TYPE,
       tooltip: '不限制区域，直接全屏识别。',
       helpUrl: '',
     },
     generator() {
-      return ["''", luaOrder]
+      return ['nil', luaOrder]
     },
   },
   {
@@ -71,7 +71,7 @@ export const visionBlocks = [
       message0: '文字识别(首个) 包含文本 %1 区域 %2 图片(可选) %3',
       args0: [
         { type: 'input_value', name: 'EXPECTED', check: 'String' },
-        { type: 'input_value', name: 'ROI', check: 'String' },
+        { type: 'input_value', name: 'ROI', check: MAA_ROI_TYPE },
         { type: 'input_value', name: 'IMAGE' },
       ],
       output: MAA_RESULT_TYPE,
@@ -93,7 +93,7 @@ export const visionBlocks = [
       message0: '文字识别(全量) 包含文本 %1 区域 %2 图片(可选) %3',
       args0: [
         { type: 'input_value', name: 'EXPECTED', check: 'String' },
-        { type: 'input_value', name: 'ROI', check: 'String' },
+        { type: 'input_value', name: 'ROI', check: MAA_ROI_TYPE },
         { type: 'input_value', name: 'IMAGE' },
       ],
       output: MAA_RESULT_TYPE,
@@ -195,7 +195,7 @@ export const visionBlocks = [
       message0: '模板匹配 模板 %1 区域 %2 阈值 %3 图片(可选) %4',
       args0: [
         { type: 'input_value', name: 'TEMPLATE', check: 'String' },
-        { type: 'input_value', name: 'ROI', check: 'String' },
+        { type: 'input_value', name: 'ROI', check: MAA_ROI_TYPE },
         { type: 'input_value', name: 'THRESHOLD', check: 'Number' },
         { type: 'input_value', name: 'IMAGE' },
       ],
@@ -220,7 +220,7 @@ export const visionBlocks = [
       args0: [
         { type: 'input_value', name: 'MODEL', check: 'String' },
         { type: 'input_value', name: 'TARGETS', check: 'String' },
-        { type: 'input_value', name: 'ROI', check: 'String' },
+        { type: 'input_value', name: 'ROI', check: MAA_ROI_TYPE },
         { type: 'input_value', name: 'IMAGE' },
       ],
       output: MAA_RESULT_TYPE,
@@ -243,7 +243,7 @@ export const visionBlocks = [
       message0: '特征匹配 模板 %1 区域 %2 图片(可选) %3',
       args0: [
         { type: 'input_value', name: 'TEMPLATE', check: 'String' },
-        { type: 'input_value', name: 'ROI', check: 'String' },
+        { type: 'input_value', name: 'ROI', check: MAA_ROI_TYPE },
         { type: 'input_value', name: 'IMAGE' },
       ],
       output: MAA_RESULT_TYPE,
@@ -266,7 +266,7 @@ export const visionBlocks = [
       args0: [
         { type: 'input_value', name: 'LOWER', check: 'String' },
         { type: 'input_value', name: 'UPPER', check: 'String' },
-        { type: 'input_value', name: 'ROI', check: 'String' },
+        { type: 'input_value', name: 'ROI', check: MAA_ROI_TYPE },
         { type: 'input_value', name: 'IMAGE' },
       ],
       output: MAA_RESULT_TYPE,

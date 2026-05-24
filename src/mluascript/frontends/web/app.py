@@ -48,6 +48,7 @@ class BlocklyFileUpdatePayload(BaseModel):
     path: str
     xml: str = ""
     expectedMtime: float | None = None
+    previousPath: str | None = None
 
 
 class LuaFileCreatePayload(BaseModel):
@@ -59,6 +60,7 @@ class LuaFileUpdatePayload(BaseModel):
     path: str
     content: str = ""
     expectedMtime: float | None = None
+    previousPath: str | None = None
 
 
 class ValidateNamePayload(BaseModel):
@@ -107,24 +109,28 @@ class LoginPayload(BaseModel):
     password: str = ""
 
 
-_EDITOR_SESSION: dict[str, Any] = {
-    "blocklyDocument": {
-        "xml": "",
-        "filename": "",
-        "path": "",
-        "mtime": None,
-        "dirty": False,
-        "saveMode": "create",
-    },
-    "luaDocument": {
-        "content": "",
-        "filename": "",
-        "path": "",
-        "mtime": None,
-        "dirty": False,
-        "saveMode": "create",
-    },
-}
+def _create_empty_editor_session() -> dict[str, Any]:
+    return {
+        "blocklyDocument": {
+            "xml": "",
+            "filename": "",
+            "path": "",
+            "mtime": None,
+            "dirty": False,
+            "saveMode": "create",
+        },
+        "luaDocument": {
+            "content": "",
+            "filename": "",
+            "path": "",
+            "mtime": None,
+            "dirty": False,
+            "saveMode": "create",
+        },
+    }
+
+
+_EDITOR_SESSIONS: dict[str, dict[str, Any]] = {}
 
 
 def _ok(data: Any, message: str = "", meta: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -143,21 +149,22 @@ def _get_web_config() -> WebServerConfig:
     return config.get(WebServerConfig)
 
 
-def _sign_session(username: str, issued_at: int, secret: str) -> str:
-    payload = f"{username}:{issued_at}"
+def _sign_session(username: str, issued_at: int, nonce: str, secret: str) -> str:
+    payload = f"{username}:{issued_at}:{nonce}"
     return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def _encode_session_token(username: str, issued_at: int, secret: str) -> str:
-    signature = _sign_session(username, issued_at, secret)
-    raw = f"{username}:{issued_at}:{signature}".encode("utf-8")
+    nonce = secrets.token_hex(8)
+    signature = _sign_session(username, issued_at, nonce, secret)
+    raw = f"{username}:{issued_at}:{nonce}:{signature}".encode("utf-8")
     return base64.urlsafe_b64encode(raw).decode("ascii")
 
 
 def _decode_session_token(token: str, cfg: WebServerConfig) -> str | None:
     try:
         raw = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
-        username, issued_at_text, signature = raw.rsplit(":", 2)
+        username, issued_at_text, nonce, signature = raw.rsplit(":", 3)
         issued_at = int(issued_at_text)
     except Exception:
         return None
@@ -167,7 +174,7 @@ def _decode_session_token(token: str, cfg: WebServerConfig) -> str | None:
     if time.time() - issued_at > cfg.session_max_age_seconds:
         return None
 
-    expected = _sign_session(username, issued_at, cfg.session_secret)
+    expected = _sign_session(username, issued_at, nonce, cfg.session_secret)
     if not hmac.compare_digest(signature, expected):
         return None
     return username
@@ -178,6 +185,22 @@ def _get_authenticated_user(request: Request) -> str | None:
     if not token:
         return None
     return _decode_session_token(token, _get_web_config())
+
+
+def _get_editor_session_key(request: Request) -> str:
+    token = request.cookies.get(_AUTH_COOKIE_NAME, "")
+    if token:
+        return token
+    return f"anonymous:{request.client.host if request.client else 'unknown'}"
+
+
+def _get_editor_session(request: Request) -> dict[str, Any]:
+    key = _get_editor_session_key(request)
+    session = _EDITOR_SESSIONS.get(key)
+    if session is None:
+        session = _create_empty_editor_session()
+        _EDITOR_SESSIONS[key] = session
+    return session
 
 
 def require_authenticated_user(request: Request) -> str:
@@ -224,7 +247,8 @@ def auth_login(payload: LoginPayload) -> JSONResponse:
 
 
 @auth_router.post("/logout")
-def auth_logout() -> JSONResponse:
+def auth_logout(request: Request) -> JSONResponse:
+    _EDITOR_SESSIONS.pop(_get_editor_session_key(request), None)
     response = JSONResponse(_ok({"authenticated": False}, message="已退出登录"))
     _clear_auth_cookie(response)
     return response
@@ -317,14 +341,29 @@ def _create_editor_file(path_text: str, content: str, *, kind: str) -> dict[str,
     }
 
 
-def _update_editor_file(path_text: str, content: str, expected_mtime: float | None, *, kind: str) -> dict[str, Any]:
+def _save_editor_file(
+    path_text: str,
+    content: str,
+    expected_mtime: float | None,
+    *,
+    kind: str,
+    previous_path: str | None = None,
+) -> dict[str, Any]:
     target, relative = _normalize_editor_file_path(path_text, kind=kind)
-    if not target.exists() or not target.is_file():
+    source = target
+    if previous_path:
+        source, _ = _normalize_editor_file_path(previous_path, kind=kind)
+    if not source.exists() or not source.is_file():
         raise HTTPException(status_code=404, detail="目标文件不存在")
     if expected_mtime is not None:
-        current_mtime = target.stat().st_mtime
+        current_mtime = source.stat().st_mtime
         if abs(current_mtime - expected_mtime) > 1e-6:
             raise HTTPException(status_code=409, detail="文件已发生变化，请刷新后重试")
+    if source != target:
+        if target.exists():
+            raise HTTPException(status_code=409, detail="目标文件已存在")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source.replace(target)
     target.write_text(content, encoding="utf-8")
     return {
         "path": relative,
@@ -500,10 +539,11 @@ def system_health() -> dict[str, Any]:
 
 
 @system_router.get("/bootstrap")
-def system_bootstrap() -> dict[str, Any]:
+def system_bootstrap(request: Request) -> dict[str, Any]:
     facade = get_control_facade()
     system_state = facade.get_system_state().model_dump()
     overview = facade.get_device_overview().model_dump()
+    editor_session = _get_editor_session(request)
 
     adb_items = []
     for idx, item in enumerate(facade.device_facade._adb_raw):
@@ -535,7 +575,7 @@ def system_bootstrap() -> dict[str, Any]:
     return _ok(
         {
             "systemState": system_state,
-            "editorSession": _EDITOR_SESSION,
+            "editorSession": editor_session,
             "deviceOverview": overview,
             "taskSummary": {
                 "count": len(task_views),
@@ -631,31 +671,32 @@ def system_task_output(task_id: str) -> dict[str, Any]:
 
 
 @editor_router.get("/session")
-def get_editor_session() -> dict[str, Any]:
-    return _ok(_EDITOR_SESSION)
+def get_editor_session(request: Request) -> dict[str, Any]:
+    return _ok(_get_editor_session(request))
 
 
 @editor_router.put("/session")
-def put_editor_session(payload: EditorSessionPayload) -> dict[str, Any]:
+def put_editor_session(payload: EditorSessionPayload, request: Request) -> dict[str, Any]:
+    editor_session = _get_editor_session(request)
     blockly_document = payload.blocklyDocument or {}
     lua_document = payload.luaDocument or {}
-    _EDITOR_SESSION["blocklyDocument"].update(
+    editor_session["blocklyDocument"].update(
         {
             "xml": str(blockly_document.get("xml") or ""),
-            "filename": str(blockly_document.get("filename") or _EDITOR_SESSION["blocklyDocument"].get("filename") or ""),
-            "path": str(blockly_document.get("path") or _EDITOR_SESSION["blocklyDocument"].get("path") or ""),
+            "filename": str(blockly_document.get("filename") or editor_session["blocklyDocument"].get("filename") or ""),
+            "path": str(blockly_document.get("path") or editor_session["blocklyDocument"].get("path") or ""),
             "dirty": True,
         }
     )
-    _EDITOR_SESSION["luaDocument"].update(
+    editor_session["luaDocument"].update(
         {
             "content": str(lua_document.get("content") or ""),
-            "filename": str(lua_document.get("filename") or _EDITOR_SESSION["luaDocument"].get("filename") or ""),
-            "path": str(lua_document.get("path") or _EDITOR_SESSION["luaDocument"].get("path") or ""),
+            "filename": str(lua_document.get("filename") or editor_session["luaDocument"].get("filename") or ""),
+            "path": str(lua_document.get("path") or editor_session["luaDocument"].get("path") or ""),
             "dirty": True,
         }
     )
-    return _ok(_EDITOR_SESSION, message="编辑器会话已同步")
+    return _ok(editor_session, message="编辑器会话已同步")
 
 
 @editor_router.get("/blockly/files")
@@ -664,9 +705,10 @@ def list_blockly_editor_files() -> dict[str, Any]:
 
 
 @editor_router.get("/blockly/files/content")
-def get_blockly_editor_file(path: str = Query(...)) -> dict[str, Any]:
+def get_blockly_editor_file(request: Request, path: str = Query(...)) -> dict[str, Any]:
     data = _read_editor_file(path, kind="blockly")
-    _EDITOR_SESSION["blocklyDocument"].update(
+    editor_session = _get_editor_session(request)
+    editor_session["blocklyDocument"].update(
         {
             "xml": data["xml"],
             "filename": data["filename"],
@@ -680,9 +722,10 @@ def get_blockly_editor_file(path: str = Query(...)) -> dict[str, Any]:
 
 
 @editor_router.post("/blockly/files")
-def create_blockly_editor_file(payload: BlocklyFileCreatePayload) -> dict[str, Any]:
+def create_blockly_editor_file(payload: BlocklyFileCreatePayload, request: Request) -> dict[str, Any]:
     data = _create_editor_file(payload.path, payload.xml, kind="blockly")
-    _EDITOR_SESSION["blocklyDocument"].update(
+    editor_session = _get_editor_session(request)
+    editor_session["blocklyDocument"].update(
         {
             "xml": payload.xml,
             "filename": data["filename"],
@@ -696,9 +739,16 @@ def create_blockly_editor_file(payload: BlocklyFileCreatePayload) -> dict[str, A
 
 
 @editor_router.put("/blockly/files/content")
-def update_blockly_editor_file(payload: BlocklyFileUpdatePayload) -> dict[str, Any]:
-    data = _update_editor_file(payload.path, payload.xml, payload.expectedMtime, kind="blockly")
-    _EDITOR_SESSION["blocklyDocument"].update(
+def update_blockly_editor_file(payload: BlocklyFileUpdatePayload, request: Request) -> dict[str, Any]:
+    data = _save_editor_file(
+        payload.path,
+        payload.xml,
+        payload.expectedMtime,
+        kind="blockly",
+        previous_path=payload.previousPath,
+    )
+    editor_session = _get_editor_session(request)
+    editor_session["blocklyDocument"].update(
         {
             "xml": payload.xml,
             "filename": data["filename"],
@@ -722,9 +772,10 @@ def list_lua_editor_files() -> dict[str, Any]:
 
 
 @editor_router.get("/lua/files/content")
-def get_lua_editor_file(path: str = Query(...)) -> dict[str, Any]:
+def get_lua_editor_file(request: Request, path: str = Query(...)) -> dict[str, Any]:
     data = _read_editor_file(path, kind="lua")
-    _EDITOR_SESSION["luaDocument"].update(
+    editor_session = _get_editor_session(request)
+    editor_session["luaDocument"].update(
         {
             "content": data["content"],
             "filename": data["filename"],
@@ -738,9 +789,10 @@ def get_lua_editor_file(path: str = Query(...)) -> dict[str, Any]:
 
 
 @editor_router.post("/lua/files")
-def create_lua_editor_file(payload: LuaFileCreatePayload) -> dict[str, Any]:
+def create_lua_editor_file(payload: LuaFileCreatePayload, request: Request) -> dict[str, Any]:
     data = _create_editor_file(payload.path, payload.content, kind="lua")
-    _EDITOR_SESSION["luaDocument"].update(
+    editor_session = _get_editor_session(request)
+    editor_session["luaDocument"].update(
         {
             "content": payload.content,
             "filename": data["filename"],
@@ -754,9 +806,16 @@ def create_lua_editor_file(payload: LuaFileCreatePayload) -> dict[str, Any]:
 
 
 @editor_router.put("/lua/files/content")
-def update_lua_editor_file(payload: LuaFileUpdatePayload) -> dict[str, Any]:
-    data = _update_editor_file(payload.path, payload.content, payload.expectedMtime, kind="lua")
-    _EDITOR_SESSION["luaDocument"].update(
+def update_lua_editor_file(payload: LuaFileUpdatePayload, request: Request) -> dict[str, Any]:
+    data = _save_editor_file(
+        payload.path,
+        payload.content,
+        payload.expectedMtime,
+        kind="lua",
+        previous_path=payload.previousPath,
+    )
+    editor_session = _get_editor_session(request)
+    editor_session["luaDocument"].update(
         {
             "content": payload.content,
             "filename": data["filename"],
