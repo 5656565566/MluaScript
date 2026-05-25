@@ -96,6 +96,9 @@ class MaaController(Protocol):
     def post_shell(self, command: str) -> ResultJob[str | bytes]:
         ...
 
+    def post_inactive(self) -> Waitable:
+        ...
+
 
 def wait_for(job: Waitable) -> None:
     job.wait()

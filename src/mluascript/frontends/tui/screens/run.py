@@ -118,6 +118,7 @@ class RunScreen(ScrollableContainer):
         self._last_rendered_task_id: str | None = None
         self._output_line_count: int = 0
         self._log_line_count: int = 0
+        self._output_version: int = -1
 
     @property
     def _control(self):
@@ -347,6 +348,7 @@ class RunScreen(ScrollableContainer):
                 self._last_rendered_task_id = None
                 self._output_line_count = 0
                 self._log_line_count = 0
+                self._output_version = -1
             return
 
         output_summary.update(f"运行输出: {task.title or task.name or task.task_id}")
@@ -358,8 +360,10 @@ class RunScreen(ScrollableContainer):
             self._last_rendered_task_id = task.task_id
             self._output_line_count = 0
             self._log_line_count = 0
+            self._output_version = -1
 
         output_lines = output.items if output is not None else []
+        output_version = output.version if output is not None else -1
 
         log_lines = []
         if logs is not None:
@@ -379,10 +383,17 @@ class RunScreen(ScrollableContainer):
                     color = "cyan"
                 log_lines.append(f"[{color}][{level}][/{color}] {msg}")
 
-        if len(output_lines) > self._output_line_count:
+        if output_version != self._output_version:
+            if len(output_lines) < self._output_line_count:
+                output_log.clear()
+                self._output_line_count = 0
+            if len(output_lines) == self._output_line_count:
+                output_log.clear()
+                self._output_line_count = 0
             for line in output_lines[self._output_line_count:]:
                 output_log.write(Text.from_ansi(line))
             self._output_line_count = len(output_lines)
+            self._output_version = output_version
 
         if len(log_lines) > self._log_line_count:
             for line in log_lines[self._log_line_count:]:

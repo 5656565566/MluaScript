@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Callable, cast
 
 from mluascript.control.execution.pipeline import PipelineExecutionUseCase
-from mluascript.control.execution.script import ScriptExecutionUseCase
+from mluascript.control.execution.script import ScriptExecutionUseCase, reset_script_controller_state
 from mluascript.control.integration.facade import IntegrationFacade
 from mluascript.control.integration.models import MaaPipelineRunContext, RunStatus, ScriptRunContext
 from mluascript.control.state.manager import StateManager
@@ -60,6 +60,34 @@ class FakeTasker:
     def post_task(self, entry: str, override: dict[str, Any]) -> FakeTaskJob:
         self.post_task_calls.append((entry, override))
         return self.task_job
+
+
+class FakeWaitable:
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self.error = error
+        self.wait_called = False
+
+    def wait(self) -> "FakeWaitable":
+        self.wait_called = True
+        if self.error is not None:
+            raise self.error
+        return self
+
+
+class FakeResetController:
+    def __init__(self, *, failing_contacts: set[int] | None = None, inactive_error: Exception | None = None) -> None:
+        self.failing_contacts = failing_contacts or set()
+        self.inactive_error = inactive_error
+        self.touch_up_calls: list[int] = []
+        self.inactive_called = 0
+
+    def post_touch_up(self, contact: int) -> FakeWaitable:
+        self.touch_up_calls.append(contact)
+        return FakeWaitable(error=RuntimeError(f"contact-{contact}")) if contact in self.failing_contacts else FakeWaitable()
+
+    def post_inactive(self) -> FakeWaitable:
+        self.inactive_called += 1
+        return FakeWaitable(error=self.inactive_error)
 
 
 class FakeWorkspaceManager(WorkspaceManager):
@@ -350,3 +378,39 @@ def test_pipeline_stop_fetches_context_calls_facade_and_unbinds() -> None:
     task = state_manager.get_task(task_id)
     assert task is not None
     assert task.status == "stopped"
+
+
+def test_reset_script_controller_state_releases_common_contacts_and_inactivates() -> None:
+    controller = FakeResetController()
+    context = ScriptRunContext(
+        run_id="script-run-1",
+        runtime=cast(Any, FakeRuntime(result="ok")),
+        maa=build_maa_context(),
+        locator=FakeWorkspaceManager().build_script_run_locator("scripts/demo.lua"),
+    )
+    context.maa.controller = controller
+    context.maa.state.extras["active_touch_contacts"] = {1, 3}
+
+    reset_script_controller_state(context)
+
+    assert controller.touch_up_calls == [1, 3]
+    assert controller.inactive_called == 1
+    assert context.maa.state.extras["active_touch_contacts"] == set()
+
+
+def test_reset_script_controller_state_ignores_controller_reset_errors() -> None:
+    controller = FakeResetController(failing_contacts={1, 3}, inactive_error=RuntimeError("inactive"))
+    context = ScriptRunContext(
+        run_id="script-run-2",
+        runtime=cast(Any, FakeRuntime(result="ok")),
+        maa=build_maa_context(),
+        locator=FakeWorkspaceManager().build_script_run_locator("scripts/demo.lua"),
+    )
+    context.maa.controller = controller
+    context.maa.state.extras["active_touch_contacts"] = {1, 3}
+
+    reset_script_controller_state(context)
+
+    assert controller.touch_up_calls == [1, 3]
+    assert controller.inactive_called == 1
+    assert context.maa.state.extras["active_touch_contacts"] == set()

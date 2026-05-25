@@ -8,6 +8,7 @@ import shutil
 from math import ceil
 from pathlib import Path
 from PIL import Image
+from maa.define import MaaAdbInputMethodEnum
 
 from mluascript.maa import MaaFacade
 from mluascript.maa.config import MaaDeviceConfig
@@ -38,6 +39,9 @@ from .models import (
 )
 
 PAGE_SIZE = 8
+MANUAL_ADB_TOUCH_INPUT_METHODS = int(
+    MaaAdbInputMethodEnum.Maatouch | MaaAdbInputMethodEnum.MinitouchAndAdbKey
+)
 
 
 class DeviceFacade:
@@ -105,9 +109,12 @@ class DeviceFacade:
         if not address:
             return DeviceActionResult(ok=False, message="请先输入 ADB 地址", severity="warning", overview=self.get_overview())
 
-        adb_path = self._resolve_default_adb_path()
-        logger.info(f"Manual ADB connect requested: address={address}, adb_path={adb_path}")
-        params = AdbConnectionParams(adb_path=adb_path, address=address)
+        params = self._build_manual_adb_params(address)
+        logger.info(
+            "Manual ADB connect requested: "
+            f"address={address}, adb_path={params.adb_path}, "
+            f"input_methods={params.input_methods}, screencap_methods={params.screencap_methods}"
+        )
         try:
             self._ensure_runtime_ready()
             session = connect_adb(self._maa_facade.context, params)
@@ -238,6 +245,45 @@ class DeviceFacade:
         except Exception as exc:
             logger.error(f"Device operation failed: {exc}", exc_info=True)
             return DeviceActionResult(ok=False, message=f"连接 ADB 设备失败: {exc}", severity="error", overview=self.get_overview())
+
+    def _build_manual_adb_params(self, address: str) -> AdbConnectionParams:
+        discovered = self._find_adb_device_by_address(address)
+        fallback_adb_path = self._resolve_default_adb_path()
+        if discovered is not None:
+            return AdbConnectionParams(
+                adb_path=str(discovered.get("adb_path") or fallback_adb_path),
+                address=address,
+                screencap_methods=discovered.get("screencap_methods"),
+                input_methods=discovered.get("input_methods"),
+                config=discovered.get("config") or {},
+            )
+        # When manual connect has no discovery metadata, prefer touch-capable
+        # backends so touch_down/touch_up can be validated without falling back
+        # to AdbShell.
+        return AdbConnectionParams(
+            adb_path=fallback_adb_path,
+            address=address,
+            input_methods=MANUAL_ADB_TOUCH_INPUT_METHODS,
+        )
+
+    def _find_adb_device_by_address(self, address: str) -> dict | None:
+        normalized = address.strip().lower()
+        for device in self._adb_raw:
+            if str(device.get("address") or "").strip().lower() == normalized:
+                return device
+
+        try:
+            discovered = find_adb_devices()
+        except Exception as exc:
+            logger.warning(f"Manual ADB connect discovery fallback failed: {exc}")
+            return None
+
+        self._adb_raw = discovered
+        self._adb_page = 0
+        for device in discovered:
+            if str(device.get("address") or "").strip().lower() == normalized:
+                return device
+        return None
 
     def _connect_desktop_item(self, action_id: str) -> DeviceActionResult:
         idx = self._parse_index(action_id, len(self._desktop_raw))

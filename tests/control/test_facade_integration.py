@@ -387,11 +387,7 @@ def test_control_facade_connect_emulator_device_uses_mumu_config(mocker) -> None
             ]
         ),
     )
-    mocker.patch.object(
-        facade.device_facade,
-        "_get_global_config",
-        return_value=type("Cfg", (), {"maa_adb_dir": "./adb/adb.exe"})(),
-    )
+    mocker.patch.object(facade.device_facade, "_resolve_default_adb_path", return_value="./adb/adb.exe")
 
     result = facade.connect_device("emulator:0")
 
@@ -399,6 +395,92 @@ def test_control_facade_connect_emulator_device_uses_mumu_config(mocker) -> None
     assert result.message == "已连接模拟器设备: MuMu模拟器"
     params = mock_connect.call_args.args[1]
     assert params.adb_path == "./adb/adb.exe"
+
+
+def test_control_facade_manual_connect_adb_reuses_discovered_input_methods(mocker) -> None:
+    facade = build_facade()
+    mock_session = MagicMock()
+    mock_connect = mocker.patch("mluascript.control.devices.facade.connect_adb", return_value=mock_session)
+    mocker.patch.object(
+        facade.device_facade,
+        "_resolve_default_adb_path",
+        return_value="fallback-adb.exe",
+    )
+    facade.device_facade._adb_raw = [
+        {
+            "name": "Android",
+            "adb_path": "discovered-adb.exe",
+            "address": "192.168.1.245",
+            "screencap_methods": 7,
+            "input_methods": 6,
+            "config": {"agent": "x"},
+        }
+    ]
+
+    result = facade.connect_adb("192.168.1.245")
+
+    assert result.ok is True
+    params = mock_connect.call_args.args[1]
+    assert params.adb_path == "discovered-adb.exe"
+    assert params.address == "192.168.1.245"
+    assert params.screencap_methods == 7
+    assert params.input_methods == 6
+    assert params.config == {"agent": "x"}
+
+
+def test_control_facade_manual_connect_adb_discovers_device_when_cache_empty(mocker) -> None:
+    facade = build_facade()
+    facade.device_facade._adb_raw = []
+    mock_session = MagicMock()
+    mock_connect = mocker.patch("mluascript.control.devices.facade.connect_adb", return_value=mock_session)
+    mocker.patch.object(
+        facade.device_facade,
+        "_resolve_default_adb_path",
+        return_value="fallback-adb.exe",
+    )
+    mocker.patch(
+        "mluascript.control.devices.facade.find_adb_devices",
+        return_value=[
+            {
+                "name": "Android",
+                "adb_path": "found-adb.exe",
+                "address": "192.168.1.245",
+                "screencap_methods": 5,
+                "input_methods": 4,
+                "config": {"extras": {"demo": True}},
+            }
+        ],
+    )
+
+    result = facade.connect_adb("192.168.1.245")
+
+    assert result.ok is True
+    params = mock_connect.call_args.args[1]
+    assert params.adb_path == "found-adb.exe"
+    assert params.screencap_methods == 5
+    assert params.input_methods == 4
+    assert params.config == {"extras": {"demo": True}}
+
+
+def test_control_facade_manual_connect_adb_forces_touch_backends_without_discovery(mocker) -> None:
+    facade = build_facade()
+    facade.device_facade._adb_raw = []
+    mock_session = MagicMock()
+    mock_connect = mocker.patch("mluascript.control.devices.facade.connect_adb", return_value=mock_session)
+    mocker.patch.object(
+        facade.device_facade,
+        "_resolve_default_adb_path",
+        return_value="fallback-adb.exe",
+    )
+    mocker.patch("mluascript.control.devices.facade.find_adb_devices", return_value=[])
+
+    result = facade.connect_adb("192.168.1.245:5555")
+
+    assert result.ok is True
+    params = mock_connect.call_args.args[1]
+    assert params.adb_path == "fallback-adb.exe"
+    assert params.address == "192.168.1.245:5555"
+    assert params.input_methods == 6
 
 
 

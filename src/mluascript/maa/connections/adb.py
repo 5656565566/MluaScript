@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from mluascript.shared.logging import logger
 
 from maa.controller import AdbController
@@ -9,6 +11,43 @@ from ..lifecycle.binding import bind_controller
 from ..lifecycle.runtime import MaaContext
 from .models import AdbConnectionParams, ConnectionInfo
 from .session import ConnectionSession
+
+
+def _describe_adb_input_methods(value: int | None) -> list[str]:
+    if value is None:
+        return ["SDK default"]
+    if value == int(MaaAdbInputMethodEnum.Default):
+        return ["Default", "Maatouch", "MinitouchAndAdbKey", "AdbShell"]
+    names: list[str] = []
+    for enum_value in (
+        MaaAdbInputMethodEnum.EmulatorExtras,
+        MaaAdbInputMethodEnum.Maatouch,
+        MaaAdbInputMethodEnum.MinitouchAndAdbKey,
+        MaaAdbInputMethodEnum.AdbShell,
+    ):
+        if value & int(enum_value):
+            names.append(enum_value.name)
+    return names or [f"Unknown({value})"]
+
+
+def _describe_adb_screencap_methods(value: int | None) -> list[str]:
+    if value is None:
+        return ["SDK default"]
+    if value == int(MaaAdbScreencapMethodEnum.Default):
+        return ["Default"]
+    names: list[str] = []
+    for enum_value in (
+        MaaAdbScreencapMethodEnum.EmulatorExtras,
+        MaaAdbScreencapMethodEnum.RawWithGzip,
+        MaaAdbScreencapMethodEnum.Encode,
+        MaaAdbScreencapMethodEnum.EncodeToFileAndPull,
+        MaaAdbScreencapMethodEnum.RawByNetcat,
+        MaaAdbScreencapMethodEnum.MinicapDirect,
+        MaaAdbScreencapMethodEnum.MinicapStream,
+    ):
+        if value & int(enum_value):
+            names.append(enum_value.name)
+    return names or [f"Unknown({value})"]
 
 
 def connect_adb(context: MaaContext, params: AdbConnectionParams) -> ConnectionSession:
@@ -37,6 +76,14 @@ def connect_adb(context: MaaContext, params: AdbConnectionParams) -> ConnectionS
             merged_config["extras"]["mumu"]["app_package"] = params.mumu.app_package
         merged_config["extras"]["mumu"]["app_cloned_index"] = params.mumu.app_cloned_index
 
+    requested_input_methods = kwargs.get("input_methods")
+    requested_screencap_methods = kwargs.get("screencap_methods")
+    logger.info(
+        "ADB controller options: "
+        f"input_methods={requested_input_methods} {_describe_adb_input_methods(requested_input_methods)}, "
+        f"screencap_methods={requested_screencap_methods} {_describe_adb_screencap_methods(requested_screencap_methods)}"
+    )
+
     controller = AdbController(
         adb_path=params.adb_path,
         address=params.address,
@@ -56,6 +103,11 @@ def connect_adb(context: MaaContext, params: AdbConnectionParams) -> ConnectionS
     if not getattr(screencap_job, "succeeded", False):
         logger.error(f"Adb controller screen capture failed for {params.address}")
         raise RuntimeError(f"Adb controller connect successful but screencap failed: {params.address}")
+
+    try:
+        logger.info(f"ADB controller info: {json.dumps(controller.info, ensure_ascii=False)}")
+    except Exception as exc:
+        logger.warning(f"Failed to read ADB controller info for {params.address}: {exc}")
 
     bind_controller(context, controller)
     info = ConnectionInfo(kind="adb", label=f"ADB:{params.address}", meta={"address": params.address, "adb_path": params.adb_path})

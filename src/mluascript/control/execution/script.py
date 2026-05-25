@@ -7,10 +7,12 @@ from typing import Any, Protocol
 from mluascript.control.devices import get_device_facade
 from mluascript.control.integration.facade import IntegrationFacade
 from mluascript.control.integration.models import RunStatus, ScriptRunContext
+from mluascript.maa.controllers.base import wait_for
 from mluascript.control.state.models import TaskInfo
 from mluascript.control.workspace.manager import WorkspaceManager, get_workspace_manager
 from mluascript.runtime.exception import LuaExitException
 from mluascript.runtime.threading.manager import RuntimeThreadManager
+from mluascript.shared.logging import logger
 
 from .base import BaseExecutionUseCase
 
@@ -18,6 +20,31 @@ from .base import BaseExecutionUseCase
 class ScriptRuntime(Protocol):
     def execute(self, file_content: str) -> Any:
         ...
+
+
+def reset_script_controller_state(context: ScriptRunContext) -> None:
+    controller = context.maa.controller
+    if controller is None:
+        return
+
+    contacts = context.maa.state.extras.get("active_touch_contacts")
+    if isinstance(contacts, set):
+        contacts_to_release = sorted(int(contact) for contact in contacts)
+    else:
+        contacts_to_release = []
+
+    for contact in contacts_to_release:
+        try:
+            wait_for(controller.post_touch_up(contact))
+        except Exception as exc:
+            logger.debug(f"Skip touch contact reset: contact={contact}, reason={exc}")
+    if isinstance(contacts, set):
+        contacts.clear()
+
+    try:
+        wait_for(controller.post_inactive())
+    except Exception as exc:
+        logger.debug(f"Skip controller inactive reset: reason={exc}")
 
 
 @dataclass(slots=True)
@@ -140,6 +167,8 @@ class ScriptExecutionUseCase(BaseExecutionUseCase[ScriptRunContext]):
                 context.status = RunStatus.FAILED
                 self.state_manager.finish_task(task.task_id, "failed", error=str(exc))
                 raise
+            finally:
+                reset_script_controller_state(context)
 
         host_task = self.thread_manager.spawn(runner, name=f"script-run-{task.task_id[:8]}")
         context.host_task = host_task
@@ -154,6 +183,7 @@ class ScriptExecutionUseCase(BaseExecutionUseCase[ScriptRunContext]):
         if host_task is not None:
             host_task.cancel()
             host_task.join(0.2)
+        reset_script_controller_state(context)
         if context.status is not RunStatus.STOPPED:
             context.status = RunStatus.STOPPED
         self.state_manager.update_task_info(
