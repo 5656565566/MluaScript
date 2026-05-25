@@ -2,6 +2,7 @@
 import os
 import sys
 import subprocess
+import importlib.util
 from pathlib import Path
 
 
@@ -69,21 +70,29 @@ if not build_frontend():
 import maa
 
 maa_bin_path = os.path.join(os.path.dirname(maa.__file__), 'bin')
+maa_agent_spec = importlib.util.find_spec('MaaAgentBinary')
+maa_agent_binary_path = None
+if maa_agent_spec is not None and maa_agent_spec.submodule_search_locations:
+    maa_agent_binary_path = str(Path(next(iter(maa_agent_spec.submodule_search_locations))).resolve())
 webui_dist_path = os.path.abspath('src/mluascript_web/dist')
 upx_dir = os.path.abspath('dev/upx-5.1.1-win64')
 resolved_upx_dir = upx_dir if os.path.isdir(upx_dir) else None
 resolved_icon = 'logo.ico' if sys.platform.startswith('win') and os.path.exists('logo.ico') else None
 
+datas = [
+    (maa_bin_path, '.'),
+    (maa_bin_path, 'maa/bin'),
+    (webui_dist_path, 'mluascript_web/dist'),
+    ('src/mluascript/runtime/inject_lua/*.lua', 'mluascript/runtime/inject_lua'),
+]
+if maa_agent_binary_path and os.path.isdir(maa_agent_binary_path):
+    datas.append((maa_agent_binary_path, 'MaaAgentBinary'))
+
 a = Analysis(
     ['src/build.py'],
     pathex=['src'],
     binaries=[],
-    datas=[
-        (maa_bin_path, '.'),
-        (maa_bin_path, 'maa/bin'),
-        (webui_dist_path, 'mluascript_web/dist'),
-        ('src/mluascript/runtime/inject_lua/*.lua', 'mluascript/runtime/inject_lua'),
-    ],
+    datas=datas,
     hiddenimports=[
         'mluascript.frontends',
         'mluascript.frontends.tui',
