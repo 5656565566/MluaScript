@@ -28,7 +28,7 @@ const pagedWin32Windows = computed(() => paginateDevices(state.win32Windows.valu
 </script>
 
 <template>
-  <n-card class="device-view" v-show="state.activeView.value === 'device'" :bordered="false" size="small" style="height: 100%; display: flex; flex-direction: column;" content-style="display: flex; flex-direction: column; padding: 0 16px 16px; flex: 1; min-height: 0;">
+  <n-card class="device-view" :bordered="false" size="small" style="height: 100%; display: flex; flex-direction: column;" content-style="display: flex; flex-direction: column; padding: 0 16px 16px; flex: 1; min-height: 0;">
     <template #header>设备连接</template>
     
     <n-tabs v-model:value="activeTab" type="line" animated class="device-view-tabs">

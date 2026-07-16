@@ -19,7 +19,7 @@ export function createRuntimeActions({ state, systemApi, runApi, runtimeStreams,
     return await getActions().fetchTaskDetail(taskId)
   }
 
-  async function refreshRuntimeSummary() {
+  async function refreshRuntimeSummary({ includeSelectedTask = false } = {}) {
     const [tasksPayload, scriptsPayload] = await Promise.all([
       systemApi.listTasks(),
       systemApi.listScripts(),
@@ -33,7 +33,7 @@ export function createRuntimeActions({ state, systemApi, runApi, runtimeStreams,
     if (!state.selectedTaskId.value && state.tasks.value.length) {
       state.selectedTaskId.value = state.tasks.value[state.tasks.value.length - 1].task_id
     }
-    return await refreshSelectedTask()
+    return includeSelectedTask ? await refreshSelectedTask() : null
   }
 
   return {
@@ -95,7 +95,7 @@ export function createRuntimeActions({ state, systemApi, runApi, runtimeStreams,
     },
 
     async refreshTaskManagerData() {
-      const detail = await refreshRuntimeSummary()
+      const detail = await refreshRuntimeSummary({ includeSelectedTask: true })
       return { detail: detail || null }
     },
 
@@ -107,7 +107,7 @@ export function createRuntimeActions({ state, systemApi, runApi, runtimeStreams,
     async pollRuntime() {
       if (!state.autoRefresh.value) return
       try {
-        await refreshRuntimeSummary()
+        await refreshRuntimeSummary({ includeSelectedTask: state.activeView.value === 'task-manager' })
       } catch (error) {
         console.error(error)
       }
@@ -160,4 +160,3 @@ export function createRuntimeActions({ state, systemApi, runApi, runtimeStreams,
     },
   }
 }
-

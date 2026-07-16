@@ -1,9 +1,12 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { NCard, NAlert, NButton, NInput, NSpace, NTag, NText, NIcon, NEmpty, NSelect } from 'naive-ui'
 import { state, actions } from '../store'
 
-const searchQuery = ref('')
+const searchQuery = computed({
+  get: () => state.deviceManagerQuery.value,
+  set: value => { state.deviceManagerQuery.value = value },
+})
 
 const previewIntervalOptions = [
   { label: '0.5 秒', value: 500 },
@@ -32,7 +35,7 @@ function selectSession(session) {
 </script>
 
 <template>
-  <n-card class="device-manager-view" v-show="state.activeView.value === 'device-manager'" :bordered="false" size="small" style="height: 100%; display: flex; flex-direction: column;">
+  <n-card class="device-manager-view" :bordered="false" size="small" style="height: 100%; display: flex; flex-direction: column;">
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
         <span>设备管理</span>

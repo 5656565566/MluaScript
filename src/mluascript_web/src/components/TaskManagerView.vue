@@ -1,10 +1,16 @@
 <script setup>
-import { computed, ref, h, watch } from 'vue'
+import { computed, h, watch, onBeforeUnmount } from 'vue'
 import { state, getters, actions } from '../store'
 import { NTabs, NTabPane, NCard, NInput, NButton, NSpace, NTag, NText, NIcon, NDataTable, NLayout, NLayoutSider, NLayoutContent, NEmpty, NDescriptions, NDescriptionsItem, NLog, NScrollbar } from 'naive-ui'
 
-const activeTab = ref('resource-list')
-const resourceQuery = ref('')
+const activeTab = computed({
+  get: () => state.taskManagerActiveTab.value,
+  set: value => { state.taskManagerActiveTab.value = value },
+})
+const resourceQuery = computed({
+  get: () => state.taskManagerResourceQuery.value,
+  set: value => { state.taskManagerResourceQuery.value = value },
+})
 
 const statusTypeMap = {
   running: 'primary',
@@ -145,10 +151,14 @@ watch(orderedTasks, (tasks) => {
   }
 }, { immediate: true })
 
+onBeforeUnmount(() => {
+  actions.stopSelectedTaskStreams()
+})
+
 </script>
 
 <template>
-  <n-card class="task-manager-view" v-show="state.activeView.value === 'task-manager'" :bordered="false" size="small" style="height: 100%; display: flex; flex-direction: column;" content-style="display: flex; flex-direction: column; padding: 0 16px 16px; flex: 1; min-height: 0;">
+  <n-card class="task-manager-view" :bordered="false" size="small" style="height: 100%; display: flex; flex-direction: column;" content-style="display: flex; flex-direction: column; padding: 0 16px 16px; flex: 1; min-height: 0;">
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
         <span>任务管理</span>

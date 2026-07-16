@@ -24,6 +24,7 @@ export function createAppActions({
     actions.stopRuntimeStreams()
     actions.stopSelectedTaskStreams()
     actions.stopAllDevicePreviewLoops()
+    void actions.closeTemplateEditor?.()
     state.editorSessionHydrated.value = false
     state.lastSessionBlocklyXml.value = ''
     state.lastSessionBlocklyFilename.value = ''
@@ -54,10 +55,11 @@ export function createAppActions({
     if (editorHydration.blocklyApplied && state.blocklyEditor.value) {
       await actions.applyHydratedBlocklyWorkspace()
     }
-    await actions.refreshSelectedTask()
+    if (state.activeView.value === 'task-manager') {
+      await actions.refreshSelectedTask()
+    }
     if (startStreams) {
       actions.startRuntimeStreams()
-      actions.startSelectedTaskStreams()
     }
     return true
   }

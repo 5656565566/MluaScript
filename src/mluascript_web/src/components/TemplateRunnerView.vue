@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch, h } from 'vue'
+import { computed, watch, h } from 'vue'
 import { state, actions } from '../store'
 import {
   NCard,
@@ -57,7 +57,10 @@ const orderedWorkflowTasks = computed(() => {
   return result
 })
 
-const selectedStepKey = ref('')
+const selectedStepKey = computed({
+  get: () => state.selectedWorkflowStepKey.value,
+  set: value => { state.selectedWorkflowStepKey.value = value },
+})
 const currentStep = computed(() => selectedStepKey.value ? orderedWorkflowTasks.value.find(item => item.key === selectedStepKey.value) || null : null)
 
 watch(currentWorkflow, () => {
@@ -269,7 +272,7 @@ function renderFieldControl(field, value, onUpdate) {
 </script>
 
 <template>
-  <n-card class="template-runner-view" v-show="state.activeView.value === 'template-runner'" :bordered="false" size="small" style="height: 100%; display: flex; flex-direction: column;" content-style="display: flex; flex-direction: column; padding: 0 16px 16px; flex: 1; min-height: 0;" footer-style="padding: 12px 16px;">
+  <n-card class="template-runner-view" :bordered="false" size="small" style="height: 100%; display: flex; flex-direction: column;" content-style="display: flex; flex-direction: column; padding: 0 16px 16px; flex: 1; min-height: 0;" footer-style="padding: 12px 16px;">
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
         <span>{{ templateTitle }}</span>

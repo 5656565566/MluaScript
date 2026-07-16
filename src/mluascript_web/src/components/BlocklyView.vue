@@ -22,11 +22,6 @@ function setEditorLayout(layout) {
   resizeBlockly()
 }
 
-watch(() => state.activeView.value, async () => {
-  await nextTick()
-  resizeBlockly()
-})
-
 watch(() => state.editorLayout.value, async () => {
   await nextTick()
   resizeBlockly()
@@ -76,14 +71,24 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  if (syncTimer) window.clearTimeout(syncTimer)
+  if (syncTimer) {
+    window.clearTimeout(syncTimer)
+    actions.rebuildLuaCode()
+    const hasRealChange = state.blocklyXml.value !== state.lastSavedBlocklyXml.value
+    actions.syncWorkspace().catch((error) => console.error(error))
+    if (state.autoSaveBlockly.value && hasRealChange) {
+      actions.saveBlocklyWorkspace(false).catch((error) => console.error(error))
+    }
+  }
   window.removeEventListener('resize', resizeBlockly)
   if (state.blocklyEditor.value) state.blocklyEditor.value.dispose()
+  state.blocklyEditor.value = null
+  state.blocklyEditorRef.value = null
 })
 </script>
 
 <template>
-<section class="blockly-editor-view" v-show="state.activeView.value === 'blockly'" style="display: flex; flex-direction: column; gap: 8px; padding: 10px; height: 100%; box-sizing: border-box;">
+<section class="blockly-editor-view" style="display: flex; flex-direction: column; gap: 8px; padding: 10px; height: 100%; box-sizing: border-box;">
   <div style="display: flex; justify-content: space-between; align-items: center; background: var(--n-color); padding: 8px 12px; border-radius: 4px; border: 1px solid var(--n-border-color);">
     <n-space>
       <n-button-group size="small">

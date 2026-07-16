@@ -11,5 +11,6 @@ export function createTemplateState() {
     templateWorkflowFormData: ref({}),
     selectedTaskKey: ref(''),
     selectedWorkflowKey: ref(''),
+    selectedWorkflowStepKey: ref(''),
   }
 }

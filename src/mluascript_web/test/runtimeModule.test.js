@@ -40,3 +40,41 @@ test('stopTasks stops all tasks and refreshes state once', async () => {
   assert.deepEqual(stopped, [['a', 'script'], ['b', 'pipeline']])
   assert.equal(refreshCount, 1)
 })
+
+test('runtime polling refreshes selected task detail only while task manager is active', async () => {
+  let detailCalls = 0
+  const state = {
+    activeView: ref('blockly'),
+    autoRefresh: ref(true),
+    tasks: ref([]),
+    availableScripts: ref([]),
+    selectedTaskId: ref('task-a'),
+    taskDetailById: ref({}),
+  }
+  let actions
+  actions = createRuntimeActions({
+    state,
+    systemApi: {
+      async listTasks() {
+        return { items: [{ task_id: 'task-a' }] }
+      },
+      async listScripts() {
+        return { items: [] }
+      },
+      async getTaskDetail() {
+        detailCalls += 1
+        return { task_id: 'task-a' }
+      },
+    },
+    runApi: {},
+    runtimeStreams: { stopTask() {} },
+    getActions: () => actions,
+  })
+
+  await actions.pollRuntime()
+  assert.equal(detailCalls, 0)
+
+  state.activeView.value = 'task-manager'
+  await actions.pollRuntime()
+  assert.equal(detailCalls, 1)
+})

@@ -3,8 +3,14 @@ import { computed, ref, watch, nextTick } from 'vue'
 import { NCard, NSelect, NButton, NCheckbox, NSpace, NText, NScrollbar, NEmpty } from 'naive-ui'
 import { state, actions } from '../store'
 
-const selectedLevel = ref('all')
-const autoScroll = ref(true)
+const selectedLevel = computed({
+  get: () => state.runLogsSelectedLevel.value,
+  set: value => { state.runLogsSelectedLevel.value = value },
+})
+const autoScroll = computed({
+  get: () => state.runLogsAutoScroll.value,
+  set: value => { state.runLogsAutoScroll.value = value },
+})
 const scrollbarRef = ref(null)
 
 const levelOptions = [
@@ -87,7 +93,7 @@ function getLevelType(level) {
 </script>
 
 <template>
-  <n-card class="run-logs-view" v-show="state.activeView.value === 'run-logs'" :bordered="false" size="small" style="height: 100%; display: flex; flex-direction: column;">
+  <n-card class="run-logs-view" :bordered="false" size="small" style="height: 100%; display: flex; flex-direction: column;">
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
         <n-space align="center">

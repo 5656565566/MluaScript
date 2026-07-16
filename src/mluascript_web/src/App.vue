@@ -4,19 +4,19 @@ import { NConfigProvider, NGlobalStyle, NMessageProvider, NDialogProvider, NNoti
 import { state, actions } from './store'
 import { setupNaiveDiscreteApi } from './naiveDiscreteApi'
 import Sidebar from './components/Sidebar.vue'
-import BlocklyView from './components/BlocklyView.vue'
-import TaskManagerView from './components/TaskManagerView.vue'
-import DeviceView from './components/DeviceView.vue'
-import DeviceManagerView from './components/DeviceManagerView.vue'
 import DevicePreviewFloat from './components/DevicePreviewFloat.vue'
-import RunLogsView from './components/RunLogsView.vue'
-import TemplateRunnerView from './components/TemplateRunnerView.vue'
 import ScreenshotFloat from './components/ScreenshotFloat.vue'
 import ModalHost from './components/ModalHost.vue'
 import TemplateEditorModal from './components/TemplateEditorModal.vue'
 import LoginView from './components/LoginView.vue'
+import ActiveWorkspaceView from './components/ActiveWorkspaceView.vue'
 
 let pollTimer = null
+let systemThemeQuery = null
+
+function handleSystemThemeChange() {
+  if (state.appTheme.value === 'system') actions.applyTheme()
+}
 
 function startPolling() {
   if (pollTimer) window.clearInterval(pollTimer)
@@ -25,8 +25,8 @@ function startPolling() {
   }, 5000)
 }
 
-async function initializeAuthenticatedApp() {
-  await actions.loadState()
+function activateAuthenticatedApp() {
+  actions.startRuntimeStreams()
   startPolling()
   actions.placeScreenshotDock()
 }
@@ -41,9 +41,8 @@ onMounted(async () => {
   setupNaiveDiscreteApi()
   try {
     actions.applyTheme()
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-      if (state.appTheme.value === 'system') actions.applyTheme()
-    })
+    systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    systemThemeQuery.addEventListener('change', handleSystemThemeChange)
     await actions.checkAuth()
   } catch (error) {
     console.error(error)
@@ -54,6 +53,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (pollTimer) window.clearInterval(pollTimer)
+  systemThemeQuery?.removeEventListener('change', handleSystemThemeChange)
   actions.stopRuntimeStreams()
   actions.stopSelectedTaskStreams()
   actions.stopAllDevicePreviewLoops()
@@ -69,10 +69,7 @@ watch(() => state.authenticated.value, (authenticated) => {
     actions.stopSelectedTaskStreams()
     return
   }
-  initializeAuthenticatedApp().catch((error) => {
-    console.error(error)
-    actions.setStatus(error.message || '初始化页面失败', 'error')
-  })
+  activateAuthenticatedApp()
 })
 </script>
 
@@ -94,18 +91,13 @@ watch(() => state.authenticated.value, (authenticated) => {
         <span class="mobile-title">MluaScript</span>
       </div>
       <div class="editor-shell">
-        <BlocklyView />
-        <TaskManagerView />
-        <TemplateRunnerView />
-        <DeviceView />
-        <DeviceManagerView />
-        <RunLogsView />
+        <ActiveWorkspaceView />
       </div>
     </n-layout>
     <ScreenshotFloat />
     <DevicePreviewFloat />
     <ModalHost />
-    <TemplateEditorModal />
+    <TemplateEditorModal v-if="state.templateEditorModalVisible.value" />
   </n-layout>
         </n-notification-provider>
       </n-dialog-provider>

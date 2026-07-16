@@ -25,6 +25,9 @@ passed into their factory functions so modules remain independently testable.
   or authentication end.
 - The app module owns authentication generations and clears feature resources
   when a session expires or the user logs out.
+- `ActiveWorkspaceView.vue` mounts only the selected workspace view. View-local
+  filters and selections that must survive navigation belong to feature state;
+  disposable handles such as DOM refs remain inside the mounted component.
 
 New behavior should be added to the owning module. Add code to `store.js` only
 when a new dependency must be composed or a compatibility export is required.
