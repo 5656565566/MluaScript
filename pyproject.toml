@@ -6,7 +6,7 @@ authors = [
     {name = "5656565566", email = "2393963330@qq.com"},
 ]
 dependencies = [
-    "maafw>=5.10.4",
+    "maafw>=5.12.1",
     "loguru>=0.7.2",
     "textual>=8.1.1",
     "rich>=13.9.4",

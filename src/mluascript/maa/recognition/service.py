@@ -41,7 +41,7 @@ def run_recognition_direct(
         job.wait()
 
         detail = None
-        task_detail = context.tasker.get_task_detail(job.job_id)
+        task_detail = job.get()
         node_ids = getattr(task_detail, "node_id_list", None) if task_detail is not None else None
         if node_ids:
             node_detail = context.tasker.get_node_detail(node_ids[-1])
