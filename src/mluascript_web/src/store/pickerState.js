@@ -1,6 +1,7 @@
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { closeModal, getModalInstance, openModal, updateModalProps, updateModalOptions } from '../modalStore'
-import PickerModalShell from '../components/PickerModalShell.vue'
+
+const PickerModalShell = defineAsyncComponent(() => import('../components/PickerModalShell.vue'))
 
 const initialState = () => ({
   modalId: null,

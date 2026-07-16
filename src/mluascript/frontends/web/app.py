@@ -685,7 +685,9 @@ def put_editor_session(payload: EditorSessionPayload, request: Request) -> dict[
             "xml": str(blockly_document.get("xml") or ""),
             "filename": str(blockly_document.get("filename") or editor_session["blocklyDocument"].get("filename") or ""),
             "path": str(blockly_document.get("path") or editor_session["blocklyDocument"].get("path") or ""),
-            "dirty": True,
+            "mtime": blockly_document.get("mtime", editor_session["blocklyDocument"].get("mtime")),
+            "saveMode": str(blockly_document.get("saveMode") or editor_session["blocklyDocument"].get("saveMode") or "create"),
+            "dirty": bool(blockly_document.get("dirty", True)),
         }
     )
     editor_session["luaDocument"].update(
@@ -693,7 +695,9 @@ def put_editor_session(payload: EditorSessionPayload, request: Request) -> dict[
             "content": str(lua_document.get("content") or ""),
             "filename": str(lua_document.get("filename") or editor_session["luaDocument"].get("filename") or ""),
             "path": str(lua_document.get("path") or editor_session["luaDocument"].get("path") or ""),
-            "dirty": True,
+            "mtime": lua_document.get("mtime", editor_session["luaDocument"].get("mtime")),
+            "saveMode": str(lua_document.get("saveMode") or editor_session["luaDocument"].get("saveMode") or "create"),
+            "dirty": bool(lua_document.get("dirty", True)),
         }
     )
     return _ok(editor_session, message="编辑器会话已同步")

@@ -200,6 +200,39 @@ def test_editor_session_isolated_per_authenticated_client(monkeypatch, tmp_path:
     assert response_b.json()["data"]["blocklyDocument"]["xml"] == "<xml>b</xml>"
 
 
+def test_editor_session_sync_preserves_file_metadata(monkeypatch, tmp_path: Path) -> None:
+    client = _authenticated_client(monkeypatch, tmp_path)
+    payload = {
+        "blocklyDocument": {
+            "xml": "<xml />",
+            "filename": "main.xml",
+            "path": "main.xml",
+            "mtime": 12.5,
+            "saveMode": "update",
+            "dirty": False,
+        },
+        "luaDocument": {
+            "content": "print('ok')",
+            "filename": "main.lua",
+            "path": "main.lua",
+            "mtime": 23.5,
+            "saveMode": "update",
+            "dirty": False,
+        },
+    }
+
+    response = client.put("/api/editor/session", json=payload)
+
+    assert response.status_code == 200
+    session = response.json()["data"]
+    assert session["blocklyDocument"]["mtime"] == 12.5
+    assert session["blocklyDocument"]["saveMode"] == "update"
+    assert session["blocklyDocument"]["dirty"] is False
+    assert session["luaDocument"]["mtime"] == 23.5
+    assert session["luaDocument"]["saveMode"] == "update"
+    assert session["luaDocument"]["dirty"] is False
+
+
 def test_update_lua_file_with_previous_path_renames_existing_file(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(web_app, "_get_web_config", _test_web_config)
     monkeypatch.chdir(tmp_path)
@@ -253,14 +286,22 @@ def test_update_lua_file_rejects_rename_to_existing_target(monkeypatch, tmp_path
 
 
 def test_store_guards_editor_session_replay_when_local_draft_exists() -> None:
-    store_file = Path(__file__).resolve().parents[2] / "src" / "mluascript_web" / "src" / "store.js"
-    source = store_file.read_text(encoding="utf-8")
+    session_file = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "mluascript_web"
+        / "src"
+        / "features"
+        / "editor"
+        / "editorSession.js"
+    )
+    source = session_file.read_text(encoding="utf-8")
 
     assert "editorSessionHydrated" in source
     assert "hasUnsyncedBlocklyDraft" in source
     assert "hasUnsyncedLuaDraft" in source
-    assert "const shouldApplyBlockly = !state.editorSessionHydrated.value || !hasUnsyncedBlocklyDraft()" in source
-    assert "const shouldApplyLua = !state.editorSessionHydrated.value || !hasUnsyncedLuaDraft()" in source
+    assert "const shouldApplyBlockly = !state.editorSessionHydrated.value || !hasUnsyncedBlocklyDraft(state)" in source
+    assert "const shouldApplyLua = !state.editorSessionHydrated.value || !hasUnsyncedLuaDraft(state)" in source
 
 
 def test_vision_roi_block_generates_lua_table_instead_of_string() -> None:

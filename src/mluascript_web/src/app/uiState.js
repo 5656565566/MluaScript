@@ -3,6 +3,7 @@ import { ref } from 'vue'
 export function createUiState() {
   return {
     loading: ref(false),
+    pendingActionCount: ref(0),
     authChecked: ref(false),
     authenticated: ref(false),
     currentUser: ref(''),
