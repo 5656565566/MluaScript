@@ -315,7 +315,7 @@ def test_control_facade_device_overview_entrypoint() -> None:
 
     assert overview.connection.initialized is True
     assert overview.adb.summary == "未发现可用 ADB 设备"
-    assert overview.desktop.summary == "未发现可控Windows 本地窗口"
+    assert overview.desktop.summary == "未发现可控 Windows 本地窗口"
     assert getattr(overview, "browser").summary == "已配置 2 个浏览器设备"
 
 
