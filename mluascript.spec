@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+import shutil
 import sys
 import subprocess
 from pathlib import Path
@@ -24,6 +25,7 @@ def _safe_print(text):
 def build_frontend():
     """构建前端项目"""
     webui_path = Path('src/mluascript_web')
+    webui_dist_path = webui_path / 'dist'
     
     if not webui_path.exists():
         return False
@@ -31,6 +33,10 @@ def build_frontend():
     print("Building frontend...")
     
     try:
+        # 打包前移除旧产物，避免构建失败时把过期 Web 资源带入新可执行文件。
+        if webui_dist_path.exists():
+            shutil.rmtree(webui_dist_path)
+
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
         env['PYTHONUTF8'] = '1'
@@ -54,7 +60,15 @@ def build_frontend():
         if result.stderr:
             _safe_print(result.stderr)
             
-        return result.returncode == 0
+        if result.returncode != 0:
+            return False
+
+        index_file = webui_dist_path / 'index.html'
+        if not index_file.is_file():
+            _safe_print(f"Frontend build did not produce {index_file}")
+            return False
+
+        return True
         
     except Exception as e:
         _safe_print(f"Build error: {e}")
@@ -62,8 +76,7 @@ def build_frontend():
 
 # 构建前端
 if not build_frontend():
-    print("Frontend build failed")
-    # 不退出，继续使用已有文件
+    raise SystemExit("Frontend build failed; packaging aborted to avoid stale Web assets")
 
 # 继续打包配置...
 import maa

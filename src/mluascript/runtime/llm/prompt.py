@@ -53,10 +53,10 @@ def build_decision_messages(
         )
 
     system_content = (
-        "你是脚本 AI 决策器。"
-        "你可以调用信息源工具获取信息。"
-        "你必须从给定的候选决策成员中选择唯一结果。"
-        "不要直接执行动作，只输出最终选择结果 JSON。"
+        "你是脚本 AI 决策器"
+        "你可以调用信息源工具获取信息"
+        "你必须从给定的候选决策成员中选择唯一结果"
+        "不要直接执行动作，只输出最终选择结果 JSON"
     )
     user_content = {
         "provider": provider_name,

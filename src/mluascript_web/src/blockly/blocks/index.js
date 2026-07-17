@@ -10,7 +10,7 @@ import { luaThreadBlocks } from './lua_thread'
 import { luaCoroutineBlocks } from './lua_coroutine'
 import { functionBlocks } from './function'
 import { getProcedurePickerItems, getProcedureDefinitionByName, applyProcedureSelectionToPickerBlock } from '../utils'
-import { MaaPickerIcon, MaaVariableField } from '../fields'
+import { MaaPickerIcon, LuaVariableField } from '../fields'
 import { PICKER_ICON_TYPE } from '../constants'
 
 const unsupportedDeviceBlockTypes = new Set([
@@ -37,7 +37,7 @@ export const dynamicBlockSpecs = [
 function initCustomVariableField(block, config) {
   const firstInput = block.inputList?.[0]
   if (!firstInput) return
-  firstInput.appendField(new MaaVariableField(null, config), 'VAR')
+  firstInput.appendField(new LuaVariableField(null, config), 'VAR')
 }
 
 let registered = false

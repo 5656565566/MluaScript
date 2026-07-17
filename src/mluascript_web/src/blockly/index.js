@@ -1,10 +1,46 @@
 import * as Blockly from 'blockly'
 import * as ZhHans from 'blockly/msg/zh-hans'
 import { ensureBlocklyBlocks } from './blocks'
-import { registerCustomFields, MaaVariableField } from './fields'
+import { registerCustomFields, LuaVariableField } from './fields'
 import { buildToolbox } from './toolbox'
 import { getIsDarkTheme } from './utils'
 import { findVariableItemByValue } from './variableContext'
+import {
+  deleteWorkspaceVariableById,
+  getWorkspaceVariableById,
+  getWorkspaceVariablesOfType,
+} from './workspaceVariables'
+
+const BLOCKLY_DARK_THEME = Blockly.Theme.defineTheme('maa-dark', {
+  name: 'maa-dark',
+  // Blockly 13 不再导出 Dark 主题 继承 Classic 以保留内置积木和分类配色
+  base: Blockly.Themes.Classic,
+  componentStyles: {
+    workspaceBackgroundColour: '#1a1a1a',
+    toolboxBackgroundColour: '#181818',
+    toolboxForegroundColour: '#d6deeb',
+    flyoutBackgroundColour: '#181818',
+    flyoutForegroundColour: '#d6deeb',
+    flyoutOpacity: 1,
+  },
+})
+
+const BLOCKLY_LIGHT_THEME = Blockly.Theme.defineTheme('maa-light', {
+  name: 'maa-light',
+  base: Blockly.Themes.Classic,
+  componentStyles: {
+    workspaceBackgroundColour: '#ffffff',
+    toolboxBackgroundColour: '#ffffff',
+    toolboxForegroundColour: '#222222',
+    flyoutBackgroundColour: '#ffffff',
+    flyoutForegroundColour: '#222222',
+    flyoutOpacity: 1,
+  },
+})
+
+function getBlocklyTheme(isDark) {
+  return isDark ? BLOCKLY_DARK_THEME : BLOCKLY_LIGHT_THEME
+}
 
 function getProcedureArgumentVariableIds(workspace) {
   if (!workspace) return new Set()
@@ -33,8 +69,7 @@ function buildFilteredVariableFlyout(workspace) {
   xmlItems.push(button)
 
   const argumentIds = getProcedureArgumentVariableIds(workspace)
-  const variables = workspace
-    .getVariablesOfType('')
+  const variables = getWorkspaceVariablesOfType(workspace)
     .filter((variable) => !argumentIds.has(variable.getId()))
   const latestVariable = variables[variables.length - 1] || null
 
@@ -131,7 +166,7 @@ function applyBlocklyDomTheme(workspace) {
   const isDark = getIsDarkTheme()
   const injectionDiv = workspace.getInjectionDiv?.()
   const svg = workspace.getParentSvg()
-  const toolboxDiv = injectionDiv?.querySelector('.blocklyToolboxDiv')
+  const toolboxDiv = injectionDiv?.querySelector('.blocklyToolbox, .blocklyToolboxDiv')
 
   for (const element of [injectionDiv, svg]) {
     if (!element) continue
@@ -217,7 +252,7 @@ function patchCoreVariableBlocks(workspace) {
     const oldField = block.getField('VAR')
     if (!firstInput || !oldField) return
     firstInput.removeField('VAR', true)
-    const field = new MaaVariableField(null, {
+    const field = new LuaVariableField(null, {
       fieldName: 'VAR',
       ...options,
     })
@@ -229,12 +264,12 @@ function patchCoreVariableBlocks(workspace) {
   }
 
   const applyVariableFieldPatch = (block) => {
-    if (!block || block.isDisposed?.() || block.__maaVariableFieldPatched) return
+    if (!block || block.isDisposed?.() || block.__luaVariableFieldPatched) return
     if (!block.getField('VAR')) return
     const config = blockConfigs[block.type]
     if (!config) return
     configureVariableField(block, config)
-    block.__maaVariableFieldPatched = true
+    block.__luaVariableFieldPatched = true
     block.setOnChange(() => {
       if (!block.workspace || block.isInFlyout || block.isDisposed?.()) return
       const currentValue = block.getFieldValue('VAR')
@@ -282,7 +317,7 @@ export function createBlocklyWorkspace(element, initialXml = '') {
     trashcan: true,
     sounds: false,
     renderer: 'zelos',
-    theme: isDark ? Blockly.Themes.Dark : Blockly.Themes.Classic,
+    theme: getBlocklyTheme(isDark),
     grid: {
       spacing: 24,
       length: 3,
@@ -358,15 +393,15 @@ export function createBlocklyWorkspace(element, initialXml = '') {
           orphanedArgumentIds.delete(id)
           continue
         }
-        const variable = workspace.getVariableById(id)
+        const variable = getWorkspaceVariableById(workspace, id)
         if (!variable) {
           orphanedArgumentIds.delete(id)
           continue
         }
-        const uses = workspace.getVariableUsesById(id)
+        const uses = Blockly.Variables.getVariableUsesById(workspace, id)
         if (!uses || uses.length === 0) {
           try {
-            workspace.deleteVariableById(id)
+            deleteWorkspaceVariableById(workspace, id)
           } catch (e) {}
           orphanedArgumentIds.delete(id)
         }
@@ -382,7 +417,7 @@ export function createBlocklyWorkspace(element, initialXml = '') {
 
 export function updateBlocklyTheme(workspace, isDark) {
   if (!workspace) return
-  workspace.setTheme(isDark ? Blockly.Themes.Dark : Blockly.Themes.Classic)
+  workspace.setTheme(getBlocklyTheme(isDark))
   if (workspace.options?.grid) {
     workspace.options.grid.colour = isDark ? '#414b5a' : '#cccccc'
   }

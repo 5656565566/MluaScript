@@ -1,6 +1,11 @@
 import * as Blockly from 'blockly'
 import { actions } from '../store'
 import { pickerActions } from '../store/pickerState'
+import {
+  deleteWorkspaceVariableById,
+  getWorkspaceVariableById,
+  getWorkspaceVariablesOfType,
+} from './workspaceVariables'
 
 const VARIABLE_PICK_VALUE = '__MAA_PICK_VARIABLE__'
 const VARIABLE_RENAME_VALUE = '__MAA_RENAME_VARIABLE__'
@@ -60,8 +65,7 @@ function getProcedureArgumentVariableIds(workspace) {
 function getWorkspaceGlobalVariables(workspace) {
   if (!workspace) return []
   const argumentIds = getProcedureArgumentVariableIds(workspace)
-  return workspace
-    .getVariablesOfType('')
+  return getWorkspaceVariablesOfType(workspace)
     .filter((variable) => !argumentIds.has(variable.getId()))
     .map((variable) => ({
       id: variable.getId(),
@@ -329,7 +333,7 @@ export function handleVariableCommand(block, value, options = {}) {
 
   if (value === VARIABLE_RENAME_VALUE) {
     const variableId = currentItem?.variableId || normalizeVariableName(currentValue)
-    const variableModel = workspace?.getVariableById?.(variableId) || null
+    const variableModel = getWorkspaceVariableById(workspace, variableId)
     if (variableModel) {
       Blockly.Variables.renameVariable(workspace, variableModel)
       const blocks = workspace?.getAllBlocks?.(false) || []
@@ -350,7 +354,7 @@ export function handleVariableCommand(block, value, options = {}) {
         if (!blockItem || blockItem.isDisposed?.()) continue
         blockItem.dispose?.(false)
       }
-      workspace?.deleteVariableById?.(variableId)
+      deleteWorkspaceVariableById(workspace, variableId)
       workspace?.getToolbox?.()?.refreshSelection?.()
     }
     return currentValue

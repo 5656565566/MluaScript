@@ -150,35 +150,4 @@ onBeforeUnmount(() => {
   grid-template-columns: 1fr;
 }
 
-.blockly-host .blocklyToolboxDiv {
-  background: var(--n-color-embedded) !important;
-  border-right: none !important;
-}
-
-.blockly-host .blocklyFlyout .blocklyWorkspace,
-.blockly-host .blocklyFlyout .blocklyBlockCanvas {
-  margin-bottom: 24px !important;
-  padding-bottom: 24px !important;
-}
-
-.blockly-host .blocklyFlyout .blocklyFlyoutBackground {
-  height: calc(100% - 24px) !important;
-}
-
-.blockly-host .blocklyTreeRow {
-  fill: transparent !important;
-}
-
-.blockly-host .blocklyTreeRow:not(.blocklyTreeSelected):hover {
-  background: var(--n-border-color) !important;
-}
-
-.blockly-host .blocklyTreeRow.blocklyTreeSelected {
-  background: var(--n-primary-color) !important;
-}
-
-.blockly-host .blocklyTreeLabel {
-  color: var(--n-text-color) !important;
-  fill: var(--n-text-color) !important;
-}
 </style>

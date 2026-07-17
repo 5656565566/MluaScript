@@ -1,6 +1,7 @@
 import * as Blockly from 'blockly'
 import { luaGenerator } from 'blockly/lua'
 import { findVariableItemByValue } from './variableContext'
+import { getWorkspaceAllVariables } from './workspaceVariables'
 
 function isInvalidVariableBlock(block) {
   if (!block || block.isDisposed?.()) return false
@@ -44,10 +45,10 @@ function wrapVariableBlockGenerators() {
 export function workspaceToXml(workspace) {
   const dom = Blockly.Xml.workspaceToDom(workspace)
 
-  // 由于 MaaVariableField（FieldDropdown）替换了原生 FieldVariable，
-  // Blockly 的 workspaceToDom 不会自动收集这些变量到 <variables> 元素。
-  // 这里手动确保所有工作区变量都被序列化。
-  const allVars = workspace.getAllVariables?.() || []
+  // 由于 LuaVariableField（FieldDropdown）替换了原生 FieldVariable，
+  // Blockly 的 workspaceToDom 不会自动收集这些变量到 <variables> 元素
+  // 这里手动确保所有工作区变量都被序列化
+  const allVars = getWorkspaceAllVariables(workspace)
   if (allVars.length > 0) {
     let variablesElement = dom.querySelector('variables')
     if (!variablesElement) {

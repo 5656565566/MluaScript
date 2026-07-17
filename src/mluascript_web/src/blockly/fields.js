@@ -91,7 +91,7 @@ OriginalFieldTextInput.prototype.widgetDispose_ = function() {
   }
 }
 
-export class MaaVariableField extends OriginalFieldDropdown {
+export class LuaVariableField extends OriginalFieldDropdown {
   constructor(menuGenerator, config = {}) {
     const variableConfig = {
       fieldName: config.fieldName || 'VAR',
@@ -307,6 +307,6 @@ export class MaaPickerIcon extends Blockly.icons.Icon {
 }
 
 export function registerCustomFields() {
-  Blockly.fieldRegistry.register('field_variable_custom', MaaVariableField)
+  Blockly.fieldRegistry.register('field_variable_custom', LuaVariableField)
   Blockly.fieldRegistry.register('field_shared_variable', SharedVariableField)
 }

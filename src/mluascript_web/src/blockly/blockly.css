@@ -1,0 +1,202 @@
+/* Blockly 11/13 可编辑字段 新版使用 Field/Editing 旧版使用 Text/editing */
+.blockly-theme-dark .blocklyEditableField > .blocklyFieldRect,
+.blockly-theme-dark .blocklyEditableField > .blocklyDropdownRect,
+.blockly-theme-dark .blocklyNonEditableField > .blocklyFieldRect,
+.blockly-theme-dark .blocklyNonEditableField > .blocklyDropdownRect,
+.blockly-theme-dark .blocklyEditableText > rect,
+.blockly-theme-dark .blocklyEditableText > .blocklyDropdownRect,
+.blockly-theme-dark .blocklyNonEditableText > rect,
+.blockly-theme-dark .blocklyNonEditableText > .blocklyDropdownRect {
+  fill: rgba(255, 255, 255, 0.16) !important;
+  fill-opacity: 1 !important;
+  stroke: rgba(255, 255, 255, 0.24) !important;
+}
+
+.blockly-theme-light .blocklyEditableField > .blocklyFieldRect,
+.blockly-theme-light .blocklyEditableField > .blocklyDropdownRect,
+.blockly-theme-light .blocklyNonEditableField > .blocklyFieldRect,
+.blockly-theme-light .blocklyNonEditableField > .blocklyDropdownRect,
+.blockly-theme-light .blocklyEditableText > rect,
+.blockly-theme-light .blocklyEditableText > .blocklyDropdownRect,
+.blockly-theme-light .blocklyNonEditableText > rect,
+.blockly-theme-light .blocklyNonEditableText > .blocklyDropdownRect {
+  fill: rgba(255, 255, 255, 0.72) !important;
+  fill-opacity: 1 !important;
+  stroke: rgba(0, 0, 0, 0.2) !important;
+}
+
+.blockly-theme-dark .blocklyEditableField .blocklyFieldText,
+.blockly-theme-dark .blocklyNonEditableField .blocklyFieldText,
+.blockly-theme-dark .blocklyEditableText text,
+.blockly-theme-dark .blocklyEditableText tspan,
+.blockly-theme-dark .blocklyNonEditableText text,
+.blockly-theme-dark .blocklyNonEditableText tspan,
+.blockly-theme-dark .blocklyDropdownText {
+  fill: #f8fafc !important;
+}
+
+.blockly-theme-light .blocklyEditableField .blocklyFieldText,
+.blockly-theme-light .blocklyNonEditableField .blocklyFieldText,
+.blockly-theme-light .blocklyEditableText text,
+.blockly-theme-light .blocklyEditableText tspan,
+.blockly-theme-light .blocklyNonEditableText text,
+.blockly-theme-light .blocklyNonEditableText tspan,
+.blockly-theme-light .blocklyDropdownText {
+  fill: #212121 !important;
+}
+
+.blocklyEditableField.blocklyEditing > .blocklyFieldRect,
+.blocklyEditableField.blocklyEditing > .blocklyDropdownRect,
+.blocklyEditableText.editing > rect,
+.blocklyEditableText.editing > .blocklyDropdownRect {
+  fill: rgba(0, 0, 0, 0.28) !important;
+  stroke: rgba(255, 255, 255, 0.3) !important;
+}
+
+.blocklyEditableField.blocklyEditing .blocklyFieldText,
+.blocklyEditableText.editing text,
+.blocklyEditableText.editing tspan,
+.blocklyEditableText.editing .blocklyDropdownText {
+  fill: transparent !important;
+  opacity: 0 !important;
+}
+
+/* Blockly 使用 HTML 覆盖层完成字段编辑和下拉菜单 */
+.blockly-embedded-input {
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 4px !important;
+  border: none !important;
+  outline: none !important;
+  background: transparent !important;
+  color: var(--color-text-primary) !important;
+  text-align: center !important;
+  box-sizing: border-box !important;
+}
+
+.blocklyWidgetDiv .blocklyHtmlInput:focus,
+.blocklyDropDownDiv .blocklyHtmlInput:focus,
+.blocklyTextInputBubble textarea.blocklyTextarea:focus {
+  background-color: rgba(0, 0, 0, 0.28) !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  caret-color: #ffffff !important;
+  outline: none !important;
+}
+
+.blocklyDropDownDiv,
+.blocklyDropDownDiv .blocklyDropDownContent,
+.blocklyDropDownDiv .blocklyMenu,
+.blocklyDropDownDiv .goog-menu {
+  background: #5b67a5 !important;
+  color: #f8fafc !important;
+}
+
+.blocklyDropDownDiv {
+  border: 1px solid #44507c !important;
+}
+
+.blocklyDropDownDiv .blocklyMenuItem,
+.blocklyDropDownDiv .goog-menuitem,
+.blocklyDropDownDiv .blocklyMenuItemContent,
+.blocklyDropDownDiv .goog-menuitem-content,
+.blocklyDropDownDiv .blocklyMenuItemCheckbox,
+.blocklyDropDownDiv .goog-menuitem-checkbox {
+  color: #f8fafc !important;
+  fill: #f8fafc !important;
+  background: transparent !important;
+}
+
+.blocklyDropDownDiv .blocklyMenuItemHighlight,
+.blocklyDropDownDiv .goog-menuitem-highlight,
+.blocklyDropDownDiv .blocklyMenuItem:hover,
+.blocklyDropDownDiv .goog-menuitem:hover,
+.blocklyDropDownDiv .blocklyMenuItemSelected {
+  background: rgba(0, 0, 0, 0.22) !important;
+  color: #ffffff !important;
+}
+
+.blocklyDropDownDiv .blocklyMenuItemHighlight .blocklyMenuItemContent,
+.blocklyDropDownDiv .goog-menuitem-highlight .goog-menuitem-content,
+.blocklyDropDownDiv .blocklyMenuItem:hover .blocklyMenuItemContent,
+.blocklyDropDownDiv .blocklyMenuItemSelected .blocklyMenuItemContent {
+  color: #ffffff !important;
+  background: transparent !important;
+}
+
+/* 工作区、滚动条和积木轮廓 */
+.blocklyScrollbarBackground {
+  fill: var(--color-scrollbar) !important;
+}
+
+.blocklyScrollbarHandle {
+  fill: var(--color-scrollbar-handle) !important;
+}
+
+.blockly-theme-dark .blocklyZoom {
+  filter: brightness(0.8) invert(1);
+}
+
+.blocklyDraggable > .blocklyPath {
+  stroke: #666 !important;
+}
+
+.blocklyDraggable {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+.blocklySvg,
+.injectionDiv,
+.blocklyMainBackground {
+  border: none !important;
+  outline: none !important;
+  stroke: none !important;
+}
+
+/* 工具箱同时兼容 Blockly 11 的 Tree 和 Blockly 13 的 Toolbox 类名 */
+.blockly-host .blocklyToolbox,
+.blockly-host .blocklyToolboxDiv {
+  border-right: none !important;
+}
+
+.blockly-host .blocklyFlyout .blocklyWorkspace,
+.blockly-host .blocklyFlyout .blocklyBlockCanvas {
+  margin-bottom: 24px !important;
+  padding-bottom: 24px !important;
+}
+
+.blockly-host .blocklyFlyout .blocklyFlyoutBackground {
+  height: calc(100% - 24px) !important;
+}
+
+.blockly-host .blocklyTreeRow,
+.blockly-host .blocklyToolboxCategory {
+  fill: transparent !important;
+}
+
+.blockly-host .blocklyTreeRow:not(.blocklyTreeSelected):hover,
+.blockly-host .blocklyToolboxCategory:not(.blocklyToolboxSelected):hover {
+  background: var(--n-border-color) !important;
+}
+
+.blockly-host .blocklyTreeRow.blocklyTreeSelected,
+.blockly-host .blocklyToolboxCategory.blocklyToolboxSelected {
+  background: var(--n-primary-color) !important;
+}
+
+.blockly-theme-dark .blocklyTreeRow,
+.blockly-theme-dark .blocklyToolboxCategory,
+.blockly-theme-dark .blocklyTreeLabel,
+.blockly-theme-dark .blocklyToolboxCategoryLabel {
+  color: var(--color-text-primary) !important;
+  fill: var(--color-text-primary) !important;
+}
+
+.blockly-theme-light .blocklyTreeRow,
+.blockly-theme-light .blocklyToolboxCategory,
+.blockly-theme-light .blocklyTreeLabel,
+.blockly-theme-light .blocklyToolboxCategoryLabel {
+  color: #222222 !important;
+  fill: #222222 !important;
+}
