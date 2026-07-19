@@ -35,7 +35,23 @@ export function createTemplateFlow() {
 }
 
 export function createTemplateFlowStep() {
-  return { k: '', task: '', args: {}, onFail: 'stop' }
+  return { k: '', task: '', args: {}, onSuccess: 'continue', successGoto: '', onFail: 'stop', goto: '' }
+}
+
+export function createStepArgBinding(source = 'var', value = '') {
+  if (source === 'literal') return { $bind: 'literal', value }
+  return { $bind: 'var', key: String(value || '') }
+}
+
+export function normalizeStepArgBinding(value) {
+  if (value && typeof value === 'object' && value.$bind === 'var') {
+    return createStepArgBinding('var', value.key)
+  }
+  if (value && typeof value === 'object' && value.$bind === 'literal') {
+    return createStepArgBinding('literal', value.value)
+  }
+  // Legacy step values were plain literals. Keep that behavior when editing old templates.
+  return createStepArgBinding('literal', value)
 }
 
 export function createEnumOption() {
@@ -136,7 +152,10 @@ export function normalizeTemplateEditorData(data = {}) {
           k: step.k || '',
           task: step.task || '',
           args: step.args && typeof step.args === 'object' ? { ...step.args } : {},
+          onSuccess: step.onSuccess || 'continue',
+          successGoto: step.successGoto || '',
           onFail: step.onFail || 'stop',
+          goto: step.goto || '',
         })) : [],
       })) : [],
     },
@@ -175,7 +194,11 @@ export function renameVariableReferences({ varsList, localData, from, to }) {
       for (const [key, value] of Object.entries(step.args)) {
         const mappedKey = key === oldKey ? newKey : key
         if (!mappedKey || Object.prototype.hasOwnProperty.call(nextArgs, mappedKey)) continue
-        nextArgs[mappedKey] = value === oldKey ? newKey : value
+        if (value && typeof value === 'object' && value.$bind === 'var') {
+          nextArgs[mappedKey] = { ...value, key: value.key === oldKey ? newKey : value.key }
+        } else {
+          nextArgs[mappedKey] = value === oldKey ? newKey : value
+        }
       }
       step.args = nextArgs
     }
@@ -260,7 +283,10 @@ export function buildTemplatePayload(localData, varsList, { clone = false } = {}
         k: step.k,
         task: step.task,
         args: step.args && typeof step.args === 'object' ? step.args : {},
+        onSuccess: step.onSuccess || 'continue',
+        ...(step.onSuccess === 'goto' && step.successGoto ? { successGoto: step.successGoto } : {}),
         onFail: step.onFail || 'stop',
+        ...(step.onFail === 'goto' && step.goto ? { goto: step.goto } : {}),
       })),
     })),
   }

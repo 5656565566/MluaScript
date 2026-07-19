@@ -1,0 +1,124 @@
+:global(.n-card.template-picker-dialog) {
+  width: min(760px, calc(100vw - 48px));
+}
+
+:global(.n-card.template-step-arg-dialog) {
+  width: min(920px, calc(100vw - 48px));
+}
+
+.picker-dialog-body,
+.step-arg-editor-body {
+  min-height: 320px;
+}
+
+.picker-dialog-alert,
+.picker-dialog-search,
+.step-arg-editor-alert {
+  margin-bottom: 16px;
+}
+
+.picker-dialog-list,
+.step-arg-editor-list {
+  max-height: 52vh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.picker-empty-text {
+  padding: 24px;
+  color: var(--n-text-color-3);
+  text-align: center;
+}
+
+.picker-option-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.picker-option-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 8px;
+  background: var(--n-color-embedded);
+  cursor: pointer;
+}
+
+.picker-option-checkbox {
+  margin-top: 3px;
+}
+
+.picker-option-content,
+.step-arg-editor-inputs {
+  min-width: 0;
+}
+
+.picker-option-title {
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.step-arg-editor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 56vh;
+}
+
+.step-arg-editor-row {
+  display: grid;
+  grid-template-columns: 42px 180px minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 8px;
+  background: var(--n-color-embedded);
+}
+
+.step-arg-editor-enable {
+  padding-top: 8px;
+}
+
+.step-arg-editor-key {
+  padding-top: 6px;
+}
+
+.inline-switch-field {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 6px;
+  background: var(--n-color);
+}
+
+.step-arg-inline-editor {
+  width: 100%;
+}
+
+.step-arg-binding-grid {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+@media (max-width: 760px) {
+  :global(.n-card.template-picker-dialog),
+  :global(.n-card.template-step-arg-dialog) {
+    width: calc(100vw - 24px);
+  }
+
+  .picker-option-grid,
+  .step-arg-editor-row,
+  .step-arg-binding-grid {
+    grid-template-columns: 1fr;
+  }
+}

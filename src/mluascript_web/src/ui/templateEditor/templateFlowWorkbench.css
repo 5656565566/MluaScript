@@ -1,0 +1,349 @@
+.flow-workbench-root {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.flow-step-rail-header,
+.flow-step-inspector-header,
+.flow-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.field-label,
+.flow-step-inspector-title,
+.flow-section-title {
+  font-weight: 600;
+}
+
+.flow-empty-title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.field-label {
+  margin-bottom: 6px;
+  color: var(--n-text-color-2);
+  font-size: 13px;
+}
+
+.flow-definition-bar {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(200px, 1fr) minmax(240px, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 8px;
+  background: var(--n-color-embedded);
+}
+
+.flow-global-binding {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.flow-global-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+  font-size: 13px;
+}
+
+.flow-parameter-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid var(--n-border-color);
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+}
+
+.flow-parameter-label {
+  margin-right: 4px;
+  color: var(--n-text-color-3);
+  font-size: 12px;
+}
+
+.flow-workbench {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 290px) minmax(0, 1fr);
+  margin-top: 14px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.flow-step-rail {
+  min-width: 0;
+  min-height: 0;
+  padding: 14px;
+  border-right: 1px solid var(--n-border-color);
+  background: var(--n-color-embedded);
+  overflow: auto;
+}
+
+.flow-step-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.flow-step-list-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 8px;
+  align-items: center;
+  gap: 9px;
+  min-height: 54px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--n-text-color);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flow-step-list-item:hover {
+  background: var(--n-color-hover);
+}
+
+.flow-step-list-item:focus-visible {
+  outline: 2px solid var(--n-primary-color);
+  outline-offset: 1px;
+}
+
+.flow-step-list-item.is-active {
+  border-color: var(--n-primary-color);
+  background: var(--n-color);
+}
+
+.flow-step-order {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--n-color-embedded);
+  color: var(--n-text-color-3);
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 11px;
+}
+
+.flow-step-list-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.flow-step-list-copy strong,
+.flow-step-list-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-step-list-copy strong {
+  font-size: 13px;
+}
+
+.flow-step-list-copy span {
+  color: var(--n-text-color-3);
+  font-size: 11px;
+}
+
+.flow-step-state {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--n-warning-color);
+}
+
+.flow-step-state.is-complete {
+  background: var(--n-success-color);
+}
+
+.flow-step-empty,
+.flow-inline-empty,
+.flow-empty-state,
+.flow-step-inspector-empty {
+  color: var(--n-text-color-3);
+  text-align: center;
+}
+
+.flow-step-empty,
+.flow-inline-empty {
+  margin-top: 12px;
+  padding: 18px 12px;
+  border: 1px dashed var(--n-border-color);
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.flow-empty-state,
+.flow-step-inspector-empty {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+}
+
+.flow-empty-state {
+  flex: 1;
+  min-height: 0;
+}
+
+.flow-step-inspector {
+  min-width: 0;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+}
+
+.flow-step-inspector-empty {
+  min-height: 100%;
+}
+
+.flow-step-inspector-header {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--n-border-color);
+}
+
+.flow-step-inspector-title,
+.flow-section-title {
+  margin-bottom: 4px;
+}
+
+.flow-step-identity,
+.flow-transition-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) minmax(220px, 1.2fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.flow-binding-section,
+.flow-transition-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--n-border-color);
+}
+
+.flow-transition-control {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.flow-binding-table {
+  margin-top: 12px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.flow-binding-table-head,
+.flow-binding-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(130px, 0.8fr) minmax(180px, 1.4fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.flow-binding-table-head {
+  padding: 8px 12px;
+  background: var(--n-color-embedded);
+  color: var(--n-text-color-3);
+  font-size: 11px;
+}
+
+.flow-binding-row {
+  padding: 10px 12px;
+}
+
+.flow-binding-row + .flow-binding-row {
+  border-top: 1px solid var(--n-border-color);
+}
+
+.flow-binding-argument {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.flow-binding-argument strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.flow-binding-argument code {
+  color: var(--n-text-color-3);
+  font-size: 11px;
+}
+
+.flow-binding-value {
+  min-width: 0;
+}
+
+@media (max-width: 1120px) {
+  .flow-definition-bar,
+  .flow-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .flow-step-rail {
+    border-right: 0;
+    border-bottom: 1px solid var(--n-border-color);
+  }
+
+  .flow-step-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .flow-step-rail-header,
+  .flow-step-inspector-header,
+  .flow-section-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .flow-step-list,
+  .flow-step-identity,
+  .flow-transition-grid,
+  .flow-binding-table-head,
+  .flow-binding-row {
+    grid-template-columns: 1fr;
+  }
+
+  .flow-binding-table-head {
+    display: none;
+  }
+}

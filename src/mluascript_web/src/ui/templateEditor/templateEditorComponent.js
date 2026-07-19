@@ -1,60 +1,45 @@
+import { ChevronDown } from '@vicons/ionicons5'
+import { ref } from 'vue'
 import {
-  NAlert,
   NButton,
-  NCheckbox,
-  NCollapse,
-  NCollapseItem,
-  NDivider,
-  NDynamicInput,
-  NForm,
-  NFormItem,
-  NInput,
-  NInputNumber,
+  NIcon,
   NModal,
-  NScrollbar,
-  NSelect,
   NSpace,
-  NSwitch,
-  NTabPane,
-  NTabs,
   NTag,
   NText,
   useMessage,
 } from 'naive-ui'
 import { getWorkspaceProcedureDefinitions } from '../../blockly/utils'
 import { actions, state } from '../../store'
+import TemplateAuxiliaryDialogs from './TemplateAuxiliaryDialogs.vue'
+import TemplateFlowWorkbench from './TemplateFlowWorkbench.vue'
+import TemplateResourceDialogs from './TemplateResourceDialogs.vue'
+import PaginatedSearchSelect from './PaginatedSearchSelect.vue'
 import { useTemplateEditor } from './useTemplateEditor'
 
 export default {
   components: {
-    NAlert,
+    ChevronDown,
     NButton,
-    NCheckbox,
-    NCollapse,
-    NCollapseItem,
-    NDivider,
-    NDynamicInput,
-    NForm,
-    NFormItem,
-    NInput,
-    NInputNumber,
+    NIcon,
     NModal,
-    NScrollbar,
-    NSelect,
     NSpace,
-    NSwitch,
-    NTabPane,
-    NTabs,
     NTag,
     NText,
+    PaginatedSearchSelect,
+    TemplateAuxiliaryDialogs,
+    TemplateFlowWorkbench,
+    TemplateResourceDialogs,
   },
   setup() {
-    return useTemplateEditor({
+    const summaryExpanded = ref(false)
+    const editor = useTemplateEditor({
       state,
       message: useMessage(),
       getProcedureDefinitions: getWorkspaceProcedureDefinitions,
       closeEditor: actions.closeTemplateEditor,
       saveEditorMeta: actions.saveTemplateEditorMeta,
     })
+    return { ...editor, flowEditor: editor, summaryExpanded }
   },
 }

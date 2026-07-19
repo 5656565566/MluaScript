@@ -88,8 +88,8 @@ function handleManageWithFallback() {
 </script>
 
 <template>
-  <div style="display: flex; flex-direction: column; height: 100%;">
-    <div style="flex: 1; overflow-y: auto; overflow-x: hidden;">
+  <div class="picker-modal-shell">
+    <div class="picker-modal-body" :class="{ 'is-form': effectiveForm }">
       <n-alert v-if="effectiveSummary" type="info" :show-icon="false" style="margin-bottom: 16px;">
         {{ effectiveSummary }}
       </n-alert>
@@ -126,9 +126,11 @@ function handleManageWithFallback() {
       />
     </div>
 
-    <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--n-border-color);">
+    <div class="picker-modal-footer">
       <n-button @click="cancelSelection">取消</n-button>
       <n-button type="primary" @click="confirmSelection">{{ effectiveForm?.confirmText || '确认' }}</n-button>
     </div>
   </div>
 </template>
+
+<style scoped src="./pickerModalShell.css"></style>

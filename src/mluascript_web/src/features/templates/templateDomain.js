@@ -48,6 +48,16 @@ export function normalizeRuntimeValue(field, value) {
   return value
 }
 
+export function resolveTemplateBinding(value, vars, runtimeValues = {}) {
+  if (!value || typeof value !== 'object' || !value.$bind) return cloneValue(value)
+  if (value.$bind === 'literal') return cloneValue(value.value)
+  if (value.$bind !== 'var') return cloneValue(value)
+
+  const key = String(value.key || '')
+  if (Object.prototype.hasOwnProperty.call(runtimeValues, key)) return cloneValue(runtimeValues[key])
+  return fieldDefaultValue(vars?.[key])
+}
+
 export function normalizeTemplateField(field, key = '') {
   const normalizedKey = key || fieldKey(field)
   const type = fieldType(field)
@@ -97,6 +107,8 @@ export function normalizeTemplateMeta(meta) {
         functionRef: taskDef.fn || taskDef.functionRef || '',
         args: step.args || {},
         enabled: step.enabled ?? true,
+        onSuccess: step.onSuccess || 'continue',
+        successGoto: step.successGoto || '',
         onFail: step.onFail || 'stop',
         allowDisable: step.allowDisable !== false,
         allowReorder: step.allowReorder !== false,
@@ -159,6 +171,10 @@ export function buildWorkflowDefaults(meta, savedConfig) {
     const savedStepEnabled = savedWorkflow.stepEnabled || {}
     const savedStepOrder = Array.isArray(savedWorkflow.stepOrder) ? savedWorkflow.stepOrder : []
     const savedGlobals = savedWorkflow.globals || {}
+    const runtimeGlobals = Object.fromEntries(Object.entries(meta?.vars || {}).map(([key, field]) => [
+      key,
+      Object.prototype.hasOwnProperty.call(savedGlobals, key) ? cloneValue(savedGlobals[key]) : fieldDefaultValue(field),
+    ]))
     const tasks = workflow.tasks || []
     next[workflowKey] = {
       stepOrder: savedStepOrder.length
@@ -167,7 +183,11 @@ export function buildWorkflowDefaults(meta, savedConfig) {
       stepEnabled: Object.fromEntries(tasks.map(step => [step.key, Object.prototype.hasOwnProperty.call(savedStepEnabled, step.key) ? Boolean(savedStepEnabled[step.key]) : Boolean(step.enabled ?? true)])),
       stepArgs: Object.fromEntries(tasks.map(step => {
         const defaults = Object.fromEntries((step.fields || []).map(field => [field.key, fieldDefaultValue(field)]))
-        return [step.key, { ...defaults, ...(step.args || {}), ...(savedStepArgs[step.key] || {}) }]
+        const boundDefaults = Object.fromEntries(Object.entries(step.args || {}).map(([key, value]) => [
+          key,
+          resolveTemplateBinding(value, meta?.vars, runtimeGlobals),
+        ]))
+        return [step.key, { ...defaults, ...boundDefaults, ...(savedStepArgs[step.key] || {}) }]
       })),
       globals: Object.fromEntries((workflow.globals || []).map(field => [field.key, Object.prototype.hasOwnProperty.call(savedGlobals, field.key) ? cloneValue(savedGlobals[field.key]) : fieldDefaultValue(field)])),
     }

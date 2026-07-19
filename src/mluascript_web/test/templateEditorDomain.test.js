@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   buildTemplatePayload,
+  createStepArgBinding,
   flattenParsedVars,
   normalizeTemplateEditorData,
   renameVariableReferences,
@@ -38,6 +39,35 @@ test('template editor data survives normalization and serialization', () => {
   }])
   assert.deepEqual(payload.tasks[0].args, ['mode', 'count'])
   assert.deepEqual(payload.flows[0].steps[0].args, { count: 3 })
+})
+
+test('step parameter overrides and transition targets survive serialization', () => {
+  const source = {
+    id: 'binding-demo',
+    vars: { stage: { tp: 'str', def: '1-7' } },
+    tasks: [{ k: 'battle', fn: 'run_battle', args: ['stage'] }],
+    flows: [{
+      k: 'main',
+      steps: [{
+        k: 'battle_1',
+        task: 'battle',
+        args: { stage: createStepArgBinding('var', 'stage') },
+        onSuccess: 'goto',
+        successGoto: 'battle_2',
+        onFail: 'goto',
+        goto: 'battle_1',
+      }],
+    }],
+  }
+
+  const normalized = normalizeTemplateEditorData(source)
+  const payload = buildTemplatePayload(normalized.localData, normalized.varsList)
+
+  assert.deepEqual(payload.flows[0].steps[0].args.stage, { $bind: 'var', key: 'stage' })
+  assert.equal(payload.flows[0].steps[0].onSuccess, 'goto')
+  assert.equal(payload.flows[0].steps[0].successGoto, 'battle_2')
+  assert.equal(payload.flows[0].steps[0].onFail, 'goto')
+  assert.equal(payload.flows[0].steps[0].goto, 'battle_1')
 })
 
 test('renaming a variable updates tasks, flows, conditions, and step values', () => {

@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import {
   buildTemplatePayload,
   createEmptyTemplate,
@@ -7,9 +7,12 @@ import {
   createTemplateFlowStep,
   createTemplateTask,
   createTemplateVariable,
+  createStepArgBinding,
   normalizeTemplateEditorData,
+  normalizeStepArgBinding,
   renameVariableReferences,
-} from '../../features/templates/editor/templateEditorDomain'
+} from '../../features/templates/editor/templateEditorDomain.js'
+import { createTemplateAutosave } from './templateAutosave.js'
 
 const EMPTY_PICKER_STATE = {
   show: false,
@@ -31,20 +34,61 @@ const EMPTY_STEP_ARG_STATE = {
   rows: [],
 }
 
-export function useTemplateEditor({ state, message, getProcedureDefinitions, closeEditor, saveEditorMeta }) {
-  const activeTab = ref('basic')
+export function useTemplateEditor({
+  state,
+  message,
+  getProcedureDefinitions,
+  closeEditor,
+  saveEditorMeta,
+  autosaveDelay,
+  scheduler,
+}) {
   const variableSearch = ref('')
   const localData = ref(createEmptyTemplate())
   const varsList = ref([])
   const procedureDefinitions = ref([])
   const pickerState = ref({ ...EMPTY_PICKER_STATE })
   const stepArgEditorState = ref({ ...EMPTY_STEP_ARG_STATE })
+  const settingsDialogVisible = ref(false)
+  const variableDialogVisible = ref(false)
+  const taskDialogVisible = ref(false)
+  const selectedFlowIndex = ref(0)
+  const selectedStepIndex = ref(0)
+  const autosaveStatus = ref('saved')
+  const isClosing = ref(false)
+  let autosaveReady = false
+  let initializationGeneration = 0
+  let editRevision = 0
+  let savedRevision = 0
+
+  const autosaveStatusText = computed(() => ({
+    pending: '等待自动保存',
+    saving: '正在自动保存…',
+    saved: '已自动保存',
+    error: '自动保存失败',
+  })[autosaveStatus.value])
+
+  const autosave = createTemplateAutosave({
+    delay: autosaveDelay,
+    scheduler,
+    save: async ({ revision, payload }) => {
+      autosaveStatus.value = 'saving'
+      try {
+        await saveEditorMeta(payload)
+        savedRevision = Math.max(savedRevision, revision)
+        autosaveStatus.value = savedRevision === editRevision ? 'saved' : 'pending'
+      } catch (error) {
+        autosaveStatus.value = 'error'
+        throw error
+      }
+    },
+  })
 
   const visible = computed({
     get: () => state.templateEditorModalVisible.value,
     set: value => {
       if (value) state.templateEditorModalVisible.value = true
-      else closeEditor()
+      else void handleClose()
     },
   })
 
@@ -58,8 +102,13 @@ export function useTemplateEditor({ state, message, getProcedureDefinitions, clo
   const onFailOptions = [
     { label: '失败即停止', value: 'stop' },
     { label: '失败后继续', value: 'continue' },
+    { label: '跳转到指定任务', value: 'goto' },
   ]
-
+  const onSuccessOptions = [
+    { label: '继续下一个任务', value: 'continue' },
+    { label: '跳转到指定任务', value: 'goto' },
+    { label: '退出任务流', value: 'exit' },
+  ]
   const flattenedVarOptions = computed(() => varsList.value
     .map(item => item._key ? ({
       value: item._key,
@@ -69,11 +118,6 @@ export function useTemplateEditor({ state, message, getProcedureDefinitions, clo
     }) : null)
     .filter(Boolean))
 
-  const stepArgSourceOptions = computed(() => [
-    { label: '直接填写默认值', value: '__literal__' },
-    ...flattenedVarOptions.value.map(item => ({ label: item.label, value: item.value })),
-  ])
-
   const procedureOptions = computed(() => procedureDefinitions.value
     .filter(item => item.args.length === 1 && item.args[0] === 'args')
     .map(item => ({ label: item.signature, value: item.name })))
@@ -81,6 +125,37 @@ export function useTemplateEditor({ state, message, getProcedureDefinitions, clo
   const taskOptions = computed(() => (localData.value.tasks || [])
     .filter(item => item.k)
     .map(item => ({ label: item.t ? `${item.t} (${item.k})` : item.k, value: item.k })))
+
+  const flowOptions = computed(() => (localData.value.flows || []).map((flow, index) => ({
+    label: flow.t ? `${flow.t} (${flow.k || `flow_${index + 1}`})` : (flow.k || `任务流 ${index + 1}`),
+    value: index,
+  })))
+
+  const selectedFlow = computed(() => localData.value.flows?.[selectedFlowIndex.value] || null)
+  const selectedStep = computed(() => selectedFlow.value?.steps?.[selectedStepIndex.value] || null)
+
+  const flowVariableOptions = computed(() => {
+    const allowedKeys = new Set(selectedFlow.value?.g || [])
+    return flattenedVarOptions.value.filter(item => allowedKeys.has(item.value))
+  })
+
+  const bindingSourceOptions = computed(() => [
+    { label: '任务流参数', value: 'var', disabled: !flowVariableOptions.value.length },
+    { label: '固定值', value: 'literal' },
+  ])
+
+  const stepArgSourceOptions = computed(() => [
+    { label: '直接填写固定值', value: '__literal__' },
+    ...flowVariableOptions.value.map(item => ({ label: item.label, value: item.value })),
+  ])
+
+  const gotoStepOptions = computed(() => (selectedFlow.value?.steps || [])
+    .filter((_, index) => index !== selectedStepIndex.value)
+    .map((step, index) => ({
+      label: step.k ? `${step.k}${step.task ? ` (${step.task})` : ''}` : `任务 ${index + 1}`,
+      value: step.k,
+    }))
+    .filter(item => item.value))
 
   const filteredVarsList = computed(() => {
     const keyword = variableSearch.value.trim().toLowerCase()
@@ -106,11 +181,24 @@ export function useTemplateEditor({ state, message, getProcedureDefinitions, clo
     flowSteps: (localData.value.flows || []).reduce((total, flow) => total + (flow.steps?.length || 0), 0),
   }))
 
-  const templatePreview = computed(() => JSON.stringify(
-    buildTemplatePayload(localData.value, varsList.value, { clone: true }),
-    null,
-    2,
-  ))
+  const stepBindingRows = computed(() => {
+    const step = selectedStep.value
+    const task = getTaskByKey(step?.task)
+    if (!step || !task) return []
+    return (task.args || [])
+      .filter(key => Object.prototype.hasOwnProperty.call(step.args || {}, key))
+      .map(key => ({
+        ...getVarMeta(key),
+        binding: normalizeStepArgBinding(step.args[key]),
+      }))
+  })
+
+  const stepBindingStats = computed(() => ({
+    total: stepBindingRows.value.length,
+    complete: stepBindingRows.value.filter(row => (
+      row.binding.$bind !== 'var' || flowVariableOptions.value.some(item => item.value === row.binding.key)
+    )).length,
+  }))
 
   function refreshProcedureDefinitions() {
     procedureDefinitions.value = getProcedureDefinitions().map(item => {
@@ -129,15 +217,27 @@ export function useTemplateEditor({ state, message, getProcedureDefinitions, clo
     })
   }
 
-  function initialize(data) {
-    activeTab.value = 'basic'
+  async function initialize(data) {
+    const generation = ++initializationGeneration
+    autosave.cancelPending()
+    autosaveReady = false
+    editRevision = 0
+    savedRevision = 0
+    autosaveStatus.value = 'saved'
     variableSearch.value = ''
     pickerState.value = { ...EMPTY_PICKER_STATE }
     stepArgEditorState.value = { ...EMPTY_STEP_ARG_STATE }
+    settingsDialogVisible.value = false
+    variableDialogVisible.value = false
+    taskDialogVisible.value = false
+    selectedFlowIndex.value = 0
+    selectedStepIndex.value = 0
     refreshProcedureDefinitions()
     const normalized = normalizeTemplateEditorData(data || {})
     localData.value = normalized.localData
     varsList.value = normalized.varsList
+    await nextTick()
+    if (generation === initializationGeneration) autosaveReady = true
   }
 
   function getProcedureByName(name) {
@@ -177,23 +277,10 @@ export function useTemplateEditor({ state, message, getProcedureDefinitions, clo
   function normalizeStepArgEditorRow(key, currentValue) {
     const meta = getVarMeta(key)
     const hasCurrent = typeof currentValue !== 'undefined'
-    let editorType = 'text'
-    let value = hasCurrent ? currentValue : (meta.def ?? '')
-    let sourceMode = 'literal'
-    if (typeof currentValue === 'string') {
-      const matchesVariable = flattenedVarOptions.value.some(item => item.value === currentValue)
-      sourceMode = matchesVariable && currentValue !== key ? 'var' : 'literal'
-    }
-    if (meta.tp === 'bool') {
-      editorType = 'bool'
-      value = hasCurrent ? Boolean(currentValue) : Boolean(meta.def ?? false)
-    } else if (meta.tp === 'int') {
-      editorType = 'number'
-      value = hasCurrent ? Number(currentValue) : (meta.def ?? 0)
-    } else if (meta.tp === 'enum') {
-      editorType = 'enum'
-    }
-    return { key, label: meta.label, tp: meta.tp, editorType, sourceMode, value, meta }
+    const binding = hasCurrent
+      ? normalizeStepArgBinding(currentValue)
+      : createStepArgBinding('literal', buildDefaultStepArgValue(key))
+    return { key, label: meta.label, tp: meta.tp, binding, meta }
   }
 
   function enumOptionsForKey(varKey) {
@@ -245,6 +332,217 @@ export function useTemplateEditor({ state, message, getProcedureDefinitions, clo
 
   function handleStepTaskChange(step) {
     step.args = {}
+  }
+
+  function setVariableKey(variable, value) {
+    const previousKey = String(variable._referenceKey || variable._key || '').trim()
+    variable._key = value
+    const nextKey = String(value || '').trim()
+    if (!nextKey) {
+      if (previousKey) variable._referenceKey = previousKey
+      return
+    }
+    if (previousKey && previousKey !== nextKey) {
+      renameVariableReferences({ varsList: varsList.value, localData: localData.value, from: previousKey, to: nextKey })
+      syncStepArgEditorReferences(previousKey, nextKey)
+    }
+    variable._referenceKey = nextKey
+  }
+
+  function setTaskKey(task, value) {
+    const previousKey = String(task._referenceKey || task.k || '').trim()
+    task.k = value
+    const nextKey = String(value || '').trim()
+    if (!nextKey) {
+      if (previousKey) task._referenceKey = previousKey
+      return
+    }
+    if (previousKey && previousKey !== nextKey) {
+      for (const flow of localData.value.flows || []) {
+        for (const step of flow.steps || []) {
+          if (step.task === previousKey) step.task = nextKey
+        }
+      }
+    }
+    task._referenceKey = nextKey
+  }
+
+  function handleVariableTypeChange(variable) {
+    variable.def = variable.tp === 'bool' ? false : (variable.tp === 'int' ? null : '')
+    if (variable.tp !== 'int') {
+      variable.min = undefined
+      variable.max = undefined
+    }
+    if (variable.tp !== 'enum') variable.oneOf = []
+  }
+
+  function nextUniqueKey(items, prefix) {
+    const used = new Set((items || []).map(item => item.k).filter(Boolean))
+    let index = 1
+    while (used.has(`${prefix}_${index}`)) index += 1
+    return `${prefix}_${index}`
+  }
+
+  function selectFlow(index) {
+    selectedFlowIndex.value = Number(index) || 0
+    selectedStepIndex.value = 0
+  }
+
+  function selectStep(index) {
+    selectedStepIndex.value = Math.max(0, Number(index) || 0)
+  }
+
+  function addFlow() {
+    const flow = createTemplateFlow()
+    flow.k = nextUniqueKey(localData.value.flows, 'flow')
+    flow.t = '新任务流'
+    localData.value.flows.push(flow)
+    selectFlow(localData.value.flows.length - 1)
+  }
+
+  function removeSelectedFlow() {
+    if (!selectedFlow.value) return
+    localData.value.flows.splice(selectedFlowIndex.value, 1)
+    selectedFlowIndex.value = Math.max(0, Math.min(selectedFlowIndex.value, localData.value.flows.length - 1))
+    selectedStepIndex.value = 0
+  }
+
+  function addStep() {
+    const flow = selectedFlow.value
+    if (!flow) return
+    const step = createTemplateFlowStep()
+    step.k = nextUniqueKey(flow.steps, 'step')
+    step.task = localData.value.tasks?.[0]?.k || ''
+    flow.steps.push(step)
+    selectedStepIndex.value = flow.steps.length - 1
+  }
+
+  function removeSelectedStep() {
+    const flow = selectedFlow.value
+    if (!flow || !selectedStep.value) return
+    const removedKey = selectedStep.value.k
+    flow.steps.splice(selectedStepIndex.value, 1)
+    for (const step of flow.steps) {
+      if (step.onFail === 'goto' && step.goto === removedKey) {
+        step.onFail = 'stop'
+        step.goto = ''
+      }
+      if (step.onSuccess === 'goto' && step.successGoto === removedKey) {
+        step.onSuccess = 'continue'
+        step.successGoto = ''
+      }
+    }
+    selectedStepIndex.value = Math.max(0, Math.min(selectedStepIndex.value, flow.steps.length - 1))
+  }
+
+  function moveSelectedStep(offset) {
+    const flow = selectedFlow.value
+    const from = selectedStepIndex.value
+    const to = from + offset
+    if (!flow || to < 0 || to >= flow.steps.length) return
+    const [step] = flow.steps.splice(from, 1)
+    flow.steps.splice(to, 0, step)
+    selectedStepIndex.value = to
+  }
+
+  function isStepBindingComplete(step) {
+    const task = getTaskByKey(step?.task)
+    if (!task) return false
+    const allowedKeys = new Set(task.args || [])
+    return Object.entries(step.args || {}).every(([key, value]) => {
+      if (!allowedKeys.has(key)) return false
+      const binding = normalizeStepArgBinding(value)
+      return binding.$bind !== 'var' || flowVariableOptions.value.some(item => item.value === binding.key)
+    })
+  }
+
+  function handleWorkbenchStepTaskChange(taskKey) {
+    const step = selectedStep.value
+    if (!step) return
+    step.task = taskKey || ''
+    const task = getTaskByKey(step.task)
+    const allowedKeys = new Set(task?.args || [])
+    step.args = Object.fromEntries(Object.entries(step.args || {}).filter(([key]) => allowedKeys.has(key)))
+  }
+
+  function setStepArgSource(argKey, source) {
+    const step = selectedStep.value
+    if (!step) return
+    const current = Object.prototype.hasOwnProperty.call(step.args || {}, argKey)
+      ? normalizeStepArgBinding(step.args[argKey])
+      : null
+    if (source === 'var') {
+      const sameName = flowVariableOptions.value.find(item => item.value === argKey) || flowVariableOptions.value[0]
+      const currentKey = current?.$bind === 'var'
+        && flowVariableOptions.value.some(item => item.value === current.key)
+        ? current.key
+        : sameName?.value
+      step.args[argKey] = createStepArgBinding('var', currentKey)
+    } else {
+      const value = current?.$bind === 'literal' ? current.value : buildDefaultStepArgValue(argKey)
+      step.args[argKey] = createStepArgBinding('literal', value)
+    }
+  }
+
+  function setStepArgValue(argKey, value) {
+    const step = selectedStep.value
+    if (!step) return
+    const binding = normalizeStepArgBinding(step.args?.[argKey])
+    step.args[argKey] = binding.$bind === 'var'
+      ? createStepArgBinding('var', value)
+      : createStepArgBinding('literal', value)
+  }
+
+  function setSelectedStepKey(value) {
+    const flow = selectedFlow.value
+    const step = selectedStep.value
+    if (!flow || !step) return
+    const previousKey = step.k
+    step.k = value
+    if (!previousKey || previousKey === value) return
+    for (const candidate of flow.steps) {
+      if (candidate !== step && candidate.onFail === 'goto' && candidate.goto === previousKey) candidate.goto = value
+      if (candidate !== step && candidate.onSuccess === 'goto' && candidate.successGoto === previousKey) candidate.successGoto = value
+    }
+  }
+
+  function handleStepOnSuccessChange(value) {
+    const step = selectedStep.value
+    if (!step) return
+    step.onSuccess = value
+    if (value !== 'goto') step.successGoto = ''
+  }
+
+  function handleStepOnFailChange(value) {
+    const step = selectedStep.value
+    if (!step) return
+    step.onFail = value
+    if (value !== 'goto') step.goto = ''
+  }
+
+  function openSettingsDialog() {
+    settingsDialogVisible.value = true
+  }
+
+  function openVariableDialog() {
+    variableDialogVisible.value = true
+  }
+
+  function openTaskDialog() {
+    refreshProcedureDefinitions()
+    taskDialogVisible.value = true
+  }
+
+  function closeSettingsDialog() {
+    settingsDialogVisible.value = false
+  }
+
+  function closeVariableDialog() {
+    variableDialogVisible.value = false
+  }
+
+  function closeTaskDialog() {
+    taskDialogVisible.value = false
   }
 
   function closePicker() {
@@ -323,20 +621,25 @@ export function useTemplateEditor({ state, message, getProcedureDefinitions, clo
     if (!step) return closeStepArgEditor()
     step.args = Object.fromEntries(stepArgEditorState.value.rows
       .filter(row => stepArgEditorState.value.selectedKeys.includes(row.key))
-      .map(row => [row.key, row.value]))
+      .map(row => [row.key, row.binding]))
     closeStepArgEditor()
   }
 
-  function fillArgsFromTask(step) {
-    const task = getTaskByKey(step.task)
-    if (!task) {
-      message.warning('未找到对应任务，无法自动生成步骤默认值')
+  function setStepArgEditorSource(row, source) {
+    const current = normalizeStepArgBinding(row.binding)
+    if (source === 'var') {
+      const sameName = flowVariableOptions.value.find(item => item.value === row.key) || flowVariableOptions.value[0]
+      const currentKey = current.$bind === 'var'
+        && flowVariableOptions.value.some(item => item.value === current.key)
+        ? current.key
+        : sameName?.value
+      row.binding = createStepArgBinding('var', currentKey)
       return
     }
-    step.args = Object.fromEntries((task.args || [])
-      .filter(Boolean)
-      .map(arg => [arg, buildDefaultStepArgValue(arg)]))
-    message.success('已根据变量类型自动生成步骤默认值')
+    row.binding = createStepArgBinding(
+      'literal',
+      current.$bind === 'literal' ? current.value : buildDefaultStepArgValue(row.key),
+    )
   }
 
   function handleAddDependentVar(parentVar, eqValue = undefined) {
@@ -350,102 +653,99 @@ export function useTemplateEditor({ state, message, getProcedureDefinitions, clo
     else varsList.value.splice(index + 1, 0, child)
   }
 
-  function warnOnTab(tab, text) {
-    activeTab.value = tab
-    message.warning(text)
-    return false
-  }
-
-  function validateTemplate() {
-    if (!localData.value.id) return warnOnTab('basic', '模板 ID 不能为空')
-    const variableKeys = varsList.value.map(item => item._key).filter(Boolean)
-    const duplicateVariable = variableKeys.find((key, index) => variableKeys.indexOf(key) !== index)
-    if (duplicateVariable) return warnOnTab('vars', `存在重复参数键名: ${duplicateVariable}`)
-
-    const invalidTask = (localData.value.tasks || []).find(item => !item.k || !item.fn)
-    if (invalidTask) return warnOnTab('tasks', '任务必须填写任务 Key 和 Lua 函数名')
-    const taskKeys = (localData.value.tasks || []).map(item => item.k).filter(Boolean)
-    const duplicateTask = taskKeys.find((key, index) => taskKeys.indexOf(key) !== index)
-    if (duplicateTask) return warnOnTab('tasks', `存在重复任务 Key: ${duplicateTask}`)
-
-    const variableKeySet = new Set(flattenedVarOptions.value.map(item => item.value))
-    for (const task of localData.value.tasks || []) {
-      const procedure = getProcedureByName(task.fn)
-      if (!procedure) return warnOnTab('tasks', `任务引用了不存在的 Blockly 函数: ${task.fn}`)
-      if (!(procedure.args.length === 1 && procedure.args[0] === 'args')) {
-        return warnOnTab('tasks', `任务只能绑定形如 function xxx(args) 的函数: ${task.fn}`)
-      }
-      const missingArg = (task.args || []).find(arg => !variableKeySet.has(arg))
-      if (missingArg) return warnOnTab('tasks', `任务变量不存在: ${missingArg}`)
+  async function handleClose() {
+    if (isClosing.value) return
+    isClosing.value = true
+    try {
+      const snapshot = savedRevision < editRevision
+        ? {
+            revision: editRevision,
+            payload: buildTemplatePayload(localData.value, varsList.value, { clone: true }),
+          }
+        : undefined
+      await autosave.flush(snapshot)
+      closeEditor()
+    } catch (error) {
+      message.warning(error?.message || '自动保存失败，请稍后重试')
+    } finally {
+      isClosing.value = false
     }
-
-    const taskKeySet = new Set(taskKeys)
-    for (const flow of localData.value.flows || []) {
-      if (!flow.k) return warnOnTab('flows', '任务流必须填写 Key')
-      const missingGlobal = (flow.g || []).find(arg => !variableKeySet.has(arg))
-      if (missingGlobal) return warnOnTab('flows', `任务流全局参数不存在: ${missingGlobal}`)
-      const stepKeys = new Set()
-      for (const step of flow.steps || []) {
-        if (!step.k || !step.task) return warnOnTab('flows', '任务流步骤必须填写步骤 ID 和任务')
-        if (stepKeys.has(step.k)) return warnOnTab('flows', `任务流内存在重复步骤 ID: ${step.k}`)
-        stepKeys.add(step.k)
-        if (!taskKeySet.has(step.task)) return warnOnTab('flows', `任务流步骤引用了不存在的任务: ${step.task}`)
-      }
-    }
-    return true
-  }
-
-  async function handleSave() {
-    if (!validateTemplate()) return
-    await saveEditorMeta(buildTemplatePayload(localData.value, varsList.value))
-    message.success('已保存模板配置到拼图块')
-  }
-
-  function handleClose() {
-    closeEditor()
   }
 
   watch(() => state.templateEditorModalData.value, initialize, { immediate: true })
   watch(
-    () => varsList.value.map(item => item._key),
-    (nextKeys, previousKeys) => {
-      if (!Array.isArray(previousKeys) || previousKeys.length !== nextKeys.length) return
-      for (let index = 0; index < nextKeys.length; index += 1) {
-        const from = String(previousKeys[index] || '').trim()
-        const to = String(nextKeys[index] || '').trim()
-        if (!from || !to || from === to) continue
-        renameVariableReferences({ varsList: varsList.value, localData: localData.value, from, to })
-        syncStepArgEditorReferences(from, to)
-      }
+    () => buildTemplatePayload(localData.value, varsList.value, { clone: true }),
+    payload => {
+      if (!autosaveReady) return
+      editRevision += 1
+      autosaveStatus.value = 'pending'
+      autosave.schedule({ revision: editRevision, payload })
     },
-    { flush: 'sync' },
+    { deep: true, flush: 'post' },
   )
-
   return {
-    activeTab,
+    selectedFlowIndex,
+    selectedStepIndex,
     variableSearch,
+    autosaveStatus,
+    autosaveStatusText,
+    isClosing,
     visible,
     pickerState,
     stepArgEditorState,
+    settingsDialogVisible,
+    variableDialogVisible,
+    taskDialogVisible,
     localData,
     varsList,
     tpOptions,
     onFailOptions,
+    onSuccessOptions,
+    bindingSourceOptions,
     stepArgSourceOptions,
     procedureOptions,
     taskOptions,
+    flowOptions,
+    selectedFlow,
+    selectedStep,
+    gotoStepOptions,
+    stepBindingRows,
+    stepBindingStats,
     filteredVarsList,
     pickerFilteredOptions,
     stats,
-    templatePreview,
+    refreshProcedureDefinitions,
     createVar: createTemplateVariable,
     createTask: createTemplateTask,
     createFlow: createTemplateFlow,
     createFlowStep: createTemplateFlowStep,
     createEnumOption,
     duplicateVar,
+    setVariableKey,
+    setTaskKey,
+    handleVariableTypeChange,
     handleTaskFunctionChange,
     handleStepTaskChange,
+    selectFlow,
+    selectStep,
+    addFlow,
+    removeSelectedFlow,
+    addStep,
+    removeSelectedStep,
+    moveSelectedStep,
+    isStepBindingComplete,
+    handleWorkbenchStepTaskChange,
+    setStepArgSource,
+    setStepArgValue,
+    setSelectedStepKey,
+    handleStepOnSuccessChange,
+    handleStepOnFailChange,
+    openSettingsDialog,
+    openVariableDialog,
+    openTaskDialog,
+    closeSettingsDialog,
+    closeVariableDialog,
+    closeTaskDialog,
     formatValuePreview,
     enumOptionsForKey,
     closePicker,
@@ -455,9 +755,8 @@ export function useTemplateEditor({ state, message, getProcedureDefinitions, clo
     openFlowGlobalPicker,
     openStepArgsPicker,
     confirmStepArgEditor,
-    fillArgsFromTask,
+    setStepArgEditorSource,
     handleAddDependentVar,
-    handleSave,
     handleClose,
   }
 }

@@ -3,7 +3,7 @@ import {
   buildWorkflowDefaults,
   normalizeTemplateMeta,
   normalizeTemplateSavedConfig,
-} from './templateDomain'
+} from './templateDomain.js'
 
 export function createTemplateActions({ state, templateApi, getActions }) {
   function applyTemplateState(meta, savedConfig) {
@@ -176,7 +176,6 @@ export function createTemplateActions({ state, templateApi, getActions }) {
       if (typeof state.templateEditorModalCallback.value === 'function') {
         await state.templateEditorModalCallback.value(meta)
       }
-      await getActions().closeTemplateEditor()
     },
   }
 }

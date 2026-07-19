@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -20,6 +21,14 @@ from .utils.virtual_io import VirtualIO
 NamespaceBuilder = Callable[[LuaRuntime], Any]
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeGlobalsSnapshot:
+    """可安全复制到子运行时的全局值与 Lua 函数字节码"""
+
+    values: dict[str, Any]
+    functions: dict[str, str]
+
+
 class LuaEngine:
     """Lua 脚本运行时管理器"""
 
@@ -34,6 +43,7 @@ class LuaEngine:
         self._lua_require_base_dir: Path | None = None
         self._main_script: str = ""
         self._namespace_builders: dict[str, NamespaceBuilder] = {}
+        self._builtin_lua_function_bytecodes: dict[str, str] = {}
 
     def register_namespace(self, name: str, builder: NamespaceBuilder) -> None:
         """注册额外 Lua 命名空间 构建时延迟注入到对应 runtime"""
@@ -75,34 +85,75 @@ class LuaEngine:
         globals_table["set_output_limit"] = self.host_api.set_output_limit
         globals_table["get_output_limit"] = self.host_api.get_output_limit
 
-    def _capture_runtime_globals_snapshot(self, lua: LuaRuntime) -> dict[str, Any]:
-        """捕获受限 globals 快照 仅保留可安全继承的全局"""
-        snapshot: dict[str, Any] = {}
+    def _capture_runtime_globals_snapshot(self, lua: LuaRuntime) -> RuntimeGlobalsSnapshot:
+        """捕获受限 globals 快照及可在子运行时重建的 Lua 全局函数"""
+        values: dict[str, Any] = {}
+        functions = {
+            key: bytecode
+            for key, bytecode in self._dump_lua_global_functions(lua).items()
+            if self._builtin_lua_function_bytecodes.get(key) != bytecode
+        }
         globals_table = lua.globals()
         for key in list(globals_table.keys()):
             if not isinstance(key, str):
-                continue
-            if key.startswith("_"):
                 continue
             try:
                 value = globals_table[key]
             except Exception:
                 continue
+
             if callable(value):
+                continue
+
+            # 保持原有私有值隔离规则；函数不受此前缀限制，因为 Blockly
+            # 会将中文函数名编码为以 _E 开头的合法 Lua 标识符。
+            if key.startswith("_"):
                 continue
             try:
                 normalized = lua_2_python(value)
             except Exception:
                 continue
             if isinstance(normalized, (type(None), bool, int, float, str, list, dict)):
-                snapshot[key] = normalized
-        return snapshot
+                values[key] = normalized
+        return RuntimeGlobalsSnapshot(values=values, functions=functions)
 
-    def _apply_runtime_globals_snapshot(self, lua: LuaRuntime, snapshot: dict[str, Any]) -> None:
-        """将受限 globals 快照重新注入到子运行时"""
+    def _dump_lua_global_functions(self, lua: LuaRuntime) -> dict[str, str]:
+        """序列化当前 Runtime 中可由 string.dump 处理的 Lua 全局函数"""
+        functions: dict[str, str] = {}
         globals_table = lua.globals()
-        for key, value in snapshot.items():
+        safe_dump = globals_table["safe_dump"]
+        for key in list(globals_table.keys()):
+            if not isinstance(key, str):
+                continue
+            try:
+                value = globals_table[key]
+            except Exception:
+                continue
+            if not callable(value):
+                continue
+
+            # Python callable 和 Lua C 函数无法由 string.dump 序列化，
+            # 这里只继承纯 Lua 函数，其他宿主能力会由命名空间重新注册。
+            try:
+                bytecode = safe_dump(value)
+            except Exception:
+                continue
+            if isinstance(bytecode, str) and bytecode:
+                functions[key] = bytecode
+        return functions
+
+    def _apply_runtime_globals_snapshot(self, lua: LuaRuntime, snapshot: RuntimeGlobalsSnapshot) -> None:
+        """将受限全局值和 Lua 函数重新注入到子运行时"""
+        globals_table = lua.globals()
+        for key, value in snapshot.values.items():
             globals_table[key] = value
+
+        safe_load = globals_table["safe_load"]
+        for key, bytecode in snapshot.functions.items():
+            function_ref = safe_load(bytecode)
+            if function_ref is None:
+                raise ValueError(f"Failed to restore Lua global function in sub-thread: {key}")
+            globals_table[key] = function_ref
 
     def _register_builtin_namespaces(self, lua: LuaRuntime) -> None:
         """向 Lua 注入 runtime 内建命名空间"""
@@ -174,6 +225,9 @@ class LuaEngine:
         self._configure_lua_package_path(lua)
         build_lua_runtime_inject(lua)
         self._install_stop_hook(lua)
+        # 记录运行时自带函数，后续快照仅复制脚本新增或覆盖的函数。
+        # 这些内置函数可能持有局部 upvalue，必须由注入脚本原样重建。
+        self._builtin_lua_function_bytecodes = self._dump_lua_global_functions(lua)
         self.lupa = lua
         self._register_all_namespaces(lua)
         return self.lupa
@@ -185,7 +239,7 @@ class LuaEngine:
         snapshot = self._capture_runtime_globals_snapshot(self.lupa)
         return self._build_subruntime_from_snapshot(snapshot)
 
-    def _build_subruntime_from_snapshot(self, snapshot: dict[str, Any]) -> LuaRuntime:
+    def _build_subruntime_from_snapshot(self, snapshot: RuntimeGlobalsSnapshot) -> LuaRuntime:
         """根据预先捕获的主运行时快照构建线程子运行时"""
         subruntime = self._create_runtime()
         self._register_host_globals(subruntime)

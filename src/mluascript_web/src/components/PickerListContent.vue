@@ -40,7 +40,7 @@ function isSelected(itemValue) {
 </script>
 
 <template>
-  <div style="display: flex; flex-direction: column; height: 100%;">
+  <div class="picker-list-content">
     <n-input
       :value="searchQuery"
       :placeholder="`搜索${title}...`"
@@ -88,7 +88,7 @@ function isSelected(itemValue) {
       <n-button quaternary @click="emit('manage')">{{ manageButtonText }}</n-button>
     </div>
 
-    <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
+    <div class="picker-list-scroll">
       <n-card
         v-for="item in filteredItems"
         :key="item.value"
@@ -110,3 +110,5 @@ function isSelected(itemValue) {
     </div>
   </div>
 </template>
+
+<style scoped src="./pickerListContent.css"></style>

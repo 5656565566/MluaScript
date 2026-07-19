@@ -63,6 +63,8 @@ class TemplateStore:
         step_enabled = dict(saved_flow.stepEnabled if saved_flow else {})
         step_args = dict(saved_flow.stepArgs if saved_flow else {})
         step_order = list(saved_flow.stepOrder if saved_flow and saved_flow.stepOrder else [step.k for step in flow.steps])
+        template_values = {key: field.def_ for key, field in meta.vars.items()}
+        template_values.update(globals_values)
 
         task_map = {task.k: task for task in meta.tasks}
         steps = []
@@ -80,9 +82,9 @@ class TemplateStore:
                 if field_def is None:
                     continue
                 merged[field_key] = field_def.def_
-            merged.update(task.defaults)
+            merged.update({key: _resolve_template_binding(value, template_values) for key, value in task.defaults.items()})
             merged.update({key: value for key, value in globals_values.items() if key in task.args})
-            merged.update(step.args)
+            merged.update({key: _resolve_template_binding(value, template_values) for key, value in step.args.items()})
             merged.update(step_args.get(step.k, {}))
             active_values = dict(merged)
             final_args = {}
@@ -102,7 +104,10 @@ class TemplateStore:
                     "fn": task.fn,
                     "enabled": bool(enabled),
                     "args": final_args,
+                    "onSuccess": step.onSuccess,
+                    "successGoto": step.successGoto,
                     "onFail": step.onFail,
+                    "goto": step.goto,
                 }
             )
         return {
@@ -116,13 +121,22 @@ class TemplateStore:
         lines = [
             f"log_info('[template] start workflow={runtime['flowKey']}')",
         ]
+        step_indexes = {
+            str(step.get("key") or f"step_{index}"): index
+            for index, step in enumerate(runtime.get("steps", []), start=1)
+        }
         for index, step in enumerate(runtime.get("steps", []), start=1):
             step_key = str(step.get("key") or f"step_{index}")
             fn_name = str(step.get("fn") or "")
             fn_ref_literal = _lua_global_ref_expr(fn_name)
             args_literal = _python_to_lua_literal(step.get("args") or {})
+            # Both success and failure transitions target the final, user-ordered step sequence.
+            fail_goto_index = step_indexes.get(str(step.get("goto") or ""))
+            success_goto_index = step_indexes.get(str(step.get("successGoto") or ""))
             lines.extend(
                 [
+                    f"::__mlua_template_step_{index}::",
+                    "do",
                     f"local __mlua_template_args_{index} = {args_literal}",
                     f"log_info('[template] start step={step_key} fn={fn_name}')",
                     f"local __mlua_template_fn_{index} = {fn_ref_literal}",
@@ -133,16 +147,54 @@ class TemplateStore:
                     f"if not __mlua_template_ok_{index} then",
                     f"  log_error('[template] step failed: {step_key} => ' .. tostring(__mlua_template_result_{index}))",
                     f"  print('[template] step failed: {step_key} => ' .. tostring(__mlua_template_result_{index}))",
-                    "  if 'continue' ~= " + _python_to_lua_literal(step.get("onFail") or "stop") + " then",
+                    "  if 'continue' == " + _python_to_lua_literal(step.get("onFail") or "stop") + " then",
+                    "    -- Continue with the next workflow step.",
+                    *(
+                        [
+                            "  elseif 'goto' == " + _python_to_lua_literal(step.get("onFail") or "stop") + " then",
+                            f"    goto __mlua_template_step_{fail_goto_index}",
+                        ]
+                        if fail_goto_index is not None
+                        else []
+                    ),
+                    "  else",
                     f"    error(__mlua_template_result_{index})",
                     "  end",
                     "else",
                     f"  log_info('[template] finish step={step_key}')",
+                    *(
+                        [
+                            "  if 'goto' == " + _python_to_lua_literal(step.get("onSuccess") or "continue") + " then",
+                            f"    goto __mlua_template_step_{success_goto_index}",
+                            "  elseif 'exit' == " + _python_to_lua_literal(step.get("onSuccess") or "continue") + " then",
+                            "    return true",
+                            "  end",
+                        ]
+                        if success_goto_index is not None
+                        else [
+                            "  if 'exit' == " + _python_to_lua_literal(step.get("onSuccess") or "continue") + " then",
+                            "    return true",
+                            "  end",
+                        ]
+                    ),
+                    "end",
                     "end",
                 ]
             )
         lines.append("return true")
         return "\n".join(lines)
+
+
+def _resolve_template_binding(value: Any, template_values: dict[str, Any]) -> Any:
+    """Resolve editor binding descriptors while preserving legacy literal values."""
+    if not isinstance(value, dict) or "$bind" not in value:
+        return value
+    source = value.get("$bind")
+    if source == "literal":
+        return value.get("value")
+    if source == "var":
+        return template_values.get(str(value.get("key") or ""))
+    return value
 
 
 def _python_to_lua_literal(value: Any) -> str:

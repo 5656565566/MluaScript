@@ -5,6 +5,7 @@ import { registerCustomFields, LuaVariableField } from './fields'
 import { buildToolbox } from './toolbox'
 import { getIsDarkTheme } from './utils'
 import { findVariableItemByValue } from './variableContext'
+import { applyBlocklyZhCnLocale } from './locale'
 import {
   deleteWorkspaceVariableById,
   getWorkspaceVariableById,
@@ -106,22 +107,7 @@ function buildFilteredVariableFlyout(workspace) {
 
 export { workspaceToXml, workspaceToLua } from './generator'
 
-Blockly.setLocale(ZhHans)
-
-Blockly.Msg.CONTROLS_IF_MSG_IF = '如果'
-Blockly.Msg.CONTROLS_REPEAT_TITLE = '重复 %1 次'
-Blockly.Msg.CONTROLS_REPEAT_INPUT_DO = '循环'
-Blockly.Msg.LOGIC_BOOLEAN_TRUE = '真'
-Blockly.Msg.LOGIC_BOOLEAN_FALSE = '假'
-Blockly.Msg.TEXT_JOIN_TITLE_CREATEWITH = '拼接文本'
-Blockly.Msg.VARIABLES_DEFAULT_NAME = '项目'
-Blockly.Msg.PROCEDURES_DEFNORETURN_TITLE = '定义'
-Blockly.Msg.PROCEDURES_DEFNORETURN_PROCEDURE = '函数'
-Blockly.Msg.PROCEDURES_DEFRETURN_TITLE = '定义'
-Blockly.Msg.PROCEDURES_DEFRETURN_PROCEDURE = '函数'
-Blockly.Msg.TEXT_APPEND_TO = '追加到'
-Blockly.Msg.CONTROLS_WHILEUNTIL_OPERATOR_WHILE = '当'
-Blockly.Msg.CONTROLS_WHILEUNTIL_OPERATOR_UNTIL = '直到'
+applyBlocklyZhCnLocale(Blockly, ZhHans)
 
 registerCustomFields()
 

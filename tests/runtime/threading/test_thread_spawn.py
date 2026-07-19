@@ -134,7 +134,7 @@ def test_thread_spawn_passes_context_id() -> None:
 
 
 
-def test_thread_spawn_subthread_reads_limited_globals_snapshot() -> None:
+def test_thread_spawn_subthread_reads_values_and_global_functions_snapshot() -> None:
     engine = _make_engine()
 
     result = engine.execute(
@@ -171,8 +171,160 @@ def test_thread_spawn_subthread_reads_limited_globals_snapshot() -> None:
         "first": 42,
         "second": "hello",
         "third": True,
-        "fifth": "nil",
+        "fifth": "function",
     }, normalized
+
+
+def test_thread_spawn_subthread_calls_nested_global_helpers() -> None:
+    engine = _make_engine()
+
+    result = engine.execute(
+        '''
+        function thread_test_leaf_helper(value)
+            return value + 1
+        end
+
+        function thread_test_middle_helper(value)
+            return thread_test_leaf_helper(value) * 2
+        end
+
+        function thread_test_nested_helpers()
+            return thread_test_middle_helper(20)
+        end
+
+        local task = thread.spawn("thread_test_nested_helpers")
+        task:join(1.0)
+        return {
+            debug_result = task:result(),
+            debug_error = task:error(),
+        }
+        '''
+    )
+
+    normalized = lua_2_python(result)
+    assert isinstance(normalized, dict)
+    assert normalized.get("debug_error") in ("", None), normalized
+    assert normalized.get("debug_result") == 42, normalized
+
+
+def test_thread_spawn_subthread_calls_encoded_global_helper() -> None:
+    engine = _make_engine()
+
+    result = engine.execute(
+        '''
+        function _E6_88_98_E6_96_97_E6_96_B9_E6_A1_88()
+            return "battle-plan-ready"
+        end
+
+        function thread_test_encoded_helper()
+            return _E6_88_98_E6_96_97_E6_96_B9_E6_A1_88()
+        end
+
+        local task = thread.spawn("thread_test_encoded_helper")
+        task:join(1.0)
+        return {
+            debug_result = task:result(),
+            debug_error = task:error(),
+        }
+        '''
+    )
+
+    normalized = lua_2_python(result)
+    assert isinstance(normalized, dict)
+    assert normalized.get("debug_error") in ("", None), normalized
+    assert normalized.get("debug_result") == "battle-plan-ready", normalized
+
+
+def test_thread_spawn_global_helper_uses_dynamic_namespace() -> None:
+    engine = _make_engine()
+    engine.register_namespace(
+        "maa",
+        lambda _: {
+            "click": lambda x, y: x + y,
+        },
+    )
+
+    result = engine.execute(
+        '''
+        function thread_test_click_helper()
+            return maa.click(20, 22)
+        end
+
+        function thread_test_dynamic_namespace_helper()
+            return thread_test_click_helper()
+        end
+
+        local task = thread.spawn("thread_test_dynamic_namespace_helper")
+        task:join(1.0)
+        return {
+            debug_result = task:result(),
+            debug_error = task:error(),
+        }
+        '''
+    )
+
+    normalized = lua_2_python(result)
+    assert isinstance(normalized, dict)
+    assert normalized.get("debug_error") in ("", None), normalized
+    assert normalized.get("debug_result") == 42, normalized
+
+
+def test_thread_spawn_subthread_calls_recursive_global_helper() -> None:
+    engine = _make_engine()
+
+    result = engine.execute(
+        '''
+        function thread_test_factorial(value)
+            if value <= 1 then
+                return 1
+            end
+            return value * thread_test_factorial(value - 1)
+        end
+
+        function thread_test_recursive_helper()
+            return thread_test_factorial(5)
+        end
+
+        local task = thread.spawn("thread_test_recursive_helper")
+        task:join(1.0)
+        return {
+            debug_result = task:result(),
+            debug_error = task:error(),
+        }
+        '''
+    )
+
+    normalized = lua_2_python(result)
+    assert isinstance(normalized, dict)
+    assert normalized.get("debug_error") in ("", None), normalized
+    assert normalized.get("debug_result") == 120, normalized
+
+
+def test_thread_spawn_restores_injected_functions_with_local_upvalues() -> None:
+    engine = _make_engine()
+
+    result = engine.execute(
+        '''
+        function thread_test_result_helper()
+            local items = {
+                { text = "enemy spotted" },
+            }
+            return result_contains_text(items, "enemy")
+        end
+
+        local task = thread.spawn("thread_test_result_helper")
+        task:join(1.0)
+        return {
+            debug_result = task:result(),
+            debug_error = task:error(),
+        }
+        '''
+    )
+
+    normalized = lua_2_python(result)
+    assert isinstance(normalized, dict)
+    assert normalized.get("debug_error") in ("", None), normalized
+    assert normalized.get("debug_result") is True, normalized
 
 
 

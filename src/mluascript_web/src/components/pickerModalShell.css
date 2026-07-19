@@ -1,0 +1,56 @@
+:global(.picker-modal-panel) {
+  height: min(820px, calc(100dvh - 48px));
+}
+
+:global(.picker-modal-panel),
+:global(.picker-modal-panel > .n-card-content),
+.picker-modal-shell,
+.picker-modal-body {
+  min-height: 0;
+}
+
+:global(.picker-modal-panel > .n-card-content) {
+  display: flex;
+  overflow: hidden !important;
+}
+
+:global(.picker-modal-content-wrap) {
+  flex: 1;
+  min-height: 0;
+  height: auto !important;
+  display: flex;
+}
+
+.picker-modal-shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.picker-modal-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.picker-modal-body.is-form {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.picker-modal-footer {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--n-border-color);
+}
+
+@media (max-height: 560px) {
+  :global(.picker-modal-panel) {
+    height: calc(100dvh - 24px);
+  }
+}

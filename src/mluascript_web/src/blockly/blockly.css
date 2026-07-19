@@ -61,20 +61,7 @@
   opacity: 0 !important;
 }
 
-/* Blockly 使用 HTML 覆盖层完成字段编辑和下拉菜单 */
-.blockly-embedded-input {
-  width: 100% !important;
-  height: 100% !important;
-  margin: 0 !important;
-  padding: 0 4px !important;
-  border: none !important;
-  outline: none !important;
-  background: transparent !important;
-  color: var(--color-text-primary) !important;
-  text-align: center !important;
-  box-sizing: border-box !important;
-}
-
+/* Blockly 使用 WidgetDiv 完成字段编辑和下拉菜单 */
 .blocklyWidgetDiv .blocklyHtmlInput:focus,
 .blocklyDropDownDiv .blocklyHtmlInput:focus,
 .blocklyTextInputBubble textarea.blocklyTextarea:focus {
@@ -180,11 +167,6 @@
   background: var(--n-border-color) !important;
 }
 
-.blockly-host .blocklyTreeRow.blocklyTreeSelected,
-.blockly-host .blocklyToolboxCategory.blocklyToolboxSelected {
-  background: var(--n-primary-color) !important;
-}
-
 .blockly-theme-dark .blocklyTreeRow,
 .blockly-theme-dark .blocklyToolboxCategory,
 .blockly-theme-dark .blocklyTreeLabel,
@@ -199,4 +181,11 @@
 .blockly-theme-light .blocklyToolboxCategoryLabel {
   color: #222222 !important;
   fill: #222222 !important;
+}
+
+/* Blockly 会使用分类自身的颜色标记选中项，这里只避免主题文字规则覆盖原生白字 */
+.blockly-host .blocklyTreeRow.blocklyTreeSelected .blocklyTreeLabel,
+.blockly-host .blocklyToolboxCategory.blocklyToolboxSelected .blocklyToolboxCategoryLabel {
+  color: #ffffff !important;
+  fill: #ffffff !important;
 }

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from lupa import LuaRuntime
+
 from mluascript.control.workspace.manager import WorkspaceManager
 from mluascript.control.workspace.template_store import (
     TemplateStore,
@@ -71,6 +73,93 @@ def test_template_store_persists_saved_config(tmp_path: Path) -> None:
     assert loaded.selectedFlowKey == "main"
     assert saved_path.exists()
     assert saved_path.parent == tmp_path / "config"
+
+
+def test_template_store_resolves_step_bindings_and_generates_goto(tmp_path: Path) -> None:
+    script = tmp_path / "binding.lua"
+    script.write_text(
+        "\n".join(
+            [
+                "-- @mlua-template:start",
+                "-- {",
+                '--   "vars": { "stage": { "tp": "str", "def": "1-7" }, "retry": { "tp": "int", "def": 2 } },',
+                '--   "tasks": [{ "k": "battle", "fn": "run_battle", "args": ["stage", "retry"] }],',
+                '--   "flows": [{ "k": "main", "g": ["stage"], "steps": [',
+                '--     { "k": "battle_1", "task": "battle", "args": { "stage": { "$bind": "var", "key": "stage" }, "retry": { "$bind": "literal", "value": 3 } }, "onSuccess": "goto", "successGoto": "battle_2", "onFail": "goto", "goto": "battle_2" },',
+                '--     { "k": "battle_2", "task": "battle", "onSuccess": "exit" }',
+                "--   ] }]",
+                "-- }",
+                "-- @mlua-template:end",
+                "function run_battle(args) return args end",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    store = TemplateStore(WorkspaceManager(tmp_path))
+    meta = store.get_template_meta("binding.lua")
+    assert meta is not None
+    saved = TemplateSavedConfig(
+        scriptPath="binding.lua",
+        flows={"main": SavedFlowConfig(globals={"stage": "2-1"})},
+    )
+
+    runtime = store.build_runtime_payload(meta, saved, flow_key="main")
+    runtime_script = store.build_runtime_script(meta, saved, flow_key="main")
+
+    assert runtime["steps"][0]["args"] == {"stage": "2-1", "retry": 3}
+    assert runtime["steps"][0]["onSuccess"] == "goto"
+    assert runtime["steps"][0]["successGoto"] == "battle_2"
+    assert runtime["steps"][0]["goto"] == "battle_2"
+    assert runtime["steps"][1]["onSuccess"] == "exit"
+    assert "goto __mlua_template_step_2" in runtime_script
+    assert "if 'exit' == \"exit\" then" in runtime_script
+
+
+def test_template_store_executes_success_goto_and_exit(tmp_path: Path) -> None:
+    script = tmp_path / "success_transition.lua"
+    script.write_text(
+        "\n".join(
+            [
+                "-- @mlua-template:start",
+                "-- {",
+                '--   "tasks": [',
+                '--     { "k": "one", "fn": "step_one" },',
+                '--     { "k": "two", "fn": "step_two" },',
+                '--     { "k": "three", "fn": "step_three" },',
+                '--     { "k": "four", "fn": "step_four" }',
+                "--   ],",
+                '--   "flows": [{ "k": "main", "steps": [',
+                '--     { "k": "s1", "task": "one", "onSuccess": "goto", "successGoto": "s3" },',
+                '--     { "k": "s2", "task": "two" },',
+                '--     { "k": "s3", "task": "three", "onSuccess": "exit" },',
+                '--     { "k": "s4", "task": "four" }',
+                "--   ] }]",
+                "-- }",
+                "-- @mlua-template:end",
+                'trace = ""',
+                'function step_one(args) trace = trace .. "1" end',
+                'function step_two(args) trace = trace .. "2" end',
+                'function step_three(args) trace = trace .. "3" end',
+                'function step_four(args) trace = trace .. "4" end',
+                "function log_info(message) end",
+                "function log_error(message) end",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    store = TemplateStore(WorkspaceManager(tmp_path))
+    meta = store.get_template_meta("success_transition.lua")
+    assert meta is not None
+    runtime_script = store.build_runtime_script(
+        meta,
+        TemplateSavedConfig(scriptPath="success_transition.lua"),
+        flow_key="main",
+    )
+
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.execute(script.read_text(encoding="utf-8") + "\n" + runtime_script)
+
+    assert lua.globals().trace == "13"
 
 
 def test_python_to_lua_literal_and_runtime_script_generation(tmp_path: Path) -> None:
