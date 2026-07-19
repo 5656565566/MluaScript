@@ -1,6 +1,6 @@
 import * as Blockly from 'blockly'
 import { luaGenerator } from 'blockly/lua'
-import { findVariableItemByValue } from './variableContext'
+import { findVariableItemByValue, getProcedureClosureCaptures } from './variableContext'
 import { getWorkspaceAllVariables } from './workspaceVariables'
 import { getBlockSemanticDiagnostic } from './blockSemanticDiagnostics'
 
@@ -171,6 +171,7 @@ function buildModuleExportCode(workspace, generator) {
 export function workspaceToLua(workspace) {
   const hasModuleExport = detectModuleExport(workspace)
   wrapVariableBlockGenerators()
+  wrapProcedureGeneratorsForClosures()
 
   try {
     const rawCode = luaGenerator.workspaceToCode(workspace)
@@ -210,5 +211,29 @@ export function workspaceToLua(workspace) {
   } catch (error) {
     console.error('生成 Blockly Lua 代码失败', error)
     throw new Error(`生成 Lua 代码失败：${error?.message || '未知错误'}`)
+  }
+}
+
+function wrapProcedureGeneratorsForClosures() {
+  for (const type of ['procedures_defnoreturn', 'procedures_defreturn']) {
+    const original = luaGenerator.forBlock[type]
+    if (typeof original !== 'function' || original.__maaClosureWrapped) continue
+
+    const wrapped = function(block, generator) {
+      const captures = getProcedureClosureCaptures(block)
+      const result = original.call(this, block, generator)
+      if (!captures.length) return result
+
+      const functionName = generator.getProcedureName(block.getFieldValue('NAME'))
+      const definitionKey = `%${functionName}`
+      const definition = generator.definitions_[definitionKey]
+      if (!definition) throw new Error(`无法生成捕获外层变量的函数：${block.getFieldValue('NAME') || functionName}`)
+
+      // Blockly 默认将函数提升到文件顶部；闭包必须留在外层 local 之后的词法位置。
+      delete generator.definitions_[definitionKey]
+      return `${definition}\n`
+    }
+    wrapped.__maaClosureWrapped = true
+    luaGenerator.forBlock[type] = wrapped
   }
 }

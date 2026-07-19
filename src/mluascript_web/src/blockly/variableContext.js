@@ -175,8 +175,38 @@ function getDeclaredLocalVariables(block) {
     .filter((item) => item.name)
 }
 
+function getCapturableWorkspaceLocalVariables(block) {
+  const workspace = block?.workspace || Blockly.getMainWorkspace()
+  const procedureBlock = getEnclosingProcedureBlock(block)
+  if (!workspace || !procedureBlock || typeof workspace.getAllBlocks !== 'function') return []
+  const argumentNames = new Set(getProcedureArgumentNames(procedureBlock))
+
+  return workspace
+    .getAllBlocks(false)
+    .filter(candidate => candidate?.type === 'local_var_declare')
+    .filter(candidate => !getEnclosingProcedureBlock(candidate))
+    // 分支内声明的局部变量不属于函数定义所在的词法作用域。
+    .filter(candidate => getBranchPath(candidate).length === 0)
+    .filter(candidate => isReachableBefore(candidate, procedureBlock))
+    .filter(candidate => !argumentNames.has(normalizeVariableName(candidate.getFieldValue?.('VAR'), 'item')))
+    // 同名 local 重复声明时，函数捕获词法位置上最近的一项。
+    .sort((a, b) => getBlockY(b) - getBlockY(a))
+    .map(candidate => ({
+      name: normalizeVariableName(candidate.getFieldValue?.('VAR'), 'item'),
+      kind: 'closure',
+      label: `${normalizeVariableName(candidate.getFieldValue?.('VAR'), 'item')}（外层）`,
+      value: normalizeVariableName(candidate.getFieldValue?.('VAR'), 'item'),
+      variableId: null,
+      description: '函数捕获的外层局部变量',
+      blockId: candidate.id,
+      scopeKey: 'workspace',
+      y: getBlockY(candidate),
+    }))
+    .filter(item => item.name)
+}
+
 function dedupeVariables(items) {
-  const priority = { local: 3, argument: 2, global: 1 }
+  const priority = { local: 4, argument: 3, closure: 2, global: 1 }
   const map = new Map()
   for (const item of items) {
     const key = item.name
@@ -197,6 +227,7 @@ export function getAvailableVariablesForBlock(block, options = {}) {
 
   if (includeLocals) {
     variables.push(...getDeclaredLocalVariables(block))
+    variables.push(...getCapturableWorkspaceLocalVariables(block))
   }
 
   if (includeArguments) {
@@ -222,8 +253,8 @@ export function getAvailableVariablesForBlock(block, options = {}) {
   }
 
   const result = dedupeVariables(variables).sort((a, b) => {
-    const kindWeight = { local: 0, argument: 1, global: 2 }
-    const diff = (kindWeight[a.kind] || 99) - (kindWeight[b.kind] || 99)
+    const kindWeight = { local: 0, argument: 1, closure: 2, global: 3 }
+    const diff = (kindWeight[a.kind] ?? 99) - (kindWeight[b.kind] ?? 99)
     if (diff !== 0) return diff
     return a.name.localeCompare(b.name, 'zh-Hans-CN')
   })
@@ -244,8 +275,39 @@ export function buildVariablePickerItems(block, options = {}) {
     label: item.label,
     value: item.value,
     description: item.description,
-    group: item.kind === 'local' ? '局部变量' : item.kind === 'argument' ? '函数参数' : '全局变量',
+    group: item.kind === 'local'
+      ? '局部变量'
+      : item.kind === 'argument'
+        ? '函数参数'
+        : item.kind === 'closure'
+          ? '外层局部变量'
+          : '全局变量',
   }))
+}
+
+export function getProcedureClosureCaptures(procedureBlock) {
+  const workspace = procedureBlock?.workspace
+  if (!workspace || typeof workspace.getAllBlocks !== 'function') return []
+  const supportedTypes = new Set([
+    'variables_get',
+    'variables_set',
+    'math_change',
+    'local_var_get',
+    'local_var_set',
+  ])
+  const captures = new Map()
+
+  for (const block of workspace.getAllBlocks(false)) {
+    if (!supportedTypes.has(block?.type)) continue
+    if (getEnclosingProcedureBlock(block)?.id !== procedureBlock.id) continue
+    const item = findVariableItemByValue(block, block.getFieldValue?.('VAR') || '', {
+      includeGlobals: true,
+      includeLocals: true,
+      includeArguments: true,
+    })
+    if (item?.kind === 'closure') captures.set(item.name, item)
+  }
+  return [...captures.values()]
 }
 
 export function findVariableItemByValue(block, rawValue, options = {}) {
