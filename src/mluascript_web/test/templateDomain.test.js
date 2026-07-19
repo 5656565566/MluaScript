@@ -58,5 +58,18 @@ test('workflow defaults resolve parameter and literal binding descriptors', () =
 
 test('runtime values normalize numeric and structured inputs', () => {
   assert.equal(normalizeRuntimeValue({ tp: 'int' }, '2.9'), 2)
-  assert.deepEqual(normalizeRuntimeValue({ tp: 'list' }, '[1, 2]'), [1, 2])
+  assert.equal(normalizeRuntimeValue({ tp: 'num' }, '2.9'), 2.9)
+  assert.deepEqual(normalizeRuntimeValue({ tp: 'json' }, '[1, 2]'), [1, 2])
+})
+
+test('path is a string input style instead of a standalone type', () => {
+  const meta = normalizeTemplateMeta({
+    vars: { file: { tp: 'str', ui: 'path' } },
+    tasks: [{ k: 'task', args: ['file'] }],
+    flows: [{ k: 'main', steps: [{ k: 'step', task: 'task' }] }],
+  })
+
+  assert.equal(meta.vars.file.rawType, 'str')
+  assert.equal(meta.vars.file.type, 'string')
+  assert.equal(meta.vars.file.ui, 'path')
 })

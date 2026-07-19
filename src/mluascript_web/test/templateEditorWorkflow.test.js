@@ -17,6 +17,13 @@ function createEditor(data) {
   })
 }
 
+test('template editor exposes only canonical data types and path as a string UI style', () => {
+  const editor = createEditor({ vars: {}, tasks: [], flows: [] })
+
+  assert.deepEqual(editor.tpOptions.map(option => option.value), ['str', 'int', 'num', 'bool', 'enum', 'json'])
+  assert.deepEqual(editor.strUiOptions.map(option => option.value), ['', 'path'])
+})
+
 test('adding a workflow step keeps task parameters and flow globals untouched', () => {
   const editor = createEditor({
     vars: { stage: { tp: 'str', def: '1-7' }, retry: { tp: 'int', def: 2 } },

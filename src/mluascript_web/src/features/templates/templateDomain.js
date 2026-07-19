@@ -35,10 +35,10 @@ export function normalizeRuntimeValue(field, value) {
     return type === 'int' ? Math.trunc(num) : num
   }
   if (type === 'bool') return Boolean(value)
-  if (type === 'json' || type === 'obj' || type === 'list') {
+  if (type === 'json') {
     if (typeof value !== 'string') return cloneValue(value)
     const text = value.trim()
-    if (!text) return type === 'list' ? [] : ''
+    if (!text) return null
     try {
       return JSON.parse(text)
     } catch {
@@ -77,6 +77,7 @@ export function normalizeTemplateField(field, key = '') {
       label: option?.label || option?.t || String(option?.value ?? option?.v ?? option),
     })) : [],
     rawType: type,
+    ui: field?.ui || '',
     if: normalizedCondition,
     grp: field?.grp || '',
     as: field?.as || '',

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from mluascript.control.workspace import (
     TemplateParseError,
     dump_template_block,
@@ -83,6 +85,34 @@ def test_is_condition_active_supports_eq_ne_and_in() -> None:
     assert is_condition_active({"k": "mode", "in": ["safe", "debug"]}, {"mode": "debug"}) is True
     assert is_condition_active({"k": "enabled"}, {"enabled": True}) is True
     assert is_condition_active({"k": "enabled"}, {"enabled": False}) is False
+
+
+def test_template_variable_types_use_canonical_set_and_path_ui_hint() -> None:
+    meta = normalize_template_meta(
+        {
+            "vars": {
+                "ratio": {"tp": "num", "def": 0.5},
+                "payload": {"tp": "json", "def": {"mode": "safe"}},
+                "file": {"tp": "str", "ui": "path"},
+            }
+        }
+    )
+
+    assert meta.vars["ratio"].tp == "num"
+    assert meta.vars["payload"].tp == "json"
+    assert meta.vars["file"].tp == "str"
+    assert meta.vars["file"].ui == "path"
+
+
+@pytest.mark.parametrize("removed_type", ["path", "list", "obj"])
+def test_template_variable_removed_types_are_rejected(removed_type: str) -> None:
+    with pytest.raises(ValueError):
+        normalize_template_meta({"vars": {"legacy": {"tp": removed_type}}})
+
+
+def test_path_ui_hint_is_rejected_for_non_string_type() -> None:
+    with pytest.raises(ValueError, match="ui 仅适用于 str 字段"):
+        normalize_template_meta({"vars": {"invalid": {"tp": "json", "ui": "path"}}})
 
 
 def test_parse_template_meta_and_dump_template_block_roundtrip() -> None:

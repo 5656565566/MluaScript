@@ -40,6 +40,35 @@ def test_build_script_run_locator_collects_same_directory_resources(tmp_path: Pa
     assert {asset.kind for asset in locator.resources} == {"image", "data"}
 
 
+def test_build_script_run_locator_allows_unsaved_in_memory_script(tmp_path: Path) -> None:
+    editor_dir = tmp_path / ".mluascript_web" / "lua"
+    editor_dir.mkdir(parents=True)
+    resource_file = editor_dir / "state.json"
+    resource_file.write_text("{}", encoding="utf-8")
+
+    manager = WorkspaceManager(tmp_path)
+    locator = manager.build_script_run_locator(
+        ".mluascript_web/lua/untitled.lua",
+        allow_missing=True,
+    )
+
+    assert Path(locator.script_file) == (editor_dir / "untitled.lua").resolve()
+    assert Path(locator.script_dir) == editor_dir.resolve()
+    assert locator.script.mtime == 0.0
+    assert [asset.relative_path for asset in locator.resources] == ["state.json"]
+
+
+def test_build_script_run_locator_still_rejects_missing_disk_script_by_default(tmp_path: Path) -> None:
+    manager = WorkspaceManager(tmp_path)
+
+    try:
+        manager.build_script_run_locator("missing.lua")
+    except FileNotFoundError as exc:
+        assert str(exc) == "Script not found: missing.lua"
+    else:
+        raise AssertionError("missing disk script should be rejected")
+
+
 def test_build_pipeline_run_locator_prefers_resource_directory_when_present(tmp_path: Path) -> None:
     project_dir = tmp_path / "demo"
     resource_dir = project_dir / "resource"

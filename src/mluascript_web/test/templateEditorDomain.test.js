@@ -46,6 +46,27 @@ test('template editor data survives normalization and serialization', () => {
   assert.deepEqual(payload.flows[0].steps[0].args, { count: 3 })
 })
 
+test('template editor serializes canonical numeric, json, and path-style string fields', () => {
+  const normalized = normalizeTemplateEditorData({
+    vars: {
+      ratio: { tp: 'num', def: 0.5, min: 0, max: 1 },
+      payload: { tp: 'json', def: '{"mode":"safe"}' },
+      file: { tp: 'str', ui: 'path', def: 'demo.json' },
+    },
+  })
+  const payload = buildTemplatePayload(normalized.localData, normalized.varsList)
+
+  assert.deepEqual(payload.vars.ratio, {
+    t: '', tp: 'num', req: false, note: '', def: 0.5, min: 0, max: 1,
+  })
+  assert.deepEqual(payload.vars.payload, {
+    t: '', tp: 'json', req: false, note: '', def: '{"mode":"safe"}',
+  })
+  assert.deepEqual(payload.vars.file, {
+    t: '', tp: 'str', req: false, note: '', ui: 'path', def: 'demo.json',
+  })
+})
+
 test('step parameter overrides and transition targets survive serialization', () => {
   const source = {
     id: 'binding-demo',

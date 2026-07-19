@@ -188,7 +188,7 @@ export default {
                     @update:value="value => setStepArgValue(row.key, value)"
                   />
                   <n-input-number
-                    v-else-if="row.binding?.$bind === 'literal' && row.tp === 'int'"
+                    v-else-if="row.binding?.$bind === 'literal' && (row.tp === 'int' || row.tp === 'num')"
                     :value="row.binding.value"
                     style="width: 100%;"
                     @update:value="value => setStepArgValue(row.key, value)"
@@ -199,6 +199,14 @@ export default {
                     :options="enumOptionsForKey(row.key)"
                     clearable
                     placeholder="选择固定值"
+                    @update:value="value => setStepArgValue(row.key, value)"
+                  />
+                  <n-input
+                    v-else-if="row.binding?.$bind === 'literal' && row.tp === 'json'"
+                    :value="row.binding.value"
+                    type="textarea"
+                    :rows="3"
+                    placeholder="填写 JSON"
                     @update:value="value => setStepArgValue(row.key, value)"
                   />
                   <n-input

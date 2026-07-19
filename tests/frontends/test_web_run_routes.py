@@ -69,6 +69,19 @@ class FakeStreamFacade(FakeControlFacade):
         return TaskOutputView(task_id=task_id, items=["line 1", "line 2"], max_lines=300, total_lines=2, version=2)
 
 
+class FakeRunFacade(FakeControlFacade):
+    def __init__(self) -> None:
+        super().__init__()
+        self.run_script_calls: list[tuple[str, str, str]] = []
+
+    def get_device_overview(self) -> SimpleNamespace:
+        return SimpleNamespace(connection=SimpleNamespace(label="LOCAL"))
+
+    def run_script(self, script_path: str, code: str, target: str) -> str:
+        self.run_script_calls.append((script_path, code, target))
+        return "run-1"
+
+
 def _test_web_config() -> SimpleNamespace:
     return SimpleNamespace(
         username="admin",
@@ -159,6 +172,37 @@ def test_stop_route_rejects_deleted_task_id(monkeypatch, tmp_path: Path) -> None
     assert response.status_code == 404
     assert response.json()["detail"] == "任务不存在或已删除: deleted-task"
     assert facade.stopped_scripts == []
+
+
+def test_run_lua_uses_editor_workspace_path(monkeypatch, tmp_path: Path) -> None:
+    facade = FakeRunFacade()
+    monkeypatch.setattr(web_app, "get_control_facade", lambda: facade)
+    monkeypatch.chdir(tmp_path)
+    client = _authenticated_client(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/api/run/lua",
+        json={"scriptPath": "scripts/demo.lua", "luaCode": "return 42"},
+    )
+
+    assert response.status_code == 200
+    assert facade.run_script_calls == [
+        (".mluascript_web/lua/scripts/demo.lua", "return 42", "LOCAL")
+    ]
+
+
+def test_run_lua_allows_unsaved_editor_code(monkeypatch, tmp_path: Path) -> None:
+    facade = FakeRunFacade()
+    monkeypatch.setattr(web_app, "get_control_facade", lambda: facade)
+    monkeypatch.chdir(tmp_path)
+    client = _authenticated_client(monkeypatch, tmp_path)
+
+    response = client.post("/api/run/lua", json={"luaCode": "return 42"})
+
+    assert response.status_code == 200
+    assert facade.run_script_calls == [
+        (".mluascript_web/lua/untitled.lua", "return 42", "LOCAL")
+    ]
 
 
 def test_task_detail_views_pass_task_kind_to_stop_action() -> None:

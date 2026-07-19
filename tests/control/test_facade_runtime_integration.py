@@ -57,6 +57,25 @@ def test_control_facade_run_script_executes_real_lua(tmp_path: Path) -> None:
     assert task.result == 42
 
 
+def test_control_facade_run_script_executes_unsaved_in_memory_lua(tmp_path: Path) -> None:
+    editor_dir = tmp_path / ".mluascript_web" / "lua"
+    editor_dir.mkdir(parents=True)
+    facade = _build_real_facade(tmp_path)
+
+    task_id = facade.run_script(
+        ".mluascript_web/lua/untitled.lua",
+        "return 40 + 2",
+        "ADB:unsaved",
+    )
+    status = _wait_for_terminal_status(facade, task_id)
+    task = facade.get_task_info(task_id)
+
+    assert status == "success"
+    assert task is not None
+    assert task.result == 42
+    assert not (editor_dir / "untitled.lua").exists()
+
+
 def test_control_facade_stop_script_stops_real_lua_runtime(tmp_path: Path) -> None:
     project_dir = tmp_path / "demo"
     project_dir.mkdir()

@@ -107,11 +107,28 @@ class WorkspaceManager:
             is_entry=True,
         )
 
-    def build_script_run_locator(self, script_path: str) -> ScriptRunLocator:
+    def build_script_run_locator(self, script_path: str, *, allow_missing: bool = False) -> ScriptRunLocator:
         """为脚本运行构建项目/脚本/资源定位信息"""
-        project = self.resolve_project(script_path)
-        script = self.resolve_script_asset(script_path)
+        normalized_path = str(script_path or "").strip()
+        if normalized_path:
+            script_file = self._resolve_workspace_path(normalized_path)
+        else:
+            # 内存代码没有保存路径时，虚拟文件名只用于确定运行目录和任务元数据。
+            script_file = (self.root_dir / "untitled.lua").resolve()
+
+        is_lua_file = script_file.suffix.lower() == ".lua"
+        if not is_lua_file or (not allow_missing and not script_file.is_file()):
+            raise FileNotFoundError(f"Script not found: {script_path}")
+
+        project = self.resolve_project_by_root(script_file.parent)
         project_root = Path(project.root_dir)
+        script = ScriptAsset(
+            project_id=project.project_id,
+            name=script_file.name,
+            relative_path=str(script_file.relative_to(project_root)).replace("\\", "/"),
+            absolute_path=path_to_str(script_file),
+            mtime=script_file.stat().st_mtime if script_file.is_file() else 0.0,
+        )
         resource_dir = Path(project.resource_dir)
         return ScriptRunLocator(
             project=project,

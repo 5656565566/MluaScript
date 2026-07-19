@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import keyword
 import re
 from datetime import datetime, timezone
@@ -86,9 +87,12 @@ class TemplateStore:
             merged.update({key: value for key, value in globals_values.items() if key in task.args})
             merged.update({key: _resolve_template_binding(value, template_values) for key, value in step.args.items()})
             merged.update(step_args.get(step.k, {}))
-            active_values = dict(merged)
+            active_values = {
+                key: _normalize_runtime_value(meta.vars.get(key), value)
+                for key, value in merged.items()
+            }
             final_args = {}
-            for field_key, value in merged.items():
+            for field_key, value in active_values.items():
                 field_def = meta.vars.get(field_key)
                 if field_def is None:
                     final_args[field_key] = value
@@ -195,6 +199,21 @@ def _resolve_template_binding(value: Any, template_values: dict[str, Any]) -> An
     if source == "var":
         return template_values.get(str(value.get("key") or ""))
     return value
+
+
+def _normalize_runtime_value(field_def: Any, value: Any) -> Any:
+    """Normalize values that use an encoded editor representation."""
+    if field_def is None or field_def.tp != "json" or not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # Preserve the source value so existing validation/error reporting paths
+        # can identify the offending input without silently changing its content.
+        return value
 
 
 def _python_to_lua_literal(value: Any) -> str:

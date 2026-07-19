@@ -23,9 +23,10 @@ def test_template_store_loads_meta_and_builds_runtime_payload_with_conditional_f
                 "-- {",
                 "--   \"vars\": {",
                 "--     \"useDrug\": { \"t\": \"是否吃药\", \"tp\": \"bool\", \"def\": false, \"children\": [{ \"k\": \"drugCount\", \"t\": \"数量\", \"tp\": \"int\", \"def\": 1 }] },",
-                "--     \"stage\": { \"t\": \"关卡\", \"tp\": \"str\", \"def\": \"1-7\" }",
+                "--     \"stage\": { \"t\": \"关卡\", \"tp\": \"str\", \"def\": \"1-7\" },",
+                "--     \"payload\": { \"t\": \"扩展配置\", \"tp\": \"json\", \"def\": {} }",
                 "--   },",
-                "--   \"tasks\": [{ \"k\": \"battle\", \"fn\": \"run_battle\", \"args\": [\"stage\", \"useDrug\", \"drugCount\"] }],",
+                "--   \"tasks\": [{ \"k\": \"battle\", \"fn\": \"run_battle\", \"args\": [\"stage\", \"useDrug\", \"drugCount\", \"payload\"] }],",
                 "--   \"flows\": [{ \"k\": \"main\", \"steps\": [{ \"k\": \"s1\", \"task\": \"battle\" }] }]",
                 "-- }",
                 "-- @mlua-template:end",
@@ -43,7 +44,7 @@ def test_template_store_loads_meta_and_builds_runtime_payload_with_conditional_f
         selectedFlowKey="main",
         flows={
             "main": SavedFlowConfig(
-                stepArgs={"s1": {"useDrug": False, "drugCount": 9}},
+                stepArgs={"s1": {"useDrug": False, "drugCount": 9, "payload": "{\"mode\": \"safe\"}"}},
                 stepEnabled={"s1": True},
                 stepOrder=["s1"],
             )
@@ -53,7 +54,11 @@ def test_template_store_loads_meta_and_builds_runtime_payload_with_conditional_f
     runtime = store.build_runtime_payload(meta, saved, flow_key="main")
 
     assert runtime["steps"][0]["fn"] == "run_battle"
-    assert runtime["steps"][0]["args"] == {"stage": "1-7", "useDrug": False}
+    assert runtime["steps"][0]["args"] == {
+        "stage": "1-7",
+        "useDrug": False,
+        "payload": {"mode": "safe"},
+    }
 
     saved.flows["main"].stepArgs["s1"]["useDrug"] = True
     runtime = store.build_runtime_payload(meta, saved, flow_key="main")

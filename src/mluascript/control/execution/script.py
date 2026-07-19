@@ -97,7 +97,9 @@ class ScriptExecutionUseCase(BaseExecutionUseCase[ScriptRunContext]):
 
     def create_context(self) -> ScriptRunContext:
         request = self._require_request()
-        locator = self.workspace_manager.build_script_run_locator(request.script_path)
+        # start_script 接收的是已经生成或读取完成的代码快照；运行上下文不应再要求
+        # 对应磁盘文件存在，否则未保存的编辑器内容无法直接执行。
+        locator = self.workspace_manager.build_script_run_locator(request.script_path, allow_missing=True)
 
         device_facade = get_device_facade()
         session = device_facade._maa_facade.get_current_session()

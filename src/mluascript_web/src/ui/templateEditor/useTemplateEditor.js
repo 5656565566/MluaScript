@@ -109,9 +109,14 @@ export function useTemplateEditor({
   const tpOptions = [
     { label: '文本 (str)', value: 'str' },
     { label: '整数 (int)', value: 'int' },
+    { label: '数值 (num)', value: 'num' },
     { label: '布尔 (bool)', value: 'bool' },
     { label: '枚举 (enum)', value: 'enum' },
-    { label: '文件路径 (path)', value: 'path' },
+    { label: 'JSON (json)', value: 'json' },
+  ]
+  const strUiOptions = [
+    { label: '普通文本', value: '' },
+    { label: '文件路径', value: 'path' },
   ]
   const onFailOptions = [
     { label: '失败即停止', value: 'stop' },
@@ -423,11 +428,12 @@ export function useTemplateEditor({
   }
 
   function handleVariableTypeChange(variable) {
-    variable.def = variable.tp === 'bool' ? false : (variable.tp === 'int' ? null : '')
-    if (variable.tp !== 'int') {
+    variable.def = variable.tp === 'bool' ? false : (['int', 'num'].includes(variable.tp) ? null : '')
+    if (!['int', 'num'].includes(variable.tp)) {
       variable.min = undefined
       variable.max = undefined
     }
+    if (variable.tp !== 'str') variable.ui = ''
     if (variable.tp !== 'enum') variable.oneOf = []
   }
 
@@ -629,7 +635,7 @@ export function useTemplateEditor({
   function buildDefaultStepArgValue(varKey) {
     const meta = getVarMeta(varKey)
     if (meta.tp === 'bool') return true
-    if (meta.tp === 'int') return meta.def ?? 0
+    if (meta.tp === 'int' || meta.tp === 'num') return meta.def ?? 0
     if (meta.tp === 'enum') return meta.def ?? ''
     return meta.def ?? varKey
   }
@@ -766,6 +772,7 @@ export function useTemplateEditor({
     localData,
     varsList,
     tpOptions,
+    strUiOptions,
     onFailOptions,
     onSuccessOptions,
     bindingSourceOptions,

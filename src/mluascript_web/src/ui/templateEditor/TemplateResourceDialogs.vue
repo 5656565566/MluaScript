@@ -281,17 +281,21 @@ export default {
                       <n-input v-model:value="value.note" placeholder="提示说明 (note)" />
                     </div>
 
-                    <div v-if="value.tp === 'int'" class="form-grid cols-3 compact-grid">
+                    <div v-if="value.tp === 'int' || value.tp === 'num'" class="form-grid cols-3 compact-grid">
                       <n-input-number v-model:value="value.def" placeholder="默认值" style="width: 100%;" />
                       <n-input-number v-model:value="value.min" placeholder="最小值" style="width: 100%;" />
                       <n-input-number v-model:value="value.max" placeholder="最大值" style="width: 100%;" />
                     </div>
-                    <div v-else-if="value.tp === 'str' || value.tp === 'path'" class="form-grid cols-1 compact-grid">
+                    <div v-else-if="value.tp === 'str'" class="form-grid cols-2 compact-grid">
                       <n-input v-model:value="value.def" placeholder="默认值" />
+                      <n-select v-model:value="value.ui" :options="strUiOptions" placeholder="输入方式" />
                     </div>
                     <div v-else-if="value.tp === 'bool'" class="inline-switch-field panel-block">
                       <n-switch v-model:value="value.def" />
                       <span>默认状态</span>
+                    </div>
+                    <div v-else-if="value.tp === 'json'" class="form-grid cols-1 compact-grid">
+                      <n-input v-model:value="value.def" type="textarea" :rows="4" placeholder="JSON 默认值" />
                     </div>
 
                     <div v-if="value.tp === 'enum'" class="sub-panel">

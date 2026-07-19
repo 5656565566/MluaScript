@@ -104,7 +104,7 @@ function fieldDefaultValue(field) {
 }
 
 function fieldDisplayValue(field, value) {
-  if (['json', 'obj', 'list'].includes(field?.type)) {
+  if (field?.type === 'json') {
     if (typeof value === 'string') return value
     return JSON.stringify(value ?? fieldDefaultValue(field), null, 2)
   }
@@ -251,7 +251,7 @@ function renderFieldControl(field, value, onUpdate) {
       'onUpdate:value': onUpdate,
     })
   }
-  if (['json', 'obj', 'list'].includes(field.type)) {
+  if (field.type === 'json') {
     return h(NInput, {
       type: 'textarea',
       value: fieldDisplayValue(field, value),
@@ -264,7 +264,7 @@ function renderFieldControl(field, value, onUpdate) {
   return h(NInput, {
     value,
     'onUpdate:value': onUpdate,
-    placeholder: field.description || '请输入...',
+    placeholder: field.description || (field.ui === 'path' ? '请输入文件路径' : '请输入...'),
     clearable: true,
     style: { width: '100%' },
   })

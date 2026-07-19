@@ -848,6 +848,16 @@ def validate_lua_editor_name(payload: ValidateNamePayload) -> dict[str, Any]:
     return _ok(_validate_editor_name(payload.path, kind="lua"))
 
 
+def _editor_script_run_path(raw_path: str | None) -> str:
+    """把编辑器内的相对路径转换为工作区脚本路径。"""
+    if raw_path and str(raw_path).strip():
+        target, _ = _normalize_editor_file_path(str(raw_path), kind="lua")
+    else:
+        # 仅作为内存代码的运行目录定位，不会在磁盘创建该文件。
+        target = (_editor_lua_root() / "untitled.lua").resolve()
+    return target.relative_to(Path.cwd().resolve()).as_posix()
+
+
 @run_router.post("/lua")
 def run_lua_script(payload: RunLuaPayload) -> dict[str, Any]:
     facade = get_control_facade()
@@ -855,9 +865,9 @@ def run_lua_script(payload: RunLuaPayload) -> dict[str, Any]:
     target = payload.sessionLabel or overview.connection.label or "LOCAL"
     
     code = payload.luaCode
-    script_path = payload.scriptPath or ""
+    script_path = _editor_script_run_path(payload.scriptPath)
     
-    if not code and script_path:
+    if not code and payload.scriptPath:
         try:
             code = facade.read_script(script_path)
         except Exception as e:

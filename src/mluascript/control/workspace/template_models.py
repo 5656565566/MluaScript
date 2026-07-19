@@ -7,7 +7,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 TemplateScalar = str | int | float | bool | None
 TemplateValue = TemplateScalar | list[Any] | dict[str, Any]
-TemplateType = Literal["str", "int", "num", "bool", "enum", "json", "list", "obj"]
+TemplateType = Literal["str", "int", "num", "bool", "enum", "json"]
+TemplateInputStyle = Literal["path"]
 
 
 class TemplateCondition(BaseModel):
@@ -44,6 +45,7 @@ class TemplateVarDef(BaseModel):
     t: str = Field(default="", description="标题")
     d: str = Field(default="", description="说明")
     tp: TemplateType = Field(default="str", description="字段类型")
+    ui: TemplateInputStyle | None = Field(default=None, description="输入控件样式；path 仅用于 str 字段")
     req: bool = Field(default=False, description="是否必填")
     def_: TemplateValue = Field(default=None, alias="def", description="默认值")
     min: float | None = Field(default=None, description="最小值")
@@ -75,6 +77,12 @@ class TemplateVarDef(BaseModel):
         if value is None:
             return ""
         return str(value).strip()
+
+    @model_validator(mode="after")
+    def _validate_input_style(self) -> "TemplateVarDef":
+        if self.ui is not None and self.tp != "str":
+            raise ValueError("ui 仅适用于 str 字段")
+        return self
 
 
 class TemplateTaskDef(BaseModel):

@@ -100,7 +100,7 @@ export default {
                 :disabled="!stepArgEditorState.selectedKeys.includes(row.key)"
               />
               <n-input-number
-                v-else-if="row.tp === 'int'"
+                v-else-if="row.tp === 'int' || row.tp === 'num'"
                 v-model:value="row.binding.value"
                 :disabled="!stepArgEditorState.selectedKeys.includes(row.key)"
                 style="width: 100%;"
@@ -113,6 +113,14 @@ export default {
                 :disabled="!stepArgEditorState.selectedKeys.includes(row.key)"
                 clearable
                 placeholder="选择固定值"
+              />
+              <n-input
+                v-else-if="row.tp === 'json'"
+                v-model:value="row.binding.value"
+                type="textarea"
+                :rows="3"
+                :disabled="!stepArgEditorState.selectedKeys.includes(row.key)"
+                placeholder="填写 JSON"
               />
               <n-input
                 v-else

@@ -94,7 +94,8 @@ class FakeWorkspaceManager(WorkspaceManager):
     def __init__(self) -> None:
         super().__init__(Path("."))
 
-    def build_script_run_locator(self, script_path: str) -> ScriptRunLocator:
+    def build_script_run_locator(self, script_path: str, *, allow_missing: bool = False) -> ScriptRunLocator:
+        _ = allow_missing
         project = WorkspaceProject(
             project_id="demo",
             name="demo",

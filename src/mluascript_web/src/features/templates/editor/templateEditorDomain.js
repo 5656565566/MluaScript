@@ -15,6 +15,7 @@ export function createTemplateVariable(parentKey = '', eqValue = undefined) {
     _key: '',
     t: '',
     tp: 'str',
+    ui: '',
     def: '',
     req: false,
     note: '',
@@ -60,7 +61,7 @@ export function createEnumOption() {
 
 function defaultValueForType(type) {
   if (type === 'bool') return false
-  if (type === 'int') return null
+  if (type === 'int' || type === 'num') return null
   return ''
 }
 
@@ -78,11 +79,13 @@ function normalizeEnumOption(option) {
 }
 
 function normalizeVariable(key, value = {}) {
+  const type = value.tp || 'str'
   return {
     _key: key !== undefined ? key : (value.k || ''),
     t: value.t || '',
-    tp: value.tp || 'str',
-    def: value.def !== undefined ? value.def : defaultValueForType(value.tp || 'str'),
+    tp: type,
+    ui: type === 'str' ? (value.ui || '') : '',
+    def: value.def !== undefined ? value.def : defaultValueForType(type),
     req: Boolean(value.req),
     note: value.note || '',
     min: value.min,
@@ -378,8 +381,9 @@ function buildVariablePayload(variable) {
     req: Boolean(variable.req),
     note: variable.note || '',
   }
+  if (variable.tp === 'str' && variable.ui === 'path') field.ui = 'path'
   if (variable.def !== '' && variable.def !== null && variable.def !== undefined) field.def = variable.def
-  if (variable.tp === 'int') {
+  if (variable.tp === 'int' || variable.tp === 'num') {
     if (variable.min !== undefined && variable.min !== null) field.min = variable.min
     if (variable.max !== undefined && variable.max !== null) field.max = variable.max
   } else if (variable.tp === 'enum') {
