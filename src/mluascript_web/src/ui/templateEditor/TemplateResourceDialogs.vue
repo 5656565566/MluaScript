@@ -12,6 +12,7 @@ import {
   NInputNumber,
   NModal,
   NPagination,
+  NPopconfirm,
   NSelect,
   NSpace,
   NSwitch,
@@ -36,6 +37,7 @@ export default {
     NInputNumber,
     NModal,
     NPagination,
+    NPopconfirm,
     NSelect,
     NSpace,
     NSwitch,
@@ -98,11 +100,6 @@ export default {
       await showVariableOnItsPage(variable)
     }
 
-    function removeVariableDefinition(variable) {
-      const index = variableList.value.indexOf(variable)
-      if (index >= 0) variableList.value.splice(index, 1)
-    }
-
     async function duplicateVariableDefinition(variable) {
       props.editor.duplicateVar(variable)
       const clone = variableList.value[variableList.value.indexOf(variable) + 1]
@@ -131,11 +128,6 @@ export default {
       taskPage.value = Math.ceil(taskList.value.length / TASK_RESOURCE_PAGE_SIZE)
     }
 
-    function removeTaskDefinition(task) {
-      const index = taskList.value.indexOf(task)
-      if (index >= 0) taskList.value.splice(index, 1)
-    }
-
     // Resource dialogs operate on the same unsaved template draft as the workflow workbench.
     return {
       ...props.editor,
@@ -146,12 +138,10 @@ export default {
       taskPage,
       taskPagination,
       addVariableDefinition,
-      removeVariableDefinition,
       duplicateVariableDefinition,
       addDependentVariable,
       toggleAllVariableAdvanced,
       addTaskDefinition,
-      removeTaskDefinition,
     }
   },
 }
@@ -248,9 +238,12 @@ export default {
                   <n-button size="small" quaternary @click="value._showAdvanced = !value._showAdvanced">
                     {{ value._showAdvanced ? '收起高级' : '展开高级' }}
                   </n-button>
-                  <n-button size="small" type="error" quaternary @click="removeVariableDefinition(value)">
-                    删除
-                  </n-button>
+                  <n-popconfirm @positive-click="removeVariableDefinition(value)">
+                    <template #trigger>
+                      <n-button size="small" type="error" quaternary>删除</n-button>
+                    </template>
+                    删除后将清理 {{ getVariableReferenceCount(value) }} 处关联引用，是否继续？
+                  </n-popconfirm>
                 </n-space>
               </div>
 
@@ -397,9 +390,12 @@ export default {
                 placeholder="选择 Blockly 函数"
                 @update:value="handleTaskFunctionChange(value)"
               />
-              <n-button size="small" type="error" quaternary @click="removeTaskDefinition(value)">
-                删除
-              </n-button>
+              <n-popconfirm @positive-click="removeTaskDefinition(value)">
+                <template #trigger>
+                  <n-button size="small" type="error" quaternary>删除</n-button>
+                </template>
+                删除后将移除任务流中的 {{ getTaskReferenceCount(value) }} 个任务实例，是否继续？
+              </n-popconfirm>
             </div>
             <div class="field-block">
               <div class="field-label">任务参数</div>

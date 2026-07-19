@@ -205,6 +205,156 @@ export function renameVariableReferences({ varsList, localData, from, to }) {
   }
 }
 
+export function countVariableReferences({ varsList, localData, key }) {
+  const targetKey = String(key || '').trim()
+  if (!targetKey) return 0
+  let count = 0
+  for (const variable of varsList || []) {
+    if (variable?.if?.k === targetKey) count += 1
+  }
+  for (const task of localData?.tasks || []) {
+    count += (task.args || []).filter(item => item === targetKey).length
+  }
+  for (const flow of localData?.flows || []) {
+    count += (flow.g || []).filter(item => item === targetKey).length
+    for (const step of flow.steps || []) {
+      for (const [argKey, value] of Object.entries(step.args || {})) {
+        if (argKey === targetKey) count += 1
+        if (value?.$bind === 'var' && value.key === targetKey) count += 1
+      }
+    }
+  }
+  return count
+}
+
+export function removeVariableReferences({ varsList, localData, key }) {
+  const targetKey = String(key || '').trim()
+  if (!targetKey) return
+  for (const variable of varsList || []) {
+    if (variable?.if?.k === targetKey) variable.if = null
+  }
+  for (const task of localData?.tasks || []) {
+    task.args = (task.args || []).filter(item => item !== targetKey)
+  }
+  for (const flow of localData?.flows || []) {
+    flow.g = (flow.g || []).filter(item => item !== targetKey)
+    for (const step of flow.steps || []) {
+      const nextArgs = {}
+      for (const [argKey, value] of Object.entries(step.args || {})) {
+        if (argKey === targetKey) continue
+        if (value?.$bind === 'var' && value.key === targetKey) continue
+        nextArgs[argKey] = value
+      }
+      step.args = nextArgs
+    }
+  }
+}
+
+export function countTaskReferences(localData, key) {
+  const targetKey = String(key || '').trim()
+  if (!targetKey) return 0
+  return (localData?.flows || []).reduce(
+    (total, flow) => total + (flow.steps || []).filter(step => step.task === targetKey).length,
+    0,
+  )
+}
+
+export function removeTaskReferences(localData, key) {
+  const targetKey = String(key || '').trim()
+  if (!targetKey) return
+  for (const flow of localData?.flows || []) {
+    const removedStepKeys = new Set(
+      (flow.steps || []).filter(step => step.task === targetKey).map(step => step.k).filter(Boolean),
+    )
+    flow.steps = (flow.steps || []).filter(step => step.task !== targetKey)
+    for (const step of flow.steps) {
+      if (step.onSuccess === 'goto' && removedStepKeys.has(step.successGoto)) {
+        step.onSuccess = 'continue'
+        step.successGoto = ''
+      }
+      if (step.onFail === 'goto' && removedStepKeys.has(step.goto)) {
+        step.onFail = 'stop'
+        step.goto = ''
+      }
+    }
+  }
+}
+
+export function validateTemplateDraft(localData, varsList, { procedureNames = null } = {}) {
+  const errors = []
+  const variableKeys = (varsList || []).map(item => String(item?._key || '').trim())
+  const taskKeys = (localData?.tasks || []).map(item => String(item?.k || '').trim())
+  const flowKeys = (localData?.flows || []).map(item => String(item?.k || '').trim())
+
+  const addKeyErrors = (keys, label) => {
+    const seen = new Set()
+    keys.forEach((key, index) => {
+      if (!key) {
+        errors.push(`${label} ${index + 1} 缺少 Key`)
+        return
+      }
+      if (seen.has(key)) errors.push(`${label} Key 重复：${key}`)
+      seen.add(key)
+    })
+  }
+  addKeyErrors(variableKeys, '参数')
+  addKeyErrors(taskKeys, '任务')
+  addKeyErrors(flowKeys, '任务流')
+
+  const variableKeySet = new Set(variableKeys.filter(Boolean))
+  const taskKeySet = new Set(taskKeys.filter(Boolean))
+  const procedureNameSet = Array.isArray(procedureNames) ? new Set(procedureNames.filter(Boolean)) : null
+  for (const variable of varsList || []) {
+    if (variable?.if?.k && !variableKeySet.has(variable.if.k)) {
+      errors.push(`参数 ${variable._key || '未命名参数'} 引用了不存在的条件参数：${variable.if.k}`)
+    }
+  }
+  for (const task of localData?.tasks || []) {
+    const taskLabel = task.k || '未命名任务'
+    const functionName = String(task.fn || '').trim()
+    if (!functionName) {
+      errors.push(`任务 ${taskLabel} 未选择 Blockly 函数`)
+    } else if (procedureNameSet && !procedureNameSet.has(functionName)) {
+      errors.push(`任务 ${taskLabel} 引用的 Blockly 函数不存在：${functionName}`)
+    }
+    for (const argKey of task.args || []) {
+      if (!variableKeySet.has(argKey)) errors.push(`任务 ${taskLabel} 引用了不存在的参数：${argKey}`)
+    }
+  }
+  for (const flow of localData?.flows || []) {
+    for (const key of flow.g || []) {
+      if (!variableKeySet.has(key)) errors.push(`任务流 ${flow.k || '未命名任务流'} 引用了不存在的参数：${key}`)
+    }
+    const stepKeys = (flow.steps || []).map(step => String(step?.k || '').trim())
+    addKeyErrors(stepKeys, `任务流 ${flow.k || '未命名任务流'} 的步骤`)
+    const stepKeySet = new Set(stepKeys.filter(Boolean))
+    for (const step of flow.steps || []) {
+      const stepLabel = step.k || '未命名步骤'
+      const task = (localData?.tasks || []).find(item => item.k === step.task)
+      if (!step.task || !taskKeySet.has(step.task)) {
+        errors.push(`步骤 ${stepLabel} 引用了不存在的任务：${step.task || '未选择'}`)
+      }
+      const taskArgKeys = new Set(task?.args || [])
+      for (const [argKey, value] of Object.entries(step.args || {})) {
+        if (!taskArgKeys.has(argKey)) errors.push(`步骤 ${stepLabel} 覆盖了任务未声明的参数：${argKey}`)
+        if (value?.$bind === 'var' && !variableKeySet.has(value.key)) {
+          errors.push(`步骤 ${stepLabel} 绑定了不存在的参数：${value.key || '未选择'}`)
+        }
+        if (value?.$bind === 'var' && !(flow.g || []).includes(value.key)) {
+          errors.push(`步骤 ${stepLabel} 绑定了任务流未选择的参数：${value.key || '未选择'}`)
+        }
+      }
+      if (step.onSuccess === 'goto' && !stepKeySet.has(step.successGoto)) {
+        errors.push(`步骤 ${stepLabel} 的成功跳转目标不存在：${step.successGoto || '未选择'}`)
+      }
+      if (step.onFail === 'goto' && !stepKeySet.has(step.goto)) {
+        errors.push(`步骤 ${stepLabel} 的失败跳转目标不存在：${step.goto || '未选择'}`)
+      }
+    }
+  }
+  return [...new Set(errors)]
+}
+
 function cleanEnumOptions(options) {
   return (options || [])
     .map(option => ({ v: option?.v ?? '', t: option?.t ?? '' }))

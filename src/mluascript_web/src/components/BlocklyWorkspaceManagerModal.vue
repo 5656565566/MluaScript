@@ -48,7 +48,7 @@ onUnmounted(() => {
         <div class="workspace-actions">
           <n-button size="small" :loading="state.loading.value" @click="actions.handleAction(actions.saveLuaScript)">保存 Lua</n-button>
           <n-button size="small" :loading="state.loading.value" @click="actions.handleAction(actions.saveBlocklyWorkspace)">保存 Blockly</n-button>
-          <n-button type="primary" size="small" :loading="state.loading.value" @click="actions.handleAction(() => actions.runLuaScript(null, state.luaCode.value))">直接执行 Lua</n-button>
+          <n-button type="primary" size="small" :loading="state.loading.value" @click="actions.handleAction(actions.runCurrentBlocklyLua)">直接执行 Lua</n-button>
         </div>
 
         <div class="workspace-meta-box">

@@ -2,6 +2,7 @@ import * as Blockly from 'blockly'
 import { luaGenerator } from 'blockly/lua'
 import { findVariableItemByValue } from './variableContext'
 import { getWorkspaceAllVariables } from './workspaceVariables'
+import { getBlockSemanticDiagnostic } from './blockSemanticDiagnostics'
 
 function isInvalidVariableBlock(block) {
   if (!block || block.isDisposed?.()) return false
@@ -14,6 +15,24 @@ function isInvalidVariableBlock(block) {
     includeArguments: false,
   })
   return !variableItem
+}
+
+export function collectBlocklyDiagnostics(workspace) {
+  if (!workspace || typeof workspace.getAllBlocks !== 'function') return []
+  const diagnostics = []
+  for (const block of workspace.getAllBlocks(false)) {
+    if (!block || block.isDisposed?.()) continue
+    const warning = String(block.getWarningText?.() || '').trim()
+    const invalidVariable = isInvalidVariableBlock(block)
+    const semanticDiagnostic = getBlockSemanticDiagnostic(block, workspace)
+    if (!warning && !invalidVariable && !semanticDiagnostic) continue
+    diagnostics.push({
+      blockId: block.id || '',
+      blockType: block.type || '',
+      message: warning || semanticDiagnostic || '变量未选择或不在当前作用域内',
+    })
+  }
+  return diagnostics
 }
 
 function wrapVariableBlockGenerators() {
@@ -115,7 +134,7 @@ function detectModuleExport(workspace) {
 
 function buildModuleExportCode(workspace, generator) {
   const exportNames = collectModuleExportFunctions(workspace)
-  if (!exportNames.length) return ''
+  if (!exportNames.length) throw new Error('请选择要导出的函数')
 
   const definedNames = collectDefinedProcedureNames(workspace)
   const resolvedNames = []
@@ -133,7 +152,7 @@ function buildModuleExportCode(workspace, generator) {
 
   const missingNames = resolvedNames.filter((item) => !item.generatedName).map((item) => item.rawName)
   if (missingNames.length) {
-    return `-- 以下导出目标不是已定义函数: ${missingNames.join(', ')}\n`
+    throw new Error(`导出函数不存在：${missingNames.join('、')}`)
   }
 
   const uniqueResolvedNames = []
@@ -154,9 +173,9 @@ export function workspaceToLua(workspace) {
   wrapVariableBlockGenerators()
 
   try {
-    const code = luaGenerator.workspaceToCode(workspace)
+    const rawCode = luaGenerator.workspaceToCode(workspace)
     if (hasModuleExport) {
-      const sanitizedCode = code
+      const sanitizedCode = rawCode
         .split('\n')
         .filter((line) => !line.trimStart().startsWith('-- __maa_export_function__:'))
         .join('\n')
@@ -166,7 +185,6 @@ export function workspaceToLua(workspace) {
       return finalCode || '-- 请先编排 Blockly 拼图块'
     }
 
-    const rawCode = luaGenerator.workspaceToCode(workspace)
     const lines = rawCode.split('\n')
     const templateLines = []
     const bodyLines = []
@@ -191,6 +209,6 @@ export function workspaceToLua(workspace) {
     return mergedCode || '-- 请先编排 Blockly 拼图块'
   } catch (error) {
     console.error('生成 Blockly Lua 代码失败', error)
-    return '-- 生成 Lua 代码失败'
+    throw new Error(`生成 Lua 代码失败：${error?.message || '未知错误'}`)
   }
 }

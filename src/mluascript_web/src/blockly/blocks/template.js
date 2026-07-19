@@ -1,6 +1,7 @@
 import * as Blockly from 'blockly'
 import { PICKER_ICON_TYPE } from '../constants'
 import { MaaPickerIcon } from '../fields'
+import { attachBlockSemanticWarning, getBlockSemanticDiagnostic } from '../blockSemanticDiagnostics'
 import { state } from '../../store'
 
 function cleanTemplateData(data) {
@@ -90,8 +91,11 @@ export const templateBlocks = [
         }
         block.addIcon(icon)
       }
+      attachBlockSemanticWarning(block)
     },
     generator(block) {
+      const diagnostic = getBlockSemanticDiagnostic(block)
+      if (diagnostic) throw new Error(diagnostic)
       const jsonStr = block.getFieldValue('TEMPLATE_JSON') || '{}'
       let jsonData = {}
       try {

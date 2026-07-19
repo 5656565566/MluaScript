@@ -1,5 +1,6 @@
 import * as Blockly from 'blockly'
 import { luaOrder } from '../constants'
+import { attachBlockSemanticWarning, getBlockSemanticDiagnostic } from '../blockSemanticDiagnostics'
 
 function getSharedVarName(block) {
   return String(block.getFieldValue('VAR_NAME') || '').trim()
@@ -42,16 +43,13 @@ export const luaThreadBlocks = [
       tooltip: '将普通的【调用函数】块拖入此处，使其在后台作为任务运行并提取参数。',
       helpUrl: '',
     },
+    init(block) {
+      attachBlockSemanticWarning(block)
+    },
     generator(block, generator) {
+      const diagnostic = getBlockSemanticDiagnostic(block)
+      if (diagnostic) throw new Error(diagnostic)
       const targetBlock = block.getInputTargetBlock('FUNC_CALL')
-      if (!targetBlock) {
-        return [`thread.spawn("")`, luaOrder]
-      }
-      
-      const isCallBlock = targetBlock.type === 'procedures_callnoreturn' || targetBlock.type === 'procedures_callreturn' || targetBlock.type === 'procedure_call_picker'
-      if (!isCallBlock) {
-        return [`thread.spawn("")`, luaOrder]
-      }
 
       let rawFuncName = ''
       if (targetBlock.type === 'procedure_call_picker') {

@@ -1,6 +1,7 @@
 import * as Blockly from 'blockly'
 import { luaOrder, PICKER_ICON_TYPE } from '../constants'
 import { validateLocalVariableReference } from '../variableContext'
+import { resolveProcedureArgumentLuaName } from '../procedureArgumentName'
 import { MaaPickerIcon } from '../fields'
 import { state, actions } from '../../store'
 
@@ -188,8 +189,12 @@ export const functionBlocks = [
       syncProcedureArgField(block)
       attachProcedureArgumentWarning(block)
     },
-    generator(block) {
-      const varName = getProcedureArgumentName(block)
+    generator(block, generator) {
+      const varName = resolveProcedureArgumentLuaName(
+        getEnclosingProcedureBlock(block),
+        getProcedureArgumentName(block),
+        generator,
+      )
       if (!varName) return ['nil', luaOrder]
       return [varName, luaOrder]
     }
@@ -267,7 +272,11 @@ export const functionBlocks = [
       attachProcedureArgumentWarning(block)
     },
     generator(block, generator) {
-      const varName = getProcedureArgumentName(block)
+      const varName = resolveProcedureArgumentLuaName(
+        getEnclosingProcedureBlock(block),
+        getProcedureArgumentName(block),
+        generator,
+      )
       const value = generator.valueToCode(block, 'VALUE', luaOrder) || 'nil'
       if (!varName) return ''
       return `${varName} = ${value}\n`

@@ -285,6 +285,52 @@ def test_update_lua_file_rejects_rename_to_existing_target(monkeypatch, tmp_path
     assert conflict_response.json()["detail"] == "目标文件已存在"
 
 
+def test_save_lua_file_creates_missing_target(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(web_app, "_get_web_config", _test_web_config)
+    monkeypatch.chdir(tmp_path)
+    client = _authenticated_client(monkeypatch, tmp_path)
+
+    response = client.put(
+        "/api/editor/lua/files/content",
+        json={
+            "path": "scripts/recovered.lua",
+            "content": "print('recovered')",
+            "expectedMtime": 123.0,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["path"] == "scripts/recovered.lua"
+    recovered = tmp_path / ".mluascript_web" / "lua" / "scripts" / "recovered.lua"
+    assert recovered.read_text(encoding="utf-8") == "print('recovered')"
+
+
+def test_save_lua_file_recreates_file_deleted_after_loading(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(web_app, "_get_web_config", _test_web_config)
+    monkeypatch.chdir(tmp_path)
+    client = _authenticated_client(monkeypatch, tmp_path)
+
+    created = client.post(
+        "/api/editor/lua/files",
+        json={"path": "deleted.lua", "content": "print('old')"},
+    ).json()["data"]
+    target = tmp_path / ".mluascript_web" / "lua" / "deleted.lua"
+    target.unlink()
+
+    response = client.put(
+        "/api/editor/lua/files/content",
+        json={
+            "path": "deleted.lua",
+            "content": "print('new')",
+            "expectedMtime": created["mtime"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert target.read_text(encoding="utf-8") == "print('new')"
+
+
 def test_store_guards_editor_session_replay_when_local_draft_exists() -> None:
     session_file = (
         Path(__file__).resolve().parents[2]

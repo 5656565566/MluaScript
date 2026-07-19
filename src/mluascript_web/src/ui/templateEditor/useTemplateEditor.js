@@ -1,6 +1,8 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import {
   buildTemplatePayload,
+  countTaskReferences,
+  countVariableReferences,
   createEmptyTemplate,
   createEnumOption,
   createTemplateFlow,
@@ -10,7 +12,10 @@ import {
   createStepArgBinding,
   normalizeTemplateEditorData,
   normalizeStepArgBinding,
+  removeTaskReferences,
+  removeVariableReferences,
   renameVariableReferences,
+  validateTemplateDraft,
 } from '../../features/templates/editor/templateEditorDomain.js'
 import { createTemplateAutosave } from './templateAutosave.js'
 
@@ -61,12 +66,19 @@ export function useTemplateEditor({
   let editRevision = 0
   let savedRevision = 0
 
-  const autosaveStatusText = computed(() => ({
-    pending: '等待自动保存',
-    saving: '正在自动保存…',
-    saved: '已自动保存',
-    error: '自动保存失败',
-  })[autosaveStatus.value])
+  const templateValidationErrors = computed(() => validateTemplateDraft(localData.value, varsList.value, {
+    procedureNames: procedureDefinitions.value.map(item => item.name),
+  }))
+  const autosaveStatusText = computed(() => {
+    if (templateValidationErrors.value.length) return '配置有错误，尚未保存'
+    return ({
+      pending: '等待自动保存',
+      saving: '正在自动保存…',
+      saved: '已自动保存',
+      error: '自动保存失败',
+      invalid: '配置有错误，尚未保存',
+    })[autosaveStatus.value]
+  })
 
   const autosave = createTemplateAutosave({
     delay: autosaveDelay,
@@ -76,7 +88,9 @@ export function useTemplateEditor({
       try {
         await saveEditorMeta(payload)
         savedRevision = Math.max(savedRevision, revision)
-        autosaveStatus.value = savedRevision === editRevision ? 'saved' : 'pending'
+        autosaveStatus.value = templateValidationErrors.value.length
+          ? 'invalid'
+          : (savedRevision === editRevision ? 'saved' : 'pending')
       } catch (error) {
         autosaveStatus.value = 'error'
         throw error
@@ -237,7 +251,10 @@ export function useTemplateEditor({
     localData.value = normalized.localData
     varsList.value = normalized.varsList
     await nextTick()
-    if (generation === initializationGeneration) autosaveReady = true
+    if (generation === initializationGeneration) {
+      autosaveReady = true
+      autosaveStatus.value = templateValidationErrors.value.length ? 'invalid' : 'saved'
+    }
   }
 
   function getProcedureByName(name) {
@@ -332,6 +349,44 @@ export function useTemplateEditor({
 
   function handleStepTaskChange(step) {
     step.args = {}
+  }
+
+  function getVariableReferenceCount(variable) {
+    const key = String(variable?._key || variable?._referenceKey || '').trim()
+    return countVariableReferences({ varsList: varsList.value, localData: localData.value, key })
+  }
+
+  function removeVariableDefinition(variable) {
+    const key = String(variable?._key || variable?._referenceKey || '').trim()
+    const index = varsList.value.indexOf(variable)
+    if (index < 0) return
+    varsList.value.splice(index, 1)
+    if (!key || varsList.value.some(item => String(item?._key || '').trim() === key)) return
+    removeVariableReferences({ varsList: varsList.value, localData: localData.value, key })
+    stepArgEditorState.value.selectedKeys = stepArgEditorState.value.selectedKeys.filter(item => item !== key)
+    stepArgEditorState.value.rows = stepArgEditorState.value.rows.filter(row => (
+      row.key !== key && !(row.binding?.$bind === 'var' && row.binding.key === key)
+    ))
+  }
+
+  function getTaskReferenceCount(task) {
+    const key = String(task?.k || task?._referenceKey || '').trim()
+    return countTaskReferences(localData.value, key)
+  }
+
+  function removeTaskDefinition(task) {
+    const key = String(task?.k || task?._referenceKey || '').trim()
+    const tasks = localData.value.tasks || []
+    const index = tasks.indexOf(task)
+    if (index < 0) return
+    tasks.splice(index, 1)
+    if (!key || tasks.some(item => String(item?.k || '').trim() === key)) return
+    removeTaskReferences(localData.value, key)
+    if (stepArgEditorState.value.taskKey === key) closeStepArgEditor()
+    selectedStepIndex.value = Math.max(
+      0,
+      Math.min(selectedStepIndex.value, (selectedFlow.value?.steps?.length || 1) - 1),
+    )
   }
 
   function setVariableKey(variable, value) {
@@ -655,6 +710,11 @@ export function useTemplateEditor({
 
   async function handleClose() {
     if (isClosing.value) return
+    if (templateValidationErrors.value.length) {
+      autosaveStatus.value = 'invalid'
+      message.warning(templateValidationErrors.value[0])
+      return
+    }
     isClosing.value = true
     try {
       const snapshot = savedRevision < editRevision
@@ -674,11 +734,17 @@ export function useTemplateEditor({
 
   watch(() => state.templateEditorModalData.value, initialize, { immediate: true })
   watch(
-    () => buildTemplatePayload(localData.value, varsList.value, { clone: true }),
-    payload => {
+    () => [localData.value, varsList.value],
+    () => {
       if (!autosaveReady) return
       editRevision += 1
+      if (templateValidationErrors.value.length) {
+        autosave.cancelPending()
+        autosaveStatus.value = 'invalid'
+        return
+      }
       autosaveStatus.value = 'pending'
+      const payload = buildTemplatePayload(localData.value, varsList.value, { clone: true })
       autosave.schedule({ revision: editRevision, payload })
     },
     { deep: true, flush: 'post' },
@@ -689,6 +755,7 @@ export function useTemplateEditor({
     variableSearch,
     autosaveStatus,
     autosaveStatusText,
+    templateValidationErrors,
     isClosing,
     visible,
     pickerState,
@@ -721,6 +788,10 @@ export function useTemplateEditor({
     createFlowStep: createTemplateFlowStep,
     createEnumOption,
     duplicateVar,
+    getVariableReferenceCount,
+    removeVariableDefinition,
+    getTaskReferenceCount,
+    removeTaskDefinition,
     setVariableKey,
     setTaskKey,
     handleVariableTypeChange,

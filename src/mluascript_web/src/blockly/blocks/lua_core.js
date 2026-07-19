@@ -2,6 +2,7 @@ import * as Blockly from 'blockly'
 import { luaOrder, PICKER_ICON_TYPE } from '../constants'
 import { getLuaScriptPickerItems, getWorkspaceFunctionPickerItems } from '../utils'
 import { MaaPickerIcon } from '../fields'
+import { attachBlockSemanticWarning, getBlockSemanticDiagnostic } from '../blockSemanticDiagnostics'
 import { luaMathBlocks } from './lua_math'
 import { luaStringBlocks } from './lua_string'
 
@@ -198,10 +199,12 @@ export const luaCoreBlocks = [
       if (savedValue) {
         block.setFieldValue(savedValue, 'MODULE_LABEL')
       }
+      attachBlockSemanticWarning(block)
     },
     generator(block) {
+      const diagnostic = getBlockSemanticDiagnostic(block)
+      if (diagnostic) throw new Error(diagnostic)
       const moduleName = JSON.stringify(block.getFieldValue('MODULE_VALUE') || '')
-      if (moduleName === '""') return '-- 未选择模块\n'
       return `require(${moduleName})\n`
     },
   },
@@ -237,10 +240,12 @@ export const luaCoreBlocks = [
       if (savedValue) {
         block.setFieldValue(savedValue, 'MODULE_LABEL')
       }
+      attachBlockSemanticWarning(block)
     },
     generator(block) {
+      const diagnostic = getBlockSemanticDiagnostic(block)
+      if (diagnostic) throw new Error(diagnostic)
       const moduleName = JSON.stringify(block.getFieldValue('MODULE_VALUE') || '')
-      if (moduleName === '""') return ['nil -- 未选择模块', luaOrder]
       return [`require(${moduleName})`, luaOrder]
     },
   },
@@ -277,10 +282,12 @@ export const luaCoreBlocks = [
       if (savedValue) {
         block.setFieldValue(savedValue, 'FILE_LABEL')
       }
+      attachBlockSemanticWarning(block)
     },
     generator(block) {
+      const diagnostic = getBlockSemanticDiagnostic(block)
+      if (diagnostic) throw new Error(diagnostic)
       const filePath = JSON.stringify(block.getFieldValue('FILE_VALUE') || '')
-      if (filePath === '""') return '-- 未选择文件\n'
       return `dofile(${filePath})\n`
     },
   },
@@ -341,12 +348,6 @@ export const luaCoreBlocks = [
       block.setOnChange((event) => {
         const workspace = block.workspace
         if (!workspace) return
-        const exportBlocks = workspace.getTopBlocks(false).filter((item) => item?.type === 'lua_module_export_function')
-        if (exportBlocks.length > 1) {
-          block.setWarningText('模块导出根块只能存在一个')
-        } else {
-          block.setWarningText(null)
-        }
 
         // 自动同步函数改名
         if (event && event.type === Blockly.Events.BLOCK_CHANGE && event.element === 'field' && event.name === 'NAME') {
@@ -374,7 +375,9 @@ export const luaCoreBlocks = [
             }
           }
         }
+        block.setWarningText(getBlockSemanticDiagnostic(block, workspace))
       })
+      block.setWarningText(getBlockSemanticDiagnostic(block))
     },
     generator() {
       return ''

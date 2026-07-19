@@ -16,10 +16,26 @@ export function createEditorActions({
   editorApi,
   workspaceToLua,
   workspaceToXml,
+  collectBlocklyDiagnostics = () => [],
   scheduler,
   getActions,
 }) {
   const blocklySaves = createSaveCoordinator()
+
+  function assertBlocklyLuaReady() {
+    const workspace = state.blocklyEditor.value
+    const diagnostics = collectBlocklyDiagnostics(workspace)
+    const generationError = String(state.blocklyGenerationError?.value || '').trim()
+    if (!diagnostics.length && !generationError) return
+    const first = diagnostics[0] || { blockId: '', message: generationError }
+    if (first.blockId) {
+      workspace?.centerOnBlock?.(first.blockId)
+      workspace?.getBlockById?.(first.blockId)?.select?.()
+    }
+    // 生成错误通常与首个积木诊断是同一问题，不重复计数。
+    const errorCount = diagnostics.length || 1
+    throw new Error(`Blockly 存在 ${errorCount} 个错误：${first.message}`)
+  }
 
   async function applyBlocklyXmlToEditor() {
     if (!state.blocklyEditor.value) return
@@ -44,8 +60,15 @@ export function createEditorActions({
 
     rebuildLuaCode() {
       if (!state.blocklyEditor.value) return
-      state.blocklyXml.value = workspaceToXml(state.blocklyEditor.value)
-      state.luaCode.value = workspaceToLua(state.blocklyEditor.value)
+      try {
+        state.blocklyXml.value = workspaceToXml(state.blocklyEditor.value)
+        state.luaCode.value = workspaceToLua(state.blocklyEditor.value)
+        state.blocklyGenerationError.value = ''
+      } catch (error) {
+        const message = error?.message || '生成 Lua 代码失败'
+        state.blocklyGenerationError.value = message
+        state.luaCode.value = `-- ${message}`
+      }
     },
 
     async syncWorkspace() {
@@ -59,6 +82,7 @@ export function createEditorActions({
     async saveLuaScript() {
       const actions = getActions()
       actions.rebuildLuaCode()
+      assertBlocklyLuaReady()
       const currentFilename = state.filename.value || 'script.lua'
       const previousPath = state.savePath.value || ''
       const savedPathFilename = previousPath ? previousPath.split('/').pop() : ''
@@ -73,9 +97,9 @@ export function createEditorActions({
         expectedMtime: state.luaDocumentMtime.value,
         previousPath: filenameChanged ? previousPath : null,
       }
-      const data = hasPersistedFile
-        ? await editorApi.updateLuaFile(payload)
-        : await editorApi.createLuaFile({ path: payload.path, content: payload.content })
+      // “保存”是幂等写入：已有文件更新，文件被外部删除后则由后端重建。
+      // 显式新建文件仍使用 createLuaFile，并继续保留重名保护。
+      const data = await editorApi.updateLuaFile(payload)
 
       state.filename.value = data.filename || state.filename.value
       state.savePath.value = data.path || state.savePath.value
@@ -84,6 +108,13 @@ export function createEditorActions({
       await actions.syncWorkspace()
       await actions.loadLuaFiles()
       actions.setStatus(`Lua 文件已保存到 ${state.savePath.value}`, 'success')
+    },
+
+    async runCurrentBlocklyLua() {
+      const actions = getActions()
+      actions.rebuildLuaCode()
+      assertBlocklyLuaReady()
+      return await actions.runLuaScript(null, state.luaCode.value)
     },
 
     async saveBlocklyWorkspace(showStatus = true) {
@@ -189,6 +220,7 @@ export function createEditorActions({
     async createNewLuaFile(path) {
       const actions = getActions()
       actions.rebuildLuaCode()
+      assertBlocklyLuaReady()
       const data = await editorApi.createLuaFile({ path, content: state.luaCode.value })
       state.filename.value = data.filename || state.filename.value
       state.savePath.value = data.path || state.savePath.value

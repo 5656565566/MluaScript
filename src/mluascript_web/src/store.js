@@ -7,7 +7,7 @@ import {
 import { createAppActions } from './app/appModule'
 import { applyBootstrapState } from './app/bootstrap'
 import { createUiState } from './app/uiState'
-import { workspaceToLua, workspaceToXml, updateBlocklyTheme } from './blockly'
+import { collectBlocklyDiagnostics, workspaceToLua, workspaceToXml, updateBlocklyTheme } from './blockly'
 import { createDeviceActions } from './features/devices/deviceModule'
 import { createDeviceState } from './features/devices/deviceState'
 import { createEditorActions } from './features/editor/editorModule'
@@ -72,6 +72,7 @@ const editorActions = createEditorActions({
   editorApi,
   workspaceToLua,
   workspaceToXml,
+  collectBlocklyDiagnostics,
   scheduler: window,
   getActions: () => actions,
 })

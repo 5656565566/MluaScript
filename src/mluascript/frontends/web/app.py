@@ -354,7 +354,18 @@ def _save_editor_file(
     if previous_path:
         source, _ = _normalize_editor_file_path(previous_path, kind=kind)
     if not source.exists() or not source.is_file():
-        raise HTTPException(status_code=404, detail="目标文件不存在")
+        # Save is intentionally idempotent: an editor session may outlive a file
+        # removed outside the web UI. Recreate it from the in-memory draft.
+        if source != target and target.exists():
+            raise HTTPException(status_code=409, detail="目标文件已存在")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        return {
+            "path": relative,
+            "filename": target.name,
+            "mtime": target.stat().st_mtime,
+            "saveMode": "update",
+        }
     if expected_mtime is not None:
         current_mtime = source.stat().st_mtime
         if abs(current_mtime - expected_mtime) > 1e-6:

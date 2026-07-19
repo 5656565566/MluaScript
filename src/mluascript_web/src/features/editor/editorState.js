@@ -14,6 +14,7 @@ export function createEditorState() {
     lastSessionLuaFilename: ref(''),
     lastSessionLuaPath: ref(''),
     luaCode: ref('-- 请先编排 Blockly 拼图块'),
+    blocklyGenerationError: ref(''),
     filename: ref('script.lua'),
     blocklyFilename: ref('blockly.xml'),
     savePath: ref(''),

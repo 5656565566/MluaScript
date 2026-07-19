@@ -105,7 +105,7 @@ function buildFilteredVariableFlyout(workspace) {
   return xmlItems
 }
 
-export { workspaceToXml, workspaceToLua } from './generator'
+export { collectBlocklyDiagnostics, workspaceToXml, workspaceToLua } from './generator'
 
 applyBlocklyZhCnLocale(Blockly, ZhHans)
 
