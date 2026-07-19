@@ -36,6 +36,23 @@ export function createRuntimeActions({ state, systemApi, runApi, runtimeStreams,
     return includeSelectedTask ? await refreshSelectedTask() : null
   }
 
+  async function stopAndRefresh(stopOperation, refresh = true) {
+    try {
+      const result = await stopOperation()
+      if (refresh) await getActions().loadState()
+      return result
+    } catch (stopError) {
+      if (refresh) {
+        try {
+          await getActions().loadState()
+        } catch (refreshError) {
+          console.error('停止任务失败后刷新任务状态失败', refreshError)
+        }
+      }
+      throw stopError
+    }
+  }
+
   return {
     applyTaskLogs,
     applyTaskOutput,
@@ -90,8 +107,7 @@ export function createRuntimeActions({ state, systemApi, runApi, runtimeStreams,
 
     async stopTask(taskId, kind = 'script', { refresh = true } = {}) {
       if (!taskId) return
-      await runApi.stopTask(taskId, kind)
-      if (refresh) await getActions().loadState()
+      return await stopAndRefresh(() => runApi.stopTask(taskId, kind), refresh)
     },
 
     async refreshTaskManagerData() {
@@ -135,8 +151,7 @@ export function createRuntimeActions({ state, systemApi, runApi, runtimeStreams,
 
     async stopLuaTask(taskId) {
       if (!taskId) throw new Error('缺少 taskId')
-      await runApi.stopTask(taskId, 'script')
-      await getActions().loadState()
+      await getActions().stopTask(taskId, 'script')
       getActions().setStatus(`已停止任务: ${taskId}`, 'success')
     },
 
@@ -154,8 +169,12 @@ export function createRuntimeActions({ state, systemApi, runApi, runtimeStreams,
         getActions().setStatus('当前没有运行中的任务', 'info')
         return
       }
-      await Promise.all(runningTasks.map((task) => runApi.stopTask(task.task_id, task.kind || 'script')))
+      const results = await Promise.allSettled(
+        runningTasks.map((task) => runApi.stopTask(task.task_id, task.kind || 'script')),
+      )
       await getActions().loadState()
+      const failedResult = results.find(result => result.status === 'rejected')
+      if (failedResult) throw failedResult.reason
       getActions().setStatus(`已停止 ${runningTasks.length} 个任务`, 'success')
     },
   }

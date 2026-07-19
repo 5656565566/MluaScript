@@ -957,16 +957,36 @@ def stop_all_tasks() -> dict[str, Any]:
     return _ok({"stoppedThreads": stopped}, message=f"已停止 {stopped} 个任务")
 
 
+def _stop_task(task_id: str, expected_kind: str) -> dict[str, Any]:
+    facade = get_control_facade()
+    task = facade.get_task_detail_view(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"任务不存在或已删除: {task_id}")
+    if task.kind != expected_kind:
+        raise HTTPException(status_code=409, detail=f"任务类型不匹配: {task.kind}")
+    if task.status == "stopped":
+        return _ok({"taskId": task_id, "status": task.status}, message=f"任务已经停止: {task_id}")
+    if not task.capabilities.can_stop:
+        raise HTTPException(status_code=409, detail=f"任务当前状态不可停止: {task.status}")
+
+    if expected_kind == "script":
+        facade.stop_script(task_id)
+    else:
+        facade.stop_pipeline(task_id)
+
+    updated = facade.get_task_detail_view(task_id)
+    status = updated.status if updated is not None else "stopped"
+    return _ok({"taskId": task_id, "status": status}, message=f"已停止任务: {task_id}")
+
+
 @run_router.post("/script/{task_id}/stop")
 def stop_script_task(task_id: str) -> dict[str, Any]:
-    get_control_facade().stop_script(task_id)
-    return _ok({"taskId": task_id}, message=f"已停止任务: {task_id}")
+    return _stop_task(task_id, "script")
 
 
 @run_router.post("/pipeline/{task_id}/stop")
 def stop_pipeline_task(task_id: str) -> dict[str, Any]:
-    get_control_facade().stop_pipeline(task_id)
-    return _ok({"taskId": task_id}, message=f"已停止任务: {task_id}")
+    return _stop_task(task_id, "pipeline")
 
 
 @logs_router.get("")

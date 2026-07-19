@@ -41,6 +41,32 @@ test('stopTasks stops all tasks and refreshes state once', async () => {
   assert.equal(refreshCount, 1)
 })
 
+test('stopTask refreshes stale task state before rethrowing a stop failure', async () => {
+  const stopError = new Error('任务不存在或已删除')
+  let refreshCount = 0
+  const state = { tasks: ref([]) }
+  let actions
+  actions = createRuntimeActions({
+    state,
+    systemApi: {},
+    runApi: {
+      async stopTask() {
+        throw stopError
+      },
+    },
+    runtimeStreams: {},
+    getActions: () => ({
+      ...actions,
+      async loadState() {
+        refreshCount += 1
+      },
+    }),
+  })
+
+  await assert.rejects(actions.stopTask('deleted-task', 'script'), error => error === stopError)
+  assert.equal(refreshCount, 1)
+})
+
 test('runtime polling refreshes selected task detail only while task manager is active', async () => {
   let detailCalls = 0
   const state = {
