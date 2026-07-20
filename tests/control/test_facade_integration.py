@@ -396,9 +396,48 @@ def test_control_facade_connect_emulator_device_uses_mumu_config(mocker) -> None
     assert result.message == "已连接模拟器设备: MuMu模拟器"
     params = mock_connect.call_args.args[1]
     assert params.adb_path == "./adb/adb.exe"
+    assert params.mumu is not None
+    assert params.mumu.enable is True
 
 
-def test_control_facade_manual_connect_adb_reuses_discovered_input_methods(mocker) -> None:
+def test_control_facade_connect_discovered_adb_drops_mumu_backend(mocker) -> None:
+    facade = build_facade()
+    discovered_config = {
+        "agent": "x",
+        "extras": {
+            "mumu": {"enable": True, "path": "mumu"},
+            "demo": {"enable": True},
+        },
+    }
+    facade.device_facade._adb_raw = [
+        {
+            "name": "MuMu discovered device",
+            "adb_path": "mumu-adb.exe",
+            "address": "192.168.1.245:5555",
+            "screencap_methods": 64,
+            "input_methods": 8,
+            "config": discovered_config,
+        }
+    ]
+    mock_session = MagicMock()
+    mock_connect = mocker.patch(
+        "mluascript.control.devices.facade.connect_adb",
+        side_effect=[RuntimeError("maatouch failed"), RuntimeError("minitouch failed"), mock_session],
+    )
+
+    result = facade.connect_device("adb:0")
+
+    assert result.ok is True
+    assert [call.args[1].input_methods for call in mock_connect.call_args_list] == [4, 2, 6]
+    assert [call.args[1].screencap_methods for call in mock_connect.call_args_list] == [7, 7, 7]
+    assert all(
+        call.args[1].config == {"agent": "x", "extras": {"demo": {"enable": True}}}
+        for call in mock_connect.call_args_list
+    )
+    assert "mumu" in discovered_config["extras"]
+
+
+def test_control_facade_manual_connect_adb_uses_standard_methods_with_discovered_path(mocker) -> None:
     facade = build_facade()
     mock_session = MagicMock()
     mock_connect = mocker.patch("mluascript.control.devices.facade.connect_adb", return_value=mock_session)
@@ -459,7 +498,7 @@ def test_control_facade_manual_connect_adb_discovers_device_when_cache_empty(moc
     assert result.ok is True
     params = mock_connect.call_args.args[1]
     assert params.adb_path == "found-adb.exe"
-    assert params.screencap_methods == 5
+    assert params.screencap_methods == 7
     assert params.input_methods == 4
     assert params.config == {"extras": {"demo": True}}
     assert [call.args[1].input_methods for call in mock_connect.call_args_list] == [4]
@@ -483,6 +522,7 @@ def test_control_facade_manual_connect_adb_forces_touch_backends_without_discove
     params = mock_connect.call_args.args[1]
     assert params.adb_path == "fallback-adb.exe"
     assert params.address == "192.168.1.245:5555"
+    assert params.screencap_methods == 7
     assert params.input_methods == 4
     assert [call.args[1].input_methods for call in mock_connect.call_args_list] == [4]
 
@@ -509,6 +549,42 @@ def test_control_facade_manual_connect_adb_rewrites_default_discovery_methods(mo
 
     assert result.ok is True
     assert [call.args[1].input_methods for call in mock_connect.call_args_list] == [4, 2, 6]
+    assert [call.args[1].screencap_methods for call in mock_connect.call_args_list] == [7, 7, 7]
+
+
+def test_control_facade_manual_connect_adb_drops_discovered_mumu_backend(mocker) -> None:
+    facade = build_facade()
+    facade.device_facade._adb_raw = [
+        {
+            "name": "MuMu discovered device",
+            "adb_path": "mumu-adb.exe",
+            "address": "192.168.1.245:5555",
+            "screencap_methods": 64,
+            "input_methods": 8,
+            "config": {
+                "agent": "x",
+                "extras": {
+                    "mumu": {"enable": True, "path": "mumu"},
+                    "demo": {"enable": True},
+                },
+            },
+        }
+    ]
+    mock_session = MagicMock()
+    mock_connect = mocker.patch(
+        "mluascript.control.devices.facade.connect_adb",
+        side_effect=[RuntimeError("maatouch failed"), RuntimeError("minitouch failed"), mock_session],
+    )
+
+    result = facade.connect_adb("192.168.1.245:5555")
+
+    assert result.ok is True
+    assert [call.args[1].input_methods for call in mock_connect.call_args_list] == [4, 2, 6]
+    assert [call.args[1].screencap_methods for call in mock_connect.call_args_list] == [7, 7, 7]
+    assert all(
+        call.args[1].config == {"agent": "x", "extras": {"demo": {"enable": True}}}
+        for call in mock_connect.call_args_list
+    )
 
 
 def test_control_facade_manual_connect_adb_returns_success_on_maatouch_first_try(mocker) -> None:

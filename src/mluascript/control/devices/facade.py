@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import numpy as np
 import io
 import time
@@ -8,7 +10,7 @@ import shutil
 from math import ceil
 from pathlib import Path
 from PIL import Image
-from maa.define import MaaAdbInputMethodEnum
+from maa.define import MaaAdbInputMethodEnum, MaaAdbScreencapMethodEnum
 
 from mluascript.maa import MaaFacade
 from mluascript.maa.config import MaaDeviceConfig
@@ -39,10 +41,14 @@ from .models import (
 )
 
 PAGE_SIZE = 8
-ADB_INPUT_METHOD_DEFAULT = int(MaaAdbInputMethodEnum.Default)
 ADB_INPUT_METHOD_MAATOUCH = int(MaaAdbInputMethodEnum.Maatouch)
 ADB_INPUT_METHOD_MINITOUCH = int(MaaAdbInputMethodEnum.MinitouchAndAdbKey)
 MANUAL_ADB_TOUCH_INPUT_METHODS = int(MaaAdbInputMethodEnum.Maatouch | MaaAdbInputMethodEnum.MinitouchAndAdbKey)
+STANDARD_ADB_SCREENCAP_METHODS = int(
+    MaaAdbScreencapMethodEnum.RawWithGzip
+    | MaaAdbScreencapMethodEnum.Encode
+    | MaaAdbScreencapMethodEnum.EncodeToFileAndPull
+)
 
 
 class DeviceFacade:
@@ -118,7 +124,7 @@ class DeviceFacade:
                 f"address={address}, adb_path={params.adb_path}, "
                 f"input_methods={params.input_methods}, screencap_methods={params.screencap_methods}"
             )
-            session = self._connect_manual_adb_with_fallbacks(params)
+            session = self._connect_adb_with_fallbacks(params)
             self._maa_facade.attach_session(session)
             return DeviceActionResult(ok=True, message=f"已连接 ADB 设备: {address}", overview=self.get_overview())
         except Exception as exc:
@@ -231,16 +237,16 @@ class DeviceFacade:
         params = AdbConnectionParams(
             adb_path=str(device.get("adb_path") or fallback_adb_path),
             address=str(device.get("address") or ""),
-            screencap_methods=device.get("screencap_methods"),
-            input_methods=device.get("input_methods"),
-            config=device.get("config") or {},
+            screencap_methods=STANDARD_ADB_SCREENCAP_METHODS,
+            input_methods=self._normalize_standard_adb_input_methods(device.get("input_methods")),
+            config=self._build_standard_adb_config(device.get("config")),
         )
         if not params.address:
             return DeviceActionResult(ok=False, message="ADB 设备缺少地址信息", severity="error", overview=self.get_overview())
 
         try:
             self._ensure_runtime_ready()
-            session = connect_adb(self._maa_facade.context, params)
+            session = self._connect_adb_with_fallbacks(params)
             self._maa_facade.attach_session(session)
             return DeviceActionResult(ok=True, message=f"已连接 ADB 设备: {params.address}", overview=self.get_overview())
         except Exception as exc:
@@ -251,31 +257,26 @@ class DeviceFacade:
         discovered = self._find_adb_device_by_address(address)
         fallback_adb_path = self._resolve_default_adb_path()
         if discovered is not None:
-            discovered_input_methods = discovered.get("input_methods")
-            if self._is_default_adb_input_methods(discovered_input_methods):
-                discovered_input_methods = MANUAL_ADB_TOUCH_INPUT_METHODS
             return AdbConnectionParams(
                 adb_path=str(discovered.get("adb_path") or fallback_adb_path),
                 address=address,
-                screencap_methods=discovered.get("screencap_methods"),
-                input_methods=discovered_input_methods,
-                config=discovered.get("config") or {},
+                screencap_methods=STANDARD_ADB_SCREENCAP_METHODS,
+                input_methods=self._normalize_standard_adb_input_methods(discovered.get("input_methods")),
+                config=self._build_standard_adb_config(discovered.get("config")),
             )
-        # When manual connect has no discovery metadata, prefer touch-capable
-        # backends so touch_down/touch_up can be validated without falling back
-        # to AdbShell.
         return AdbConnectionParams(
             adb_path=fallback_adb_path,
             address=address,
+            screencap_methods=STANDARD_ADB_SCREENCAP_METHODS,
             input_methods=MANUAL_ADB_TOUCH_INPUT_METHODS,
         )
 
-    def _connect_manual_adb_with_fallbacks(self, params: AdbConnectionParams):
-        attempts = self._build_manual_adb_attempts(params)
+    def _connect_adb_with_fallbacks(self, params: AdbConnectionParams):
+        attempts = self._build_adb_attempts(params)
         last_error: Exception | None = None
         for attempt in attempts:
             logger.info(
-                "Manual ADB connect attempt: "
+                "ADB connect attempt: "
                 f"address={attempt.address}, input_methods={attempt.input_methods}, "
                 f"screencap_methods={attempt.screencap_methods}"
             )
@@ -284,14 +285,14 @@ class DeviceFacade:
             except Exception as exc:
                 last_error = exc
                 logger.warning(
-                    "Manual ADB connect attempt failed: "
+                    "ADB connect attempt failed: "
                     f"address={attempt.address}, input_methods={attempt.input_methods}, reason={exc}"
                 )
         if last_error is not None:
             raise last_error
-        raise RuntimeError("No manual ADB connect attempts were generated")
+        raise RuntimeError("No ADB connect attempts were generated")
 
-    def _build_manual_adb_attempts(self, params: AdbConnectionParams) -> list[AdbConnectionParams]:
+    def _build_adb_attempts(self, params: AdbConnectionParams) -> list[AdbConnectionParams]:
         input_methods = params.input_methods
         if input_methods in (ADB_INPUT_METHOD_MAATOUCH, ADB_INPUT_METHOD_MINITOUCH):
             return [params]
@@ -311,12 +312,26 @@ class DeviceFacade:
             unique_attempts.append(attempt)
         return unique_attempts
 
-    def _is_default_adb_input_methods(self, input_methods: object) -> bool:
+    def _normalize_standard_adb_input_methods(self, input_methods: object) -> int:
         try:
             normalized = int(input_methods)  # type: ignore[arg-type]
         except (TypeError, ValueError):
-            return input_methods is None
-        return normalized == ADB_INPUT_METHOD_DEFAULT
+            return MANUAL_ADB_TOUCH_INPUT_METHODS
+
+        touch_methods = normalized & MANUAL_ADB_TOUCH_INPUT_METHODS
+        return touch_methods or MANUAL_ADB_TOUCH_INPUT_METHODS
+
+    def _build_standard_adb_config(self, raw_config: object) -> dict:
+        if not isinstance(raw_config, dict):
+            return {}
+
+        normalized = deepcopy(raw_config)
+        extras = normalized.get("extras")
+        if isinstance(extras, dict):
+            extras.pop("mumu", None)
+            if not extras:
+                normalized.pop("extras", None)
+        return normalized
 
     def _find_adb_device_by_address(self, address: str) -> dict | None:
         normalized = address.strip().lower()

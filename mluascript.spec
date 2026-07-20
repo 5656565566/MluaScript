@@ -5,6 +5,9 @@ import sys
 import subprocess
 from pathlib import Path
 
+from PyInstaller.building.utils import format_binaries_and_datas
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+
 
 def _safe_print(text):
     if text is None:
@@ -82,10 +85,38 @@ if not build_frontend():
 import maa
 
 maa_bin_path = os.path.join(os.path.dirname(maa.__file__), 'bin')
+maa_agent_files = [
+    *collect_data_files('MaaAgentBinary'),
+    *collect_dynamic_libs('MaaAgentBinary', search_patterns=['*.so']),
+]
 webui_dist_path = os.path.abspath('src/mluascript_web/dist')
 upx_dir = os.path.abspath('dev/upx-5.1.1-win64')
 resolved_upx_dir = upx_dir if os.path.isdir(upx_dir) else None
 resolved_icon = 'logo.ico' if sys.platform.startswith('win') and os.path.exists('logo.ico') else None
+
+# Android 端触控程序是独立数据包，PyInstaller 不会随 maa Python 模块自动收集。
+required_agent_assets = {
+    'MaaAgentBinary/maatouch/universal/maatouch',
+    'MaaAgentBinary/minitouch/arm64-v8a/minitouch',
+    'MaaAgentBinary/minitouch/armeabi/minitouch',
+    'MaaAgentBinary/minitouch/armeabi-v7a/minitouch',
+    'MaaAgentBinary/minitouch/x86/minitouch',
+    'MaaAgentBinary/minitouch/x86_64/minitouch',
+}
+collected_agent_assets = {
+    (Path(destination) / Path(source).name).as_posix()
+    for source, destination in maa_agent_files
+}
+missing_agent_assets = sorted(required_agent_assets - collected_agent_assets)
+if missing_agent_assets:
+    raise SystemExit(f"MaaAgentBinary assets missing: {', '.join(missing_agent_assets)}")
+if not any(asset.endswith('/minicap.so') for asset in collected_agent_assets):
+    raise SystemExit("MaaAgentBinary minicap.so assets missing")
+
+maa_agent_toc = [
+    (destination, source, 'DATA')
+    for destination, source in format_binaries_and_datas(maa_agent_files)
+]
 
 a = Analysis(
     ['src/build.py'],
@@ -113,6 +144,9 @@ a = Analysis(
     excludes=[],
     noarchive=False,
 )
+
+# Analysis 会把 Android ELF 误判为宿主机二进制；在分类完成后按数据文件追加，保留完整 Agent 包。
+a.datas.extend(maa_agent_toc)
 
 pyz = PYZ(a.pure)
 
