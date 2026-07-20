@@ -1,7 +1,7 @@
 <script setup>
 import { computed, watch, h } from 'vue'
 import { state, actions } from '../store'
-import { isTemplateConditionActive } from '../features/templates/templateDomain.js'
+import { buildTemplateFieldRows } from '../features/templates/templateDomain.js'
 import {
   NCard,
   NSpace,
@@ -41,7 +41,7 @@ const currentWorkflowState = computed(() => {
 const orderedWorkflowTasks = computed(() => {
   const workflow = currentWorkflow.value
   if (!workflow) return []
-  const order = currentWorkflowState.value.stepOrder || []
+  const order = workflow.lockSteps ? [] : (currentWorkflowState.value.stepOrder || [])
   const tasksByKey = Object.fromEntries((workflow.tasks || []).map(task => [task.key, task]))
   const result = []
   const seen = new Set()
@@ -148,13 +148,6 @@ function getDependencyValue(conditionKey, stepKey = '') {
   return getGlobalValueByKey(conditionKey)
 }
 
-function isConditionActive(field, stepKey = '') {
-  const condition = field?.if
-  if (!condition?.k) return true
-  const currentValue = getDependencyValue(condition.k, stepKey)
-  return isTemplateConditionActive(condition, currentValue)
-}
-
 function workflowFieldModel(stepKey, field) {
   return getStepValueByKey(stepKey, field.key)
 }
@@ -166,16 +159,22 @@ function updateWorkflowField(stepKey, field, value) {
 }
 
 function isStepEnabled(stepKey) {
+  if (currentWorkflow.value?.lockSteps) {
+    const step = orderedWorkflowTasks.value.find(item => item.key === stepKey)
+    return Boolean(step?.enabled ?? true)
+  }
   return Boolean(getWorkflowState().stepEnabled?.[stepKey] ?? true)
 }
 
 function setStepEnabled(stepKey, enabled) {
+  if (currentWorkflow.value?.lockSteps) return
   const workflowKey = currentWorkflow.value?.key
   if (!workflowKey) return
   actions.updateWorkflowStepEnabled(workflowKey, stepKey, enabled)
 }
 
 function moveStep(stepKey, direction) {
+  if (currentWorkflow.value?.lockSteps) return
   const workflowKey = currentWorkflow.value?.key
   if (!workflowKey) return
   actions.moveWorkflowStep(workflowKey, stepKey, direction)
@@ -186,7 +185,10 @@ function workflowGlobalValue(field) {
 }
 
 function visibleWorkflowGlobals() {
-  return (currentWorkflow.value?.globals || []).filter(field => isConditionActive(field))
+  return buildTemplateFieldRows(
+    currentWorkflow.value?.globals || [],
+    key => getDependencyValue(key),
+  ).filter(field => field.dependencyActive)
 }
 
 function updateWorkflowGlobal(field, value) {
@@ -200,13 +202,11 @@ function updateWorkflowGlobal(field, value) {
 }
 
 function groupedFields(fields) {
-  const visible = (fields || []).filter(field => isConditionActive(field, currentStep.value?.key || ''))
-  const indexMap = new Map(visible.map((field, index) => [field.key, index]))
-  return [...visible].sort((a, b) => {
-    if (a.grp && a.grp === b.key) return 1
-    if (b.grp && b.grp === a.key) return -1
-    return (indexMap.get(a.key) ?? 0) - (indexMap.get(b.key) ?? 0)
-  })
+  const stepKey = currentStep.value?.key || ''
+  return buildTemplateFieldRows(
+    fields,
+    key => getDependencyValue(key, stepKey),
+  ).filter(field => field.dependencyActive)
 }
 
 function groupedStepFields(step) {
@@ -214,9 +214,9 @@ function groupedStepFields(step) {
 }
 
 function fieldItemStyle(field) {
-  return field.grp
-    ? 'margin-bottom: 18px; padding-left: 18px; border-left: 2px solid var(--n-border-color);'
-    : 'margin-bottom: 18px;'
+  const depth = Math.max(0, Number(field.dependencyDepth) || 0)
+  if (!depth) return 'margin-bottom: 18px;'
+  return `margin: 0 0 18px ${(depth - 1) * 18}px; padding-left: 18px; border-left: 2px solid var(--n-border-color); box-sizing: border-box;`
 }
 
 function openFromScriptManager() {
@@ -337,7 +337,7 @@ function renderFieldControl(field, value, onUpdate) {
                   </n-thing>
                   <template #suffix>
                     <n-space align="center" :wrap="false" @click.stop>
-                      <n-space :size="2" vertical v-if="step.allowReorder !== false">
+                      <n-space :size="2" vertical v-if="!currentWorkflow?.lockSteps && step.allowReorder !== false">
                         <n-button size="tiny" quaternary @click="moveStep(step.key, 'up')">
                           <template #icon><n-icon><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 15l-6-6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></n-icon></template>
                         </n-button>
@@ -345,7 +345,7 @@ function renderFieldControl(field, value, onUpdate) {
                           <template #icon><n-icon><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></n-icon></template>
                         </n-button>
                       </n-space>
-                      <n-switch v-if="step.allowDisable !== false" :value="isStepEnabled(step.key)" @update:value="setStepEnabled(step.key, $event)" size="small" />
+                      <n-switch v-if="!currentWorkflow?.lockSteps && step.allowDisable !== false" :value="isStepEnabled(step.key)" @update:value="setStepEnabled(step.key, $event)" size="small" />
                     </n-space>
                   </template>
                 </n-list-item>

@@ -52,26 +52,7 @@ const SHARED_VAR_BLOCK_TYPES = new Set([
   'shared_var_to_json',
 ])
 
-const BUILTIN_SHARED_VARIABLES = [
-  {
-    name: 'template_state',
-    label: 'template_state',
-    group: '模板全局变量',
-    description: '模板运行态共享变量',
-    builtin: true,
-    readonlyName: true,
-    deletable: false,
-  },
-  {
-    name: 'template_workflow_globals',
-    label: 'template_workflow_globals',
-    group: '模板全局变量',
-    description: '工作流全局共享变量',
-    builtin: true,
-    readonlyName: true,
-    deletable: false,
-  },
-]
+const BUILTIN_SHARED_VARIABLES = []
 
 export function getLuaScriptPickerItems(stripLuaExt = false) {
   const source = getters.luaScriptFiles?.value || getters.luaScripts?.value || []

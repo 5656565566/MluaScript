@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  buildTemplateFieldRows,
   buildWorkflowDefaults,
   isTemplateConditionActive,
   normalizeRuntimeValue,
@@ -29,6 +30,25 @@ test('workflow defaults preserve saved order and append new steps', () => {
   })
   const defaults = buildWorkflowDefaults(meta, { flows: { main: { stepOrder: ['b'] } } })
   assert.deepEqual(defaults.main.stepOrder, ['b', 'a'])
+})
+
+test('locked workflow defaults ignore saved order and enabled state', () => {
+  const meta = normalizeTemplateMeta({
+    vars: {},
+    tasks: [{ k: 'task', args: [] }],
+    flows: [{
+      k: 'main',
+      lockSteps: true,
+      steps: [{ k: 'a', task: 'task', enabled: true }, { k: 'b', task: 'task', enabled: false }],
+    }],
+  })
+  const defaults = buildWorkflowDefaults(meta, {
+    flows: { main: { stepOrder: ['b', 'a'], stepEnabled: { a: false, b: true } } },
+  })
+
+  assert.equal(meta.workflows[0].lockSteps, true)
+  assert.deepEqual(defaults.main.stepOrder, ['a', 'b'])
+  assert.deepEqual(defaults.main.stepEnabled, { a: true, b: false })
 })
 
 test('workflow defaults resolve parameter and literal binding descriptors', () => {
@@ -111,4 +131,26 @@ test('task parameter relations do not leak to another task', () => {
     in: [],
   })
   assert.equal(taskB.fields.find(field => field.key === 'gugu').if, null)
+})
+
+test('field rows preserve arbitrary dependency depth and ancestor activation', () => {
+  const fields = [
+    { key: 'leaf', if: { k: 'child', eq: true } },
+    { key: 'root' },
+    { key: 'child', if: { k: 'root', eq: true } },
+  ]
+
+  const hiddenRows = buildTemplateFieldRows(fields, key => ({ root: false, child: true }[key]))
+  assert.deepEqual(hiddenRows.map(field => [field.key, field.dependencyDepth, field.dependencyActive]), [
+    ['root', 0, true],
+    ['child', 1, false],
+    ['leaf', 2, false],
+  ])
+
+  const visibleRows = buildTemplateFieldRows(fields, key => ({ root: true, child: true }[key]))
+  assert.deepEqual(visibleRows.map(field => [field.key, field.dependencyDepth, field.dependencyActive]), [
+    ['root', 0, true],
+    ['child', 1, true],
+    ['leaf', 2, true],
+  ])
 })

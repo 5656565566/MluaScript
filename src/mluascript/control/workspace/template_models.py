@@ -134,6 +134,18 @@ class TemplateTaskDef(BaseModel):
         return self
 
 
+class TemplateSuccessBranchDef(BaseModel):
+    """步骤成功后的任务流参数分支"""
+
+    if_: TemplateCondition = Field(alias="if", description="任务流参数条件")
+    goto: str = Field(default="", description="命中后跳转的步骤 key")
+
+    model_config = {
+        "populate_by_name": True,
+        "extra": "ignore",
+    }
+
+
 class TemplateStepDef(BaseModel):
     """工作流步骤定义"""
 
@@ -145,6 +157,7 @@ class TemplateStepDef(BaseModel):
     task: str = Field(default="", description="引用 task key")
     args: dict[str, Any] = Field(default_factory=dict, description="步骤默认覆盖参数")
     enabled: bool = Field(default=True, description="默认启用")
+    successBranches: list[TemplateSuccessBranchDef] = Field(default_factory=list, description="成功后的参数分支")
     onSuccess: str = Field(default="continue", description="成功策略")
     successGoto: str = Field(default="", description="成功时跳转的步骤 key")
     onFail: str = Field(default="stop", description="失败策略")
@@ -167,12 +180,25 @@ class TemplateFlowDef(BaseModel):
     ut: str = Field(default="", description="用户标题")
     ud: str = Field(default="", description="用户说明")
     g: list[str] = Field(default_factory=list, description="全局字段引用")
+    lockSteps: bool = Field(default=False, description="锁定用户侧步骤顺序和启用状态")
     steps: list[TemplateStepDef] = Field(default_factory=list, description="步骤列表")
     ext: dict[str, Any] = Field(default_factory=dict, description="扩展字段")
 
     model_config = {
         "extra": "ignore",
     }
+
+    @model_validator(mode="after")
+    def _validate_success_branches(self) -> "TemplateFlowDef":
+        step_keys = {step.k for step in self.steps}
+        global_keys = set(self.g)
+        for step in self.steps:
+            for branch in step.successBranches:
+                if branch.if_.k not in global_keys:
+                    raise ValueError(f"步骤 {step.k} 的分支引用了非任务流参数: {branch.if_.k}")
+                if branch.goto not in step_keys:
+                    raise ValueError(f"步骤 {step.k} 的分支跳转目标不存在: {branch.goto}")
+        return self
 
 
 class TemplateEntryDef(BaseModel):

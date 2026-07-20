@@ -8,6 +8,7 @@ import {
   createEnumOption,
   createTemplateFlow,
   createTemplateFlowStep,
+  createTemplateSuccessBranch,
   createTemplateTask,
   createTemplateVariable,
   createStepArgBinding,
@@ -193,6 +194,13 @@ export function useTemplateEditor({
     }))
     .filter(item => item.value))
 
+  const workflowBranchTargetOptions = computed(() => (selectedFlow.value?.steps || [])
+    .map((step, index) => ({
+      label: step.k ? `${step.k}${step.task ? ` (${step.task})` : ''}` : `任务 ${index + 1}`,
+      value: step.k,
+    }))
+    .filter(item => item.value))
+
   const filteredVarsList = computed(() => {
     const keyword = variableSearch.value.trim().toLowerCase()
     if (!keyword) return varsList.value
@@ -310,6 +318,13 @@ export function useTemplateEditor({
     if (typeof value === 'string') return value
     if (typeof value === 'boolean') return value ? 'true' : 'false'
     if (value === null || typeof value === 'undefined') return 'null'
+    if (typeof value === 'object') {
+      try {
+        return JSON.stringify(value)
+      } catch {
+        return String(value)
+      }
+    }
     return String(value)
   }
 
@@ -509,6 +524,7 @@ export function useTemplateEditor({
         step.onSuccess = 'continue'
         step.successGoto = ''
       }
+      step.successBranches = (step.successBranches || []).filter(branch => branch.goto !== removedKey)
     }
     selectedStepIndex.value = Math.max(0, Math.min(selectedStepIndex.value, flow.steps.length - 1))
   }
@@ -581,7 +597,117 @@ export function useTemplateEditor({
     for (const candidate of flow.steps) {
       if (candidate !== step && candidate.onFail === 'goto' && candidate.goto === previousKey) candidate.goto = value
       if (candidate !== step && candidate.onSuccess === 'goto' && candidate.successGoto === previousKey) candidate.successGoto = value
+      for (const branch of candidate.successBranches || []) {
+        if (branch.goto === previousKey) branch.goto = value
+      }
     }
+  }
+
+  function workflowBranchParameterMeta(branch) {
+    return getVarMeta(branch?.if?.k)
+  }
+
+  function workflowBranchOperator(branch) {
+    return taskArgConditionOperator({ k: '__workflow_branch__', if: branch?.if })
+  }
+
+  function workflowBranchOperatorOptions(branch) {
+    return taskArgConditionOperatorsForType(workflowBranchParameterMeta(branch).tp)
+      .map(value => ({ label: taskArgRelationOperatorLabels[value], value }))
+  }
+
+  function workflowBranchValueControl(branch) {
+    const type = workflowBranchParameterMeta(branch).tp
+    if (type === 'bool' || type === 'enum') return 'select'
+    if (type === 'int' || type === 'num') return 'number'
+    return 'input'
+  }
+
+  function workflowBranchValueOptions(branch) {
+    const meta = workflowBranchParameterMeta(branch)
+    if (meta.tp === 'bool') {
+      return [
+        { label: '是 (true)', value: 'true' },
+        { label: '否 (false)', value: 'false' },
+      ]
+    }
+    return meta.tp === 'enum' ? enumOptionsForKey(meta.key) : []
+  }
+
+  function workflowBranchValueMultiple(branch) {
+    return workflowBranchParameterMeta(branch).tp === 'enum' && workflowBranchOperator(branch) === 'in'
+  }
+
+  function workflowBranchValuePrecision(branch) {
+    return workflowBranchParameterMeta(branch).tp === 'int' ? 0 : undefined
+  }
+
+  function workflowBranchValue(branch) {
+    const operator = workflowBranchOperator(branch)
+    const value = branch?.if?.[operator]
+    const meta = workflowBranchParameterMeta(branch)
+    if (meta.tp === 'enum' && operator === 'in') {
+      if (Array.isArray(value)) return value
+      try {
+        const parsed = JSON.parse(value)
+        return Array.isArray(parsed) ? parsed : []
+      } catch {
+        return []
+      }
+    }
+    if (meta.tp === 'int' || meta.tp === 'num') {
+      if (value === '' || value === null || typeof value === 'undefined') return null
+      const numericValue = Number(value)
+      return Number.isFinite(numericValue) ? numericValue : null
+    }
+    if (operator === 'in') return typeof value === 'string' ? value : JSON.stringify(value || [])
+    return formatValuePreview(value)
+  }
+
+  function workflowBranchValuePlaceholder(branch) {
+    if (workflowBranchOperator(branch) === 'in') return 'JSON 数组'
+    return workflowBranchParameterMeta(branch).tp === 'json' ? 'JSON 值' : '条件值'
+  }
+
+  function setWorkflowBranchParameter(branch, parameterKey) {
+    branch.if = parameterKey
+      ? { k: parameterKey, eq: defaultTaskArgRelationValue(parameterKey) }
+      : { k: '', eq: '' }
+  }
+
+  function setWorkflowBranchOperator(branch, operator) {
+    const parameterKey = branch?.if?.k
+    if (!parameterKey) return
+    branch.if = {
+      k: parameterKey,
+      [operator]: defaultTaskArgRelationValue(parameterKey, operator),
+    }
+  }
+
+  function setWorkflowBranchValue(branch, value) {
+    const parameterKey = branch?.if?.k
+    if (!parameterKey) return
+    branch.if = { k: parameterKey, [workflowBranchOperator(branch)]: value }
+  }
+
+  function addWorkflowBranch() {
+    const step = selectedStep.value
+    if (!step) return
+    const branch = createTemplateSuccessBranch()
+    const parameterKey = flowVariableOptions.value[0]?.value || ''
+    const operator = 'eq'
+    branch.if = {
+      k: parameterKey,
+      [operator]: parameterKey ? defaultTaskArgRelationValue(parameterKey, operator) : '',
+    }
+    branch.goto = workflowBranchTargetOptions.value[0]?.value || ''
+    if (!Array.isArray(step.successBranches)) step.successBranches = []
+    step.successBranches.push(branch)
+  }
+
+  function removeWorkflowBranch(index) {
+    if (!Array.isArray(selectedStep.value?.successBranches)) return
+    selectedStep.value.successBranches.splice(index, 1)
   }
 
   function handleStepOnSuccessChange(value) {
@@ -915,6 +1041,8 @@ export function useTemplateEditor({
     selectedFlow,
     selectedStep,
     gotoStepOptions,
+    flowVariableOptions,
+    workflowBranchTargetOptions,
     stepBindingRows,
     stepBindingStats,
     filteredVarsList,
@@ -948,6 +1076,19 @@ export function useTemplateEditor({
     setStepArgSource,
     setStepArgValue,
     setSelectedStepKey,
+    addWorkflowBranch,
+    removeWorkflowBranch,
+    workflowBranchOperator,
+    workflowBranchOperatorOptions,
+    workflowBranchValueControl,
+    workflowBranchValueOptions,
+    workflowBranchValueMultiple,
+    workflowBranchValuePrecision,
+    workflowBranchValue,
+    workflowBranchValuePlaceholder,
+    setWorkflowBranchParameter,
+    setWorkflowBranchOperator,
+    setWorkflowBranchValue,
     handleStepOnSuccessChange,
     handleStepOnFailChange,
     openSettingsDialog,

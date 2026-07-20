@@ -212,9 +212,76 @@ def test_template_store_executes_success_goto_and_exit(tmp_path: Path) -> None:
     )
 
     lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.execute(
+        "shared = { values = {} }; "
+        "function shared.set_key(key, value) shared.values[key] = value end; "
+        "function shared.get_key(key) return shared.values[key] end"
+    )
     lua.execute(script.read_text(encoding="utf-8") + "\n" + runtime_script)
 
     assert lua.globals().trace == "13"
+
+
+def test_template_store_executes_workflow_parameter_branch_and_locked_order(tmp_path: Path) -> None:
+    meta = normalize_template_meta(
+        {
+            "vars": {"count": {"tp": "int", "def": 1}},
+            "tasks": [
+                {"k": "one", "fn": "step_one"},
+                {"k": "two", "fn": "step_two"},
+                {"k": "three", "fn": "step_three"},
+            ],
+            "flows": [
+                {
+                    "k": "main",
+                    "g": ["count"],
+                    "lockSteps": True,
+                    "steps": [
+                        {
+                            "k": "s1",
+                            "task": "one",
+                            "successBranches": [{"if": {"k": "count", "gt": 2}, "goto": "s3"}],
+                        },
+                        {"k": "s2", "task": "two", "enabled": False},
+                        {"k": "s3", "task": "three"},
+                    ],
+                }
+            ],
+        }
+    )
+    saved = TemplateSavedConfig(
+        scriptPath="branch.lua",
+        flows={
+            "main": SavedFlowConfig(
+                globals={"count": 3},
+                stepOrder=["s3", "s2", "s1"],
+                stepEnabled={"s1": False, "s2": True, "s3": False},
+            )
+        },
+    )
+    store = TemplateStore(WorkspaceManager(tmp_path))
+
+    runtime = store.build_runtime_payload(meta, saved, flow_key="main")
+    runtime_script = store.build_runtime_script(meta, saved, flow_key="main")
+
+    assert [step["key"] for step in runtime["steps"]] == ["s1", "s2", "s3"]
+    assert [step["enabled"] for step in runtime["steps"]] == [True, False, True]
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.execute(
+        "shared = { values = {} }; "
+        "function shared.set_key(key, value) shared.values[key] = value end; "
+        "function shared.get_key(key) return shared.values[key] end; "
+        "trace = ''; "
+        "function step_one(args) trace = trace .. '1' end; "
+        "function step_two(args) trace = trace .. '2' end; "
+        "function step_three(args) trace = trace .. '3' end; "
+        "function log_info(message) end; function log_error(message) end"
+    )
+    lua.execute(runtime_script)
+
+    assert lua.globals().trace == "13"
+    assert lua.globals().shared["values"]["template_workflow_globals"]["count"] == 3
+    assert lua.globals().shared["values"]["template_state"]["status"] == "success"
 
 
 def test_python_to_lua_literal_and_runtime_script_generation(tmp_path: Path) -> None:

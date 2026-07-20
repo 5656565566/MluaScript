@@ -74,6 +74,45 @@ export function isTemplateConditionActive(condition, currentValue) {
   return Boolean(currentValue)
 }
 
+export function buildTemplateFieldRows(fields, getValue = () => undefined) {
+  const nodes = (fields || []).filter(field => fieldKey(field)).map((field, index) => ({
+    field,
+    key: fieldKey(field),
+    condition: field?.if?.k ? field.if : null,
+    index,
+    children: [],
+  }))
+  const nodeByKey = new Map(nodes.map(node => [node.key, node]))
+  const roots = []
+
+  for (const node of nodes) {
+    const parent = node.condition?.k ? nodeByKey.get(node.condition.k) : null
+    if (parent && parent !== node) parent.children.push(node)
+    else roots.push(node)
+  }
+
+  const rows = []
+  const visited = new Set()
+  function visit(node, depth, parentActive) {
+    if (visited.has(node)) return
+    visited.add(node)
+    const active = parentActive && (!node.condition || isTemplateConditionActive(node.condition, getValue(node.condition.k)))
+    rows.push({
+      ...node.field,
+      dependencyDepth: depth,
+      dependencyActive: active,
+    })
+    for (const child of node.children) visit(child, depth + 1, active)
+  }
+
+  for (const root of roots) visit(root, 0, true)
+  // Invalid cycles should not crash the runner. Keep their declaration order as detached roots.
+  for (const node of nodes) {
+    if (!visited.has(node)) visit(node, 0, true)
+  }
+  return rows
+}
+
 export function resolveTemplateBinding(value, vars, runtimeValues = {}) {
   if (!value || typeof value !== 'object' || !value.$bind) return cloneValue(value)
   if (value.$bind === 'literal') return cloneValue(value.value)
@@ -139,6 +178,10 @@ export function normalizeTemplateMeta(meta) {
         functionRef: taskDef.fn || taskDef.functionRef || '',
         args: step.args || {},
         enabled: step.enabled ?? true,
+        successBranches: Array.isArray(step.successBranches) ? step.successBranches.map(branch => ({
+          if: branch?.if ? { ...branch.if, in: Array.isArray(branch.if.in) ? branch.if.in : [] } : null,
+          goto: branch?.goto || '',
+        })) : [],
         onSuccess: step.onSuccess || 'continue',
         successGoto: step.successGoto || '',
         onFail: step.onFail || 'stop',
@@ -165,6 +208,7 @@ export function normalizeTemplateMeta(meta) {
       description: flow.d || flow.description || '',
       userTitle: flow.ut || flow.userTitle || flow.t || flow.title || workflowKey,
       userDescription: flow.ud || flow.userDescription || flow.d || flow.description || '',
+      lockSteps: Boolean(flow.lockSteps),
       globals,
       tasks: steps,
     }
@@ -210,8 +254,8 @@ export function buildWorkflowDefaults(meta, savedConfig) {
     const workflowKey = workflow.key
     const savedWorkflow = savedConfig?.flows?.[workflowKey] || savedConfig?.workflows?.[workflowKey] || {}
     const savedStepArgs = savedWorkflow.stepArgs || {}
-    const savedStepEnabled = savedWorkflow.stepEnabled || {}
-    const savedStepOrder = Array.isArray(savedWorkflow.stepOrder) ? savedWorkflow.stepOrder : []
+    const savedStepEnabled = workflow.lockSteps ? {} : (savedWorkflow.stepEnabled || {})
+    const savedStepOrder = workflow.lockSteps || !Array.isArray(savedWorkflow.stepOrder) ? [] : savedWorkflow.stepOrder
     const savedGlobals = savedWorkflow.globals || {}
     const runtimeGlobals = Object.fromEntries(Object.entries(meta?.vars || {}).map(([key, field]) => [
       key,

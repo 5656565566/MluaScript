@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -15,7 +16,64 @@ from textual.widgets import Button, ContentSwitcher, Input, Static, Switch, Tabb
 
 from mluascript.control.facade import get_control_facade
 from mluascript.control.state.models import TaskListItemView
-from mluascript.control.workspace import SavedFlowConfig, TemplateSavedConfig, TemplateVarDef, get_template_store, is_condition_active
+from mluascript.control.workspace import SavedFlowConfig, TemplateCondition, TemplateSavedConfig, TemplateVarDef, get_template_store, is_condition_active
+
+
+@dataclass(frozen=True, slots=True)
+class _TemplateFieldRow:
+    field: TemplateVarDef
+    depth: int
+    active: bool
+
+
+def _task_arg_key(arg: Any) -> str:
+    return arg if isinstance(arg, str) else str(getattr(arg, "k", "") or "")
+
+
+def _build_task_field_rows(
+    args: list[Any],
+    vars_by_key: dict[str, TemplateVarDef],
+    values: dict[str, Any],
+) -> list[_TemplateFieldRow]:
+    nodes: list[tuple[TemplateVarDef, TemplateCondition | None]] = []
+    for arg in args:
+        key = _task_arg_key(arg)
+        field = vars_by_key.get(key)
+        if field is None:
+            continue
+        condition = None if isinstance(arg, str) else getattr(arg, "if_", None)
+        nodes.append((field, condition))
+
+    node_by_key = {field.k: index for index, (field, _) in enumerate(nodes)}
+    children: dict[int, list[int]] = {index: [] for index in range(len(nodes))}
+    roots: list[int] = []
+    for index, (_, condition) in enumerate(nodes):
+        parent_index = node_by_key.get(condition.k) if condition is not None and condition.k else None
+        if parent_index is not None and parent_index != index:
+            children[parent_index].append(index)
+        else:
+            roots.append(index)
+
+    rows: list[_TemplateFieldRow] = []
+    visited: set[int] = set()
+
+    def visit(index: int, depth: int, parent_active: bool) -> None:
+        if index in visited:
+            return
+        visited.add(index)
+        field, condition = nodes[index]
+        active = parent_active and is_condition_active(condition, values)
+        rows.append(_TemplateFieldRow(field=field, depth=depth, active=active))
+        for child_index in children[index]:
+            visit(child_index, depth + 1, active)
+
+    for root_index in roots:
+        visit(root_index, 0, True)
+    # 无效循环关系不应让 TUI 崩溃，按声明顺序将其作为独立根节点展示。
+    for index in range(len(nodes)):
+        if index not in visited:
+            visit(index, 0, True)
+    return rows
 
 
 class TemplateRunScreen(Container):
@@ -455,25 +513,11 @@ class TemplateRunScreen(Container):
                 container.mount(Static("暂无全局变量", classes="muted-box"))
             return
 
-        active_values = dict(self._get_globals_values())
-        
         ordered_fields = [meta.vars[key] for key in flow.g if key in meta.vars]
-        index_map = {field.k: index for index, field in enumerate(ordered_fields)}
-        sorted_fields = sorted(
-            ordered_fields,
-            key=lambda field: index_map.get(field.grp, index_map.get(field.k, 0)) + 0.1 if field.grp else index_map.get(field.k, 0),
-        )
-
-        active_flags = {}
-        for field in sorted_fields:
-            is_active = is_condition_active(field.if_, active_values)
-            active_flags[field.k] = is_active
-            if is_active:
-                active_values[field.k] = self._get_global_value(field.k, field)
 
         rebuild_id = getattr(self, "_global_rebuild_id", "")
-        for field in sorted_fields:
-            self._mount_field_editor(container, field=field, scope="global", owner_key="global", is_active=active_flags[field.k], rebuild_id=rebuild_id)
+        for field in ordered_fields:
+            self._mount_field_editor(container, field=field, scope="global", owner_key="global", rebuild_id=rebuild_id)
 
     def _render_step_list(self) -> None:
         container = self.query_one("#template-step-list", Vertical)
@@ -578,28 +622,23 @@ class TemplateRunScreen(Container):
                 container.mount(Static("该步骤引用的任务不存在", classes="muted-box"))
             return
 
-        ordered_fields = [meta.vars[key] for key in task_def.args if key in meta.vars]
-        index_map = {field.k: index for index, field in enumerate(ordered_fields)}
-        sorted_fields = sorted(
-            ordered_fields,
-            key=lambda field: index_map.get(field.grp, index_map.get(field.k, 0)) + 0.1 if field.grp else index_map.get(field.k, 0),
-        )
-
-        if not sorted_fields:
+        values = self._build_active_values(step.k)
+        field_rows = _build_task_field_rows(task_def.args, meta.vars, values)
+        if not field_rows:
             if needs_rebuild:
                 container.mount(Static("该步骤未定义可配置字段", classes="muted-box"))
             return
 
-        values = self._build_active_values(step.k)
-        active_flags = {}
-        for field in sorted_fields:
-            is_active = is_condition_active(field.if_, values)
-            active_flags[field.k] = is_active
-            if is_active:
-                values[field.k] = self._get_step_value(step.k, field)
-
-        for field in sorted_fields:
-            self._mount_field_editor(container, field=field, scope="step", owner_key=step.k, is_active=active_flags[field.k], rebuild_id=rebuild_id)
+        for row in field_rows:
+            self._mount_field_editor(
+                container,
+                field=row.field,
+                scope="step",
+                owner_key=step.k,
+                is_active=row.active,
+                depth=row.depth,
+                rebuild_id=rebuild_id,
+            )
 
     def _render_meta_panel(self) -> None:
         container = self.query_one("#template-meta-list", Vertical)
@@ -632,7 +671,8 @@ class TemplateRunScreen(Container):
         task_def = next((item for item in meta.tasks if item.k == step.task), None)
         if task_def is None:
             return values
-        for field_key in task_def.args:
+        for arg in task_def.args:
+            field_key = _task_arg_key(arg)
             field = meta.vars.get(field_key)
             if field is None:
                 continue
@@ -663,8 +703,8 @@ class TemplateRunScreen(Container):
             return bool(saved_flow.stepEnabled[step_key])
         return bool(default_enabled)
 
-    def _mount_field_editor(self, container: Vertical, *, field: TemplateVarDef, scope: str, owner_key: str, is_active: bool = True, rebuild_id: str = "") -> None:
-        label = field.t or field.k
+    def _mount_field_editor(self, container: Vertical, *, field: TemplateVarDef, scope: str, owner_key: str, is_active: bool = True, depth: int = 0, rebuild_id: str = "") -> None:
+        label = f"{'  ' * depth}{field.t or field.k}"
         suffix = f"-{rebuild_id}" if rebuild_id else ""
         field_id = f"field-{scope}-{owner_key}-{field.k}{suffix}"
         title_id = f"field-title-{scope}-{owner_key}-{field.k}{suffix}"

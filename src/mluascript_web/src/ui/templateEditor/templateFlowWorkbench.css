@@ -42,13 +42,34 @@
 
 .flow-definition-bar {
   display: grid;
-  grid-template-columns: minmax(150px, 0.8fr) minmax(200px, 1fr) minmax(240px, 1fr);
+  grid-template-columns: minmax(150px, 0.7fr) minmax(200px, 0.9fr) minmax(230px, 1fr) minmax(220px, 0.8fr);
   gap: 10px;
   align-items: center;
   padding: 12px;
   border: 1px solid var(--n-border-color);
   border-radius: 8px;
   background: var(--n-color-embedded);
+}
+
+.flow-lock-setting {
+  min-width: 0;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.flow-lock-setting > span {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+  font-size: 13px;
+}
+
+.flow-lock-setting strong {
+  font-weight: 500;
 }
 
 .flow-global-binding {
@@ -259,6 +280,39 @@
   gap: 8px;
 }
 
+.flow-branch-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.flow-branch-row {
+  display: grid;
+  grid-template-columns: 24px minmax(130px, 1fr) minmax(100px, 0.65fr) minmax(130px, 1fr) auto minmax(130px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 7px;
+}
+
+.flow-branch-order {
+  color: var(--n-text-color-3);
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 11px;
+  text-align: center;
+}
+
+.flow-branch-arrow,
+.flow-branch-empty {
+  color: var(--n-text-color-3);
+  font-size: 12px;
+}
+
+.flow-branch-empty {
+  margin-top: 12px;
+}
+
 .flow-binding-table {
   margin-top: 12px;
   border: 1px solid var(--n-border-color);
@@ -338,9 +392,14 @@
   .flow-step-list,
   .flow-step-identity,
   .flow-transition-grid,
+  .flow-branch-row,
   .flow-binding-table-head,
   .flow-binding-row {
     grid-template-columns: 1fr;
+  }
+
+  .flow-branch-order {
+    display: none;
   }
 
   .flow-binding-table-head {

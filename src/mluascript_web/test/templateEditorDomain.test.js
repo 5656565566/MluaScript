@@ -127,6 +127,30 @@ test('template editor data survives normalization and serialization', () => {
   assert.deepEqual(payload.flows[0].steps[0].args, { count: 3 })
 })
 
+test('nested variable import preserves three dependency levels and condition operators', () => {
+  const normalized = normalizeTemplateEditorData({
+    vars: {
+      root: {
+        tp: 'bool',
+        children: [{
+          k: 'child',
+          tp: 'bool',
+          children: [{ k: 'leaf', tp: 'int', if: { k: 'child', gt: 2 } }],
+        }],
+      },
+    },
+    tasks: [{ k: 'run', args: ['root', 'child', 'leaf'] }],
+  })
+  const payload = buildTemplatePayload(normalized.localData, normalized.varsList)
+
+  assert.deepEqual(normalized.varsList.map(variable => variable._key), ['root', 'child', 'leaf'])
+  assert.deepEqual(payload.tasks[0].args, [
+    'root',
+    { k: 'child', if: { k: 'root', eq: true } },
+    { k: 'leaf', if: { k: 'child', gt: 2 } },
+  ])
+})
+
 test('template editor serializes canonical numeric, json, and path-style string fields', () => {
   const normalized = normalizeTemplateEditorData({
     vars: {
@@ -246,7 +270,68 @@ test('deleting a task removes its flow instances and repairs goto targets', () =
     successGoto: '',
     onFail: 'stop',
     goto: '',
+    successBranches: [],
   }])
+})
+
+test('workflow lock and typed success branches survive serialization', () => {
+  const normalized = normalizeTemplateEditorData({
+    vars: {
+      count: { t: '次数', tp: 'int', def: 0 },
+      mode: { t: '模式', tp: 'enum', def: 'safe', oneOf: [{ v: 'safe', t: '安全' }, { v: 'fast', t: '快速' }] },
+    },
+    tasks: [{ k: 'run', fn: 'run_task', args: [] }],
+    flows: [{
+      k: 'main',
+      g: ['count', 'mode'],
+      lockSteps: true,
+      steps: [
+        {
+          k: 'check',
+          task: 'run',
+          successBranches: [
+            { if: { k: 'count', gt: 2 }, goto: 'finish' },
+            { if: { k: 'mode', in: ['safe', 'fast'] }, goto: 'finish' },
+          ],
+        },
+        { k: 'finish', task: 'run' },
+      ],
+    }],
+  })
+
+  const payload = buildTemplatePayload(normalized.localData, normalized.varsList)
+
+  assert.equal(payload.flows[0].lockSteps, true)
+  assert.deepEqual(payload.flows[0].steps[0].successBranches, [
+    { if: { k: 'count', gt: 2 }, goto: 'finish' },
+    { if: { k: 'mode', in: ['safe', 'fast'] }, goto: 'finish' },
+  ])
+  assert.deepEqual(validateTemplateDraft(normalized.localData, normalized.varsList), [])
+})
+
+test('condition values serialize according to their parameter types', () => {
+  const payload = buildTemplatePayload({
+    v: 1,
+    tasks: [{
+      k: 'run',
+      fn: 'run_task',
+      args: [
+        'textCode',
+        { k: 'textChild', if: { k: 'textCode', eq: '123' } },
+        'jsonConfig',
+        { k: 'jsonChild', if: { k: 'jsonConfig', eq: '{"enabled":true}' } },
+      ],
+    }],
+    flows: [],
+  }, [
+    { _key: 'textCode', tp: 'str' },
+    { _key: 'textChild', tp: 'str' },
+    { _key: 'jsonConfig', tp: 'json' },
+    { _key: 'jsonChild', tp: 'str' },
+  ])
+
+  assert.equal(payload.tasks[0].args[1].if.eq, '123')
+  assert.deepEqual(payload.tasks[0].args[3].if.eq, { enabled: true })
 })
 
 test('template validation rejects blank, duplicate, and dangling identifiers', () => {

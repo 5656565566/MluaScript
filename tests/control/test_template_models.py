@@ -140,6 +140,54 @@ def test_task_parameter_relations_must_stay_within_the_task(args: list[object], 
         )
 
 
+def test_workflow_success_branches_require_flow_parameter_and_existing_target() -> None:
+    meta = normalize_template_meta(
+        {
+            "vars": {"count": {"tp": "int", "def": 0}},
+            "tasks": [{"k": "run", "fn": "run_task"}],
+            "flows": [
+                {
+                    "k": "main",
+                    "g": ["count"],
+                    "lockSteps": True,
+                    "steps": [
+                        {
+                            "k": "check",
+                            "task": "run",
+                            "successBranches": [{"if": {"k": "count", "gte": 2}, "goto": "finish"}],
+                        },
+                        {"k": "finish", "task": "run"},
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert meta.flows[0].lockSteps is True
+    assert meta.flows[0].steps[0].successBranches[0].if_.gte == 2
+    assert meta.flows[0].steps[0].successBranches[0].goto == "finish"
+
+    with pytest.raises(ValueError, match="非任务流参数"):
+        normalize_template_meta(
+            {
+                "vars": {"count": {"tp": "int"}},
+                "tasks": [{"k": "run"}],
+                "flows": [
+                    {
+                        "k": "main",
+                        "steps": [
+                            {
+                                "k": "check",
+                                "task": "run",
+                                "successBranches": [{"if": {"k": "count", "eq": 1}, "goto": "check"}],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+
 def test_parse_template_meta_and_dump_template_block_roundtrip() -> None:
     script = "\n".join(
         [

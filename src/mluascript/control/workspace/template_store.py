@@ -60,10 +60,19 @@ class TemplateStore:
         if flow is None:
             raise KeyError(flow_key)
         saved_flow = saved.flows.get(flow_key)
-        globals_values = dict(saved_flow.globals if saved_flow else {})
+        saved_globals = dict(saved_flow.globals if saved_flow else {})
+        globals_values = {
+            key: _normalize_runtime_value(meta.vars.get(key), saved_globals.get(key, meta.vars[key].def_))
+            for key in flow.g
+            if key in meta.vars
+        }
         step_enabled = dict(saved_flow.stepEnabled if saved_flow else {})
         step_args = dict(saved_flow.stepArgs if saved_flow else {})
-        step_order = list(saved_flow.stepOrder if saved_flow and saved_flow.stepOrder else [step.k for step in flow.steps])
+        step_order = list(
+            saved_flow.stepOrder
+            if not flow.lockSteps and saved_flow and saved_flow.stepOrder
+            else [step.k for step in flow.steps]
+        )
         template_values = {key: field.def_ for key, field in meta.vars.items()}
         template_values.update(globals_values)
 
@@ -80,7 +89,7 @@ class TemplateStore:
                 arg if isinstance(arg, str) else arg.k: arg
                 for arg in task.args
             }
-            enabled = step_enabled.get(step.k, step.enabled)
+            enabled = step.enabled if flow.lockSteps else step_enabled.get(step.k, step.enabled)
             merged = {}
             for field_key in task_args:
                 field_def = meta.vars.get(field_key)
@@ -88,7 +97,6 @@ class TemplateStore:
                     continue
                 merged[field_key] = field_def.def_
             merged.update({key: _resolve_template_binding(value, template_values) for key, value in task.defaults.items()})
-            merged.update({key: value for key, value in globals_values.items() if key in task_args})
             merged.update({key: _resolve_template_binding(value, template_values) for key, value in step.args.items()})
             merged.update(step_args.get(step.k, {}))
             active_values = {
@@ -114,6 +122,10 @@ class TemplateStore:
                     "fn": task.fn,
                     "enabled": bool(enabled),
                     "args": final_args,
+                    "successBranches": [
+                        branch.model_dump(by_alias=True, exclude_none=True)
+                        for branch in step.successBranches
+                    ],
                     "onSuccess": step.onSuccess,
                     "successGoto": step.successGoto,
                     "onFail": step.onFail,
@@ -124,11 +136,47 @@ class TemplateStore:
             "flowKey": flow.k,
             "steps": steps,
             "globals": globals_values,
+            "lockSteps": flow.lockSteps,
         }
 
     def build_runtime_script(self, meta: TemplateMeta, saved: TemplateSavedConfig, *, flow_key: str) -> str:
         runtime = self.build_runtime_payload(meta, saved, flow_key=flow_key)
         lines = [
+            "local function __mlua_template_equal(left, right)",
+            "  if type(left) ~= type(right) then return false end",
+            "  if type(left) ~= 'table' then return left == right end",
+            "  for key, value in pairs(left) do",
+            "    if not __mlua_template_equal(value, right[key]) then return false end",
+            "  end",
+            "  for key, _ in pairs(right) do",
+            "    if left[key] == nil then return false end",
+            "  end",
+            "  return true",
+            "end",
+            "local function __mlua_template_condition(value, operator, expected)",
+            "  if operator == 'eq' then return __mlua_template_equal(value, expected) end",
+            "  if operator == 'ne' then return not __mlua_template_equal(value, expected) end",
+            "  if operator == 'in' then",
+            "    for _, item in ipairs(expected or {}) do",
+            "      if __mlua_template_equal(value, item) then return true end",
+            "    end",
+            "    return false",
+            "  end",
+            "  if type(value) ~= 'number' or type(expected) ~= 'number' then return false end",
+            "  if operator == 'gt' then return value > expected end",
+            "  if operator == 'gte' then return value >= expected end",
+            "  if operator == 'lt' then return value < expected end",
+            "  if operator == 'lte' then return value <= expected end",
+            "  return false",
+            "end",
+            "local function __mlua_template_set_state(flow_key, step_key, task_key, step_index, status)",
+            "  shared.set_key('template_state', {",
+            "    flowKey = flow_key, stepKey = step_key, taskKey = task_key,",
+            "    stepIndex = step_index, status = status",
+            "  })",
+            "end",
+            f"shared.set_key('template_workflow_globals', {_python_to_lua_literal(runtime.get('globals') or {})})",
+            f"__mlua_template_set_state({_python_to_lua_literal(runtime['flowKey'])}, nil, nil, 0, 'running')",
             f"log_info('[template] start workflow={runtime['flowKey']}')",
         ]
         step_indexes = {
@@ -138,6 +186,9 @@ class TemplateStore:
         for index, step in enumerate(runtime.get("steps", []), start=1):
             step_key = str(step.get("key") or f"step_{index}")
             fn_name = str(step.get("fn") or "")
+            if not step.get("enabled", True):
+                lines.append(f"::__mlua_template_step_{index}::")
+                continue
             fn_ref_literal = _lua_global_ref_expr(fn_name)
             args_literal = _python_to_lua_literal(step.get("args") or {})
             # Both success and failure transitions target the final, user-ordered step sequence.
@@ -147,6 +198,7 @@ class TemplateStore:
                 [
                     f"::__mlua_template_step_{index}::",
                     "do",
+                    f"__mlua_template_set_state({_python_to_lua_literal(runtime['flowKey'])}, {_python_to_lua_literal(step_key)}, {_python_to_lua_literal(step.get('task') or '')}, {index}, 'running')",
                     f"local __mlua_template_args_{index} = {args_literal}",
                     f"log_info('[template] start step={step_key} fn={fn_name}')",
                     f"local __mlua_template_fn_{index} = {fn_ref_literal}",
@@ -155,6 +207,7 @@ class TemplateStore:
                     "end",
                     f"local __mlua_template_ok_{index}, __mlua_template_result_{index} = pcall(__mlua_template_fn_{index}, __mlua_template_args_{index})",
                     f"if not __mlua_template_ok_{index} then",
+                    f"  __mlua_template_set_state({_python_to_lua_literal(runtime['flowKey'])}, {_python_to_lua_literal(step_key)}, {_python_to_lua_literal(step.get('task') or '')}, {index}, 'failed')",
                     f"  log_error('[template] step failed: {step_key} => ' .. tostring(__mlua_template_result_{index}))",
                     f"  print('[template] step failed: {step_key} => ' .. tostring(__mlua_template_result_{index}))",
                     "  if 'continue' == " + _python_to_lua_literal(step.get("onFail") or "stop") + " then",
@@ -172,17 +225,24 @@ class TemplateStore:
                     "  end",
                     "else",
                     f"  log_info('[template] finish step={step_key}')",
+                    *[
+                        line
+                        for branch in step.get("successBranches", [])
+                        for line in _build_lua_success_branch(branch, step_indexes)
+                    ],
                     *(
                         [
                             "  if 'goto' == " + _python_to_lua_literal(step.get("onSuccess") or "continue") + " then",
                             f"    goto __mlua_template_step_{success_goto_index}",
                             "  elseif 'exit' == " + _python_to_lua_literal(step.get("onSuccess") or "continue") + " then",
+                            f"    __mlua_template_set_state({_python_to_lua_literal(runtime['flowKey'])}, {_python_to_lua_literal(step_key)}, {_python_to_lua_literal(step.get('task') or '')}, {index}, 'success')",
                             "    return true",
                             "  end",
                         ]
                         if success_goto_index is not None
                         else [
                             "  if 'exit' == " + _python_to_lua_literal(step.get("onSuccess") or "continue") + " then",
+                            f"    __mlua_template_set_state({_python_to_lua_literal(runtime['flowKey'])}, {_python_to_lua_literal(step_key)}, {_python_to_lua_literal(step.get('task') or '')}, {index}, 'success')",
                             "    return true",
                             "  end",
                         ]
@@ -191,8 +251,44 @@ class TemplateStore:
                     "end",
                 ]
             )
+        lines.append(
+            f"__mlua_template_set_state({_python_to_lua_literal(runtime['flowKey'])}, nil, nil, 0, 'success')"
+        )
         lines.append("return true")
         return "\n".join(lines)
+
+
+def _build_lua_success_branch(branch: dict[str, Any], step_indexes: dict[str, int]) -> list[str]:
+    """Build one ordered runtime branch against the mutable workflow globals table."""
+    condition = branch.get("if") if isinstance(branch.get("if"), dict) else {}
+    target_index = step_indexes.get(str(branch.get("goto") or ""))
+    condition_key = str(condition.get("k") or "")
+    if target_index is None or not condition_key:
+        return []
+
+    operator = ""
+    expected: Any = None
+    if isinstance(condition.get("in"), list) and condition["in"]:
+        operator = "in"
+        expected = condition["in"]
+    else:
+        for candidate in ("gt", "gte", "lt", "lte", "ne", "eq"):
+            if candidate in condition:
+                operator = candidate
+                expected = condition[candidate]
+                break
+    if not operator:
+        return []
+
+    value_expr = (
+        f"(shared.get_key('template_workflow_globals') or {{}})"
+        f"[{_python_to_lua_literal(condition_key)}]"
+    )
+    return [
+        f"  if __mlua_template_condition({value_expr}, {_python_to_lua_literal(operator)}, {_python_to_lua_literal(expected)}) then",
+        f"    goto __mlua_template_step_{target_index}",
+        "  end",
+    ]
 
 
 def _resolve_template_binding(value: Any, template_values: dict[str, Any]) -> Any:

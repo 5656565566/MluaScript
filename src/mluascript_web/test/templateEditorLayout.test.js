@@ -8,15 +8,17 @@ const resourceDialogUrl = new URL('../src/ui/templateEditor/TemplateResourceDial
 const resourceDialogStyleUrl = new URL('../src/ui/templateEditor/templateResourceDialogs.css', import.meta.url)
 const workbenchUrl = new URL('../src/ui/templateEditor/TemplateFlowWorkbench.vue', import.meta.url)
 const workbenchStyleUrl = new URL('../src/ui/templateEditor/templateFlowWorkbench.css', import.meta.url)
+const runnerUrl = new URL('../src/components/TemplateRunnerView.vue', import.meta.url)
 
 test('模板配置使用占满剩余高度的单一任务流工作区', async () => {
-  const [component, style, resourceDialog, resourceDialogStyle, workbench, workbenchStyle] = await Promise.all([
+  const [component, style, resourceDialog, resourceDialogStyle, workbench, workbenchStyle, runner] = await Promise.all([
     readFile(componentUrl, 'utf8'),
     readFile(styleUrl, 'utf8'),
     readFile(resourceDialogUrl, 'utf8'),
     readFile(resourceDialogStyleUrl, 'utf8'),
     readFile(workbenchUrl, 'utf8'),
     readFile(workbenchStyleUrl, 'utf8'),
+    readFile(runnerUrl, 'utf8'),
   ])
 
   assert.doesNotMatch(component, /<n-tabs|<n-tab-pane/)
@@ -65,7 +67,12 @@ test('模板配置使用占满剩余高度的单一任务流工作区', async ()
   assert.match(workbenchStyle, /\.flow-step-identity,\s*\.flow-transition-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/s)
   assert.doesNotMatch(workbenchStyle, /\.flow-workbench\s*\{[^}]*min-height:\s*460px/s)
   assert.match(workbench, /参数覆盖[\s\S]*配置覆盖/)
-  assert.match(workbench, /运行成功后[\s\S]*onSuccessOptions[\s\S]*运行失败后/)
+  assert.match(workbench, /锁定执行顺序[\s\S]*selectedFlow\.lockSteps/)
+  assert.match(workbench, /添加参数分支[\s\S]*workflowBranchOperatorOptions[\s\S]*未命中分支时[\s\S]*onSuccessOptions[\s\S]*运行失败后/)
+  assert.match(workbenchStyle, /\.flow-branch-row\s*\{[^}]*grid-template-columns:/s)
+  assert.match(runner, /workflow\.lockSteps \? \[\] : \(currentWorkflowState\.value\.stepOrder/)
+  assert.match(runner, /v-if="!currentWorkflow\?\.lockSteps && step\.allowReorder !== false"/)
+  assert.match(runner, /v-if="!currentWorkflow\?\.lockSteps && step\.allowDisable !== false"/)
   assert.doesNotMatch(workbench, /自动绑定同名参数/)
   assert.doesNotMatch(workbench, /class="flow-toolbar"|class="flow-toolbar-select"/)
   assert.doesNotMatch(workbench, /placeholder="选择任务流"/)

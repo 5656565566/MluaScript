@@ -46,6 +46,13 @@ export default {
           </div>
           <n-button size="small" @click="openFlowGlobalPicker(selectedFlow)">选择参数</n-button>
         </div>
+        <label class="flow-lock-setting">
+          <span>
+            <strong>锁定执行顺序</strong>
+            <n-text depth="3">使用者不可调整顺序或关闭任务</n-text>
+          </span>
+          <n-switch v-model:value="selectedFlow.lockSteps" />
+        </label>
       </div>
 
       <div v-if="selectedFlow.g?.length" class="flow-parameter-strip">
@@ -222,10 +229,72 @@ export default {
           </div>
 
           <div class="flow-transition-section">
-            <div class="flow-section-title">步骤转移</div>
+            <div class="flow-section-header">
+              <div>
+                <div class="flow-section-title">步骤转移</div>
+                <n-text depth="3">成功时按顺序匹配任务流参数，首个命中的分支生效。</n-text>
+              </div>
+              <n-button size="small" :disabled="!flowVariableOptions.length || !workflowBranchTargetOptions.length" @click="addWorkflowBranch">
+                添加参数分支
+              </n-button>
+            </div>
+
+            <div v-if="selectedStep.successBranches?.length" class="flow-branch-list">
+              <div v-for="(branch, branchIndex) in selectedStep.successBranches" :key="branchIndex" class="flow-branch-row">
+                <span class="flow-branch-order">{{ branchIndex + 1 }}</span>
+                <n-select
+                  :value="branch.if?.k || null"
+                  :options="flowVariableOptions"
+                  filterable
+                  placeholder="任务流参数"
+                  @update:value="value => setWorkflowBranchParameter(branch, value)"
+                />
+                <n-select
+                  :value="workflowBranchOperator(branch)"
+                  :options="workflowBranchOperatorOptions(branch)"
+                  :disabled="!branch.if?.k"
+                  @update:value="value => setWorkflowBranchOperator(branch, value)"
+                />
+                <n-select
+                  v-if="workflowBranchValueControl(branch) === 'select'"
+                  :value="workflowBranchValue(branch)"
+                  :options="workflowBranchValueOptions(branch)"
+                  :multiple="workflowBranchValueMultiple(branch)"
+                  :disabled="!branch.if?.k"
+                  clearable
+                  placeholder="条件值"
+                  @update:value="value => setWorkflowBranchValue(branch, value)"
+                />
+                <n-input-number
+                  v-else-if="workflowBranchValueControl(branch) === 'number'"
+                  :value="workflowBranchValue(branch)"
+                  :precision="workflowBranchValuePrecision(branch)"
+                  :disabled="!branch.if?.k"
+                  placeholder="条件值"
+                  @update:value="value => setWorkflowBranchValue(branch, value)"
+                />
+                <n-input
+                  v-else
+                  :value="workflowBranchValue(branch)"
+                  :disabled="!branch.if?.k"
+                  :placeholder="workflowBranchValuePlaceholder(branch)"
+                  @update:value="value => setWorkflowBranchValue(branch, value)"
+                />
+                <span class="flow-branch-arrow">跳转到</span>
+                <n-select
+                  v-model:value="branch.goto"
+                  :options="workflowBranchTargetOptions"
+                  filterable
+                  placeholder="目标任务"
+                />
+                <n-button size="small" type="error" quaternary @click="removeWorkflowBranch(branchIndex)">删除</n-button>
+              </div>
+            </div>
+            <div v-else class="flow-branch-empty">未配置参数分支。</div>
+
             <div class="flow-transition-grid">
               <div class="flow-transition-control">
-                <div class="field-label">运行成功后</div>
+                <div class="field-label">未命中分支时</div>
                 <n-select
                   :value="selectedStep.onSuccess"
                   :options="onSuccessOptions"

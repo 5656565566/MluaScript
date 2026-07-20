@@ -89,7 +89,7 @@ test('step overrides can only reference parameters exposed by the selected flow'
   ])
 })
 
-test('renaming a workflow step keeps success and failure goto references valid', () => {
+test('renaming a workflow step keeps success, failure, and parameter branch targets valid', () => {
   const editor = createEditor({
     tasks: [{ k: 'battle', args: [] }],
     flows: [{
@@ -103,6 +103,7 @@ test('renaming a workflow step keeps success and failure goto references valid',
           successGoto: 'battle_1',
           onFail: 'goto',
           goto: 'battle_1',
+          successBranches: [{ if: { k: 'mode', eq: 'safe' }, goto: 'battle_1' }],
         },
       ],
     }],
@@ -112,6 +113,38 @@ test('renaming a workflow step keeps success and failure goto references valid',
 
   assert.equal(editor.selectedFlow.value.steps[1].goto, 'battle_main')
   assert.equal(editor.selectedFlow.value.steps[1].successGoto, 'battle_main')
+  assert.equal(editor.selectedFlow.value.steps[1].successBranches[0].goto, 'battle_main')
+})
+
+test('workflow branch controls follow parameter types and preserve lock state', () => {
+  const editor = createEditor({
+    vars: {
+      count: { t: '次数', tp: 'int', def: 1 },
+      mode: { t: '模式', tp: 'enum', def: 'safe', oneOf: [{ v: 'safe', t: '安全' }, { v: 'fast', t: '快速' }] },
+    },
+    tasks: [{ k: 'run', args: [] }],
+    flows: [{
+      k: 'main',
+      g: ['count', 'mode'],
+      lockSteps: true,
+      steps: [{ k: 'check', task: 'run' }, { k: 'finish', task: 'run' }],
+    }],
+  })
+
+  editor.addWorkflowBranch()
+  const branch = editor.selectedStep.value.successBranches[0]
+  assert.equal(editor.selectedFlow.value.lockSteps, true)
+  assert.equal(branch.if.k, 'count')
+  assert.equal(branch.goto, 'check')
+  assert.deepEqual(editor.workflowBranchOperatorOptions(branch).map(option => option.value), ['eq', 'ne', 'gt', 'gte', 'lt', 'lte'])
+  assert.equal(editor.workflowBranchValueControl(branch), 'number')
+
+  editor.setWorkflowBranchParameter(branch, 'mode')
+  editor.setWorkflowBranchOperator(branch, 'in')
+  editor.setWorkflowBranchValue(branch, ['safe', 'fast'])
+  assert.equal(editor.workflowBranchValueControl(branch), 'select')
+  assert.equal(editor.workflowBranchValueMultiple(branch), true)
+  assert.deepEqual(editor.workflowBranchValue(branch), ['safe', 'fast'])
 })
 
 test('resource dialog key edits keep task and variable references valid', () => {

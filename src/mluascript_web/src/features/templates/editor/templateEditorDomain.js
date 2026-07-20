@@ -130,11 +130,24 @@ export function buildTaskArgTreeRows(args) {
 }
 
 export function createTemplateFlow() {
-  return { k: '', t: '', g: [], steps: [] }
+  return { k: '', t: '', g: [], lockSteps: false, steps: [] }
 }
 
 export function createTemplateFlowStep() {
-  return { k: '', task: '', args: {}, onSuccess: 'continue', successGoto: '', onFail: 'stop', goto: '' }
+  return {
+    k: '',
+    task: '',
+    args: {},
+    successBranches: [],
+    onSuccess: 'continue',
+    successGoto: '',
+    onFail: 'stop',
+    goto: '',
+  }
+}
+
+export function createTemplateSuccessBranch() {
+  return { if: { k: '', eq: '' }, goto: '' }
 }
 
 export function createStepArgBinding(source = 'var', value = '') {
@@ -163,12 +176,6 @@ function defaultValueForType(type) {
   return ''
 }
 
-function normalizeIfValue(value) {
-  if (value === undefined || value === null || value === '') return ''
-  if (typeof value === 'boolean') return value ? 'true' : 'false'
-  return String(value)
-}
-
 function normalizeEnumOption(option) {
   if (option && typeof option === 'object') {
     return { v: option.v ?? '', t: option.t ?? '' }
@@ -189,7 +196,7 @@ function normalizeVariable(key, value = {}) {
     min: value.min,
     max: value.max,
     oneOf: Array.isArray(value.oneOf) ? value.oneOf.map(normalizeEnumOption) : [],
-    if: value.if?.k ? { k: value.if.k, eq: normalizeIfValue(value.if.eq) } : null,
+    if: value.if?.k ? { ...value.if, in: Array.isArray(value.if.in) ? [...value.if.in] : value.if.in } : null,
     _showAdvanced: false,
   }
 }
@@ -215,7 +222,7 @@ export function flattenParsedVars(varsObject) {
   function traverse(key, value, implicitIf) {
     const normalized = normalizeVariable(key, value)
     if (!normalized.if && implicitIf) {
-      normalized.if = { k: implicitIf.k, eq: implicitIf.eq !== undefined ? String(implicitIf.eq) : '' }
+      normalized.if = { ...implicitIf }
     }
     if (normalized.if) normalized._showAdvanced = true
     result.push(normalized)
@@ -252,10 +259,15 @@ export function normalizeTemplateEditorData(data = {}) {
       k: flow.k || '',
       t: flow.t || '',
       g: Array.isArray(flow.g) ? [...flow.g] : [],
+      lockSteps: Boolean(flow.lockSteps),
       steps: Array.isArray(flow.steps) ? flow.steps.map(step => ({
         k: step.k || '',
         task: step.task || '',
         args: step.args && typeof step.args === 'object' ? { ...step.args } : {},
+        successBranches: Array.isArray(step.successBranches) ? step.successBranches.map(branch => ({
+          if: branch?.if?.k ? { ...branch.if } : { k: '', eq: '' },
+          goto: branch?.goto || '',
+        })) : [],
         onSuccess: step.onSuccess || 'continue',
         successGoto: step.successGoto || '',
         onFail: step.onFail || 'stop',
@@ -309,6 +321,9 @@ export function renameVariableReferences({ varsList, localData, from, to }) {
   for (const flow of localData?.flows || []) {
     flow.g = mapUniqueValues(flow.g, oldKey, newKey)
     for (const step of flow.steps || []) {
+      for (const branch of step.successBranches || []) {
+        if (branch.if?.k === oldKey) branch.if.k = newKey
+      }
       if (!step?.args || typeof step.args !== 'object') continue
       const nextArgs = {}
       for (const [key, value] of Object.entries(step.args)) {
@@ -338,6 +353,7 @@ export function countVariableReferences({ varsList, localData, key }) {
   for (const flow of localData?.flows || []) {
     count += (flow.g || []).filter(item => item === targetKey).length
     for (const step of flow.steps || []) {
+      count += (step.successBranches || []).filter(branch => branch.if?.k === targetKey).length
       for (const [argKey, value] of Object.entries(step.args || {})) {
         if (argKey === targetKey) count += 1
         if (value?.$bind === 'var' && value.key === targetKey) count += 1
@@ -358,6 +374,7 @@ export function removeVariableReferences({ varsList, localData, key }) {
   for (const flow of localData?.flows || []) {
     flow.g = (flow.g || []).filter(item => item !== targetKey)
     for (const step of flow.steps || []) {
+      step.successBranches = (step.successBranches || []).filter(branch => branch.if?.k !== targetKey)
       const nextArgs = {}
       for (const [argKey, value] of Object.entries(step.args || {})) {
         if (argKey === targetKey) continue
@@ -395,6 +412,8 @@ export function removeTaskReferences(localData, key) {
         step.onFail = 'stop'
         step.goto = ''
       }
+      step.successBranches = (step.successBranches || [])
+        .filter(branch => !removedStepKeys.has(branch.goto))
     }
   }
 }
@@ -493,6 +512,29 @@ export function validateTemplateDraft(localData, varsList, { procedureNames = nu
       if (step.onFail === 'goto' && !stepKeySet.has(step.goto)) {
         errors.push(`步骤 ${stepLabel} 的失败跳转目标不存在：${step.goto || '未选择'}`)
       }
+      for (const [branchIndex, branch] of (step.successBranches || []).entries()) {
+        const branchLabel = `步骤 ${stepLabel} 的分支 ${branchIndex + 1}`
+        const condition = branch?.if
+        if (!condition?.k || !(flow.g || []).includes(condition.k)) {
+          errors.push(`${branchLabel} 引用了任务流未选择的参数：${condition?.k || '未选择'}`)
+        }
+        if (!branch?.goto || !stepKeySet.has(branch.goto)) {
+          errors.push(`${branchLabel} 的跳转目标不存在：${branch?.goto || '未选择'}`)
+        }
+        if (!condition?.k) continue
+        const operator = resolveTaskArgConditionOperator(condition)
+        const field = variablesByKey.get(condition.k)
+        const fieldType = field?.tp || 'str'
+        if (!taskArgConditionOperatorsForType(fieldType).includes(operator)) {
+          errors.push(`${branchLabel} 使用了不适用于 ${fieldType} 的条件：${operator}`)
+        }
+        if (['gt', 'gte', 'lt', 'lte'].includes(operator)) {
+          const value = condition[operator]
+          if (value === '' || value === null || typeof value === 'undefined' || !Number.isFinite(Number(value))) {
+            errors.push(`${branchLabel} 的数值比较条件必须是有效数字`)
+          }
+        }
+      }
     }
   }
   return [...new Set(errors)]
@@ -504,18 +546,30 @@ function cleanEnumOptions(options) {
     .filter(option => option.v !== '')
 }
 
-function parseConditionScalar(value) {
+function parseConditionScalar(value, fieldType = '') {
   if (value === undefined || value === null || value === '') return undefined
-  if (value === 'true') return true
-  if (value === 'false') return false
-  if (!Number.isNaN(Number(value)) && String(Number(value)) === String(value)) return Number(value)
+  if (fieldType === 'bool') {
+    if (value === 'true') return true
+    if (value === 'false') return false
+  }
+  if (fieldType === 'int' || fieldType === 'num') {
+    const numericValue = Number(value)
+    return Number.isFinite(numericValue) ? numericValue : value
+  }
+  if (fieldType === 'json' && typeof value === 'string') {
+    try {
+      return JSON.parse(value)
+    } catch {
+      return value
+    }
+  }
   return value
 }
 
-function parseTaskArgCondition(condition) {
+function parseTaskArgCondition(condition, fieldType = '') {
   const operator = resolveTaskArgConditionOperator(condition)
   if (!operator) return { k: condition.k }
-  if (operator !== 'in') return { k: condition.k, [operator]: parseConditionScalar(condition[operator]) }
+  if (operator !== 'in') return { k: condition.k, [operator]: parseConditionScalar(condition[operator], fieldType) }
   if (Array.isArray(condition.in)) return { k: condition.k, in: condition.in }
   try {
     const values = JSON.parse(condition.in)
@@ -547,6 +601,7 @@ function buildVariablePayload(variable) {
 }
 
 export function buildTemplatePayload(localData, varsList, { clone = false } = {}) {
+  const variableTypes = new Map((varsList || []).map(variable => [variable._key, variable.tp]))
   const result = {
     v: localData.v,
     id: localData.id,
@@ -560,17 +615,24 @@ export function buildTemplatePayload(localData, varsList, { clone = false } = {}
       args: Array.isArray(task.args) ? task.args.map((arg) => {
         const key = taskArgKey(arg)
         const condition = taskArgCondition(arg)
-        return condition ? { k: key, if: parseTaskArgCondition(condition) } : key
+        return condition ? { k: key, if: parseTaskArgCondition(condition, variableTypes.get(condition.k)) } : key
       }).filter(taskArgKey) : [],
     })),
     flows: (localData.flows || []).map(flow => ({
       k: flow.k,
       t: flow.t,
       g: Array.isArray(flow.g) ? flow.g.filter(Boolean) : [],
+      ...(flow.lockSteps ? { lockSteps: true } : {}),
       steps: (flow.steps || []).map(step => ({
         k: step.k,
         task: step.task,
         args: step.args && typeof step.args === 'object' ? step.args : {},
+        ...((step.successBranches || []).length ? {
+          successBranches: step.successBranches.map(branch => ({
+            if: parseTaskArgCondition(branch.if, variableTypes.get(branch.if?.k)),
+            goto: branch.goto,
+          })),
+        } : {}),
         onSuccess: step.onSuccess || 'continue',
         ...(step.onSuccess === 'goto' && step.successGoto ? { successGoto: step.successGoto } : {}),
         onFail: step.onFail || 'stop',
