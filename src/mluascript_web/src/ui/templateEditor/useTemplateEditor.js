@@ -1,5 +1,6 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import {
+  buildTaskArgTreeRows,
   buildTemplatePayload,
   countTaskReferences,
   countVariableReferences,
@@ -10,11 +11,18 @@ import {
   createTemplateTask,
   createTemplateVariable,
   createStepArgBinding,
+  mergeTaskArgSelection,
   normalizeTemplateEditorData,
   normalizeStepArgBinding,
   removeTaskReferences,
   removeVariableReferences,
   renameVariableReferences,
+  taskArgCondition,
+  taskArgConditionOperator,
+  taskArgConditionOperatorsForType,
+  taskArgKey,
+  taskArgKeys,
+  updateTaskArgCondition,
   validateTemplateDraft,
 } from '../../features/templates/editor/templateEditorDomain.js'
 import { createTemplateAutosave } from './templateAutosave.js'
@@ -128,12 +136,21 @@ export function useTemplateEditor({
     { label: '跳转到指定任务', value: 'goto' },
     { label: '退出任务流', value: 'exit' },
   ]
+  const taskArgRelationOperatorLabels = {
+    eq: '等于',
+    ne: '不等于',
+    gt: '大于',
+    gte: '大于等于',
+    lt: '小于',
+    lte: '小于等于',
+    in: '在集合中',
+  }
   const flattenedVarOptions = computed(() => varsList.value
     .map(item => item._key ? ({
       value: item._key,
       label: item.t ? `${item.t} (${item._key})` : item._key,
-      desc: item.if?.k ? `依赖 ${item.if.k}` : (item.note || '顶层变量'),
-      source: item.if?.k ? 'child' : 'top',
+      desc: item.note || '模板参数',
+      source: 'top',
     }) : null)
     .filter(Boolean))
 
@@ -204,7 +221,7 @@ export function useTemplateEditor({
     const step = selectedStep.value
     const task = getTaskByKey(step?.task)
     if (!step || !task) return []
-    return (task.args || [])
+    return taskArgKeys(task.args)
       .filter(key => Object.prototype.hasOwnProperty.call(step.args || {}, key))
       .map(key => ({
         ...getVarMeta(key),
@@ -285,7 +302,7 @@ export function useTemplateEditor({
       tp: field.tp,
       def: field.def,
       note: field.note || '',
-      source: field.if?.k ? 'child' : 'top',
+      source: 'top',
     }
   }
 
@@ -308,7 +325,7 @@ export function useTemplateEditor({
   function enumOptionsForKey(varKey) {
     const field = varsList.value.find(item => item._key === varKey)
     if (!field || field.tp !== 'enum') return []
-    return (field.oneOf || []).map(item => ({ label: item.t || item.v || '', value: item.v || '' }))
+    return (field.oneOf || []).map(item => ({ label: item.t || String(item.v ?? ''), value: item.v ?? '' }))
   }
 
   function duplicateVar(value) {
@@ -509,7 +526,7 @@ export function useTemplateEditor({
   function isStepBindingComplete(step) {
     const task = getTaskByKey(step?.task)
     if (!task) return false
-    const allowedKeys = new Set(task.args || [])
+    const allowedKeys = new Set(taskArgKeys(task.args))
     return Object.entries(step.args || {}).every(([key, value]) => {
       if (!allowedKeys.has(key)) return false
       const binding = normalizeStepArgBinding(value)
@@ -645,8 +662,8 @@ export function useTemplateEditor({
       title: '选择任务变量',
       summary: '这些变量会被打包进任务函数的 args 对象。',
       options: flattenedVarOptions.value,
-      value: task.args || [],
-      onConfirm: selected => { task.args = selected },
+      value: taskArgKeys(task.args),
+      onConfirm: selected => { task.args = mergeTaskArgSelection(task.args, selected) },
     })
   }
 
@@ -666,7 +683,7 @@ export function useTemplateEditor({
       message.warning('请先为该步骤选择任务')
       return
     }
-    const rows = (task.args || []).map(key => normalizeStepArgEditorRow(key, step.args?.[key]))
+    const rows = taskArgKeys(task.args).map(key => normalizeStepArgEditorRow(key, step.args?.[key]))
     stepArgEditorState.value = {
       show: true,
       flowKey: flow.k || '',
@@ -703,15 +720,130 @@ export function useTemplateEditor({
     )
   }
 
-  function handleAddDependentVar(parentVar, eqValue = undefined) {
-    if (!parentVar._key) {
-      message.warning('请先填写父级参数的键名')
-      return
+  function taskArgRelationOptions(task, arg) {
+    const currentKey = taskArgKey(arg)
+    return taskArgKeys(task?.args)
+      .filter(key => key !== currentKey)
+      .map((key) => {
+        const meta = getVarMeta(key)
+        return { label: meta.label === key ? key : `${meta.label} (${key})`, value: key }
+      })
+  }
+
+  function taskArgTreeRows(task) {
+    return buildTaskArgTreeRows(task?.args).map((row) => {
+      const meta = getVarMeta(row.key)
+      return {
+        ...row,
+        label: meta.label,
+        type: meta.tp,
+      }
+    })
+  }
+
+  function taskArgRelationKey(arg) {
+    return taskArgCondition(arg)?.k || null
+  }
+
+  function taskArgRelationParentMeta(arg) {
+    return getVarMeta(taskArgRelationKey(arg))
+  }
+
+  function taskArgRelationOperatorOptions(arg) {
+    return taskArgConditionOperatorsForType(taskArgRelationParentMeta(arg).tp)
+      .map(value => ({ label: taskArgRelationOperatorLabels[value], value }))
+  }
+
+  function taskArgRelationValueControl(arg) {
+    const type = taskArgRelationParentMeta(arg).tp
+    if (type === 'bool' || type === 'enum') return 'select'
+    if (type === 'int' || type === 'num') return 'number'
+    return 'input'
+  }
+
+  function taskArgRelationValueOptions(arg) {
+    const parent = taskArgRelationParentMeta(arg)
+    if (parent.tp === 'bool') {
+      return [
+        { label: '是 (true)', value: 'true' },
+        { label: '否 (false)', value: 'false' },
+      ]
     }
-    const child = createTemplateVariable(parentVar._key, eqValue)
-    const index = varsList.value.indexOf(parentVar)
-    if (index === -1) varsList.value.push(child)
-    else varsList.value.splice(index + 1, 0, child)
+    return parent.tp === 'enum' ? enumOptionsForKey(parent.key) : []
+  }
+
+  function taskArgRelationValueMultiple(arg) {
+    return taskArgRelationParentMeta(arg).tp === 'enum' && taskArgConditionOperator(arg) === 'in'
+  }
+
+  function taskArgRelationValuePrecision(arg) {
+    return taskArgRelationParentMeta(arg).tp === 'int' ? 0 : undefined
+  }
+
+  function taskArgRelationValue(arg) {
+    const condition = taskArgCondition(arg)
+    if (!condition) return ''
+    const operator = taskArgConditionOperator(arg)
+    const value = condition[operator]
+    const parent = taskArgRelationParentMeta(arg)
+    if (parent.tp === 'enum' && operator === 'in') {
+      if (Array.isArray(value)) return value
+      try {
+        const parsed = JSON.parse(value)
+        return Array.isArray(parsed) ? parsed : []
+      } catch {
+        return []
+      }
+    }
+    if (parent.tp === 'int' || parent.tp === 'num') {
+      if (value === '' || value === null || typeof value === 'undefined') return null
+      const numericValue = Number(value)
+      return Number.isFinite(numericValue) ? numericValue : null
+    }
+    if (operator === 'in') return typeof value === 'string' ? value : JSON.stringify(value || [])
+    return formatValuePreview(value)
+  }
+
+  function taskArgRelationValuePlaceholder(arg) {
+    if (taskArgConditionOperator(arg) === 'in') return 'JSON 数组'
+    return taskArgRelationParentMeta(arg).tp === 'json' ? 'JSON 值' : '条件值'
+  }
+
+  function defaultTaskArgRelationValue(parentKey, operator = 'eq') {
+    const parent = getVarMeta(parentKey)
+    let value = parent.def ?? ''
+    if (parent.tp === 'bool') value = true
+    if (parent.tp === 'enum') value = parent.def ?? enumOptionsForKey(parentKey)[0]?.value ?? ''
+    if (parent.tp === 'int' || parent.tp === 'num') {
+      const numericValue = Number(value)
+      return Number.isFinite(numericValue) ? numericValue : 0
+    }
+    if (operator === 'in') return parent.tp === 'enum' ? [value] : JSON.stringify([value])
+    return formatValuePreview(value)
+  }
+
+  function setTaskArgRelationParent(task, arg, parentKey) {
+    const key = taskArgKey(arg)
+    const condition = parentKey ? { k: parentKey, eq: defaultTaskArgRelationValue(parentKey) } : null
+    task.args = updateTaskArgCondition(task.args, key, condition)
+  }
+
+  function setTaskArgRelationValue(task, arg, value) {
+    const key = taskArgKey(arg)
+    const parentKey = taskArgRelationKey(arg)
+    if (!parentKey) return
+    const operator = taskArgConditionOperator(arg)
+    task.args = updateTaskArgCondition(task.args, key, { k: parentKey, [operator]: value })
+  }
+
+  function setTaskArgRelationOperator(task, arg, operator) {
+    const key = taskArgKey(arg)
+    const parentKey = taskArgRelationKey(arg)
+    if (!parentKey) return
+    task.args = updateTaskArgCondition(task.args, key, {
+      k: parentKey,
+      [operator]: defaultTaskArgRelationValue(parentKey, operator),
+    })
   }
 
   async function handleClose() {
@@ -834,7 +966,21 @@ export function useTemplateEditor({
     openStepArgsPicker,
     confirmStepArgEditor,
     setStepArgEditorSource,
-    handleAddDependentVar,
+    taskArgKey,
+    taskArgTreeRows,
+    taskArgRelationOptions,
+    taskArgRelationKey,
+    taskArgConditionOperator,
+    taskArgRelationOperatorOptions,
+    taskArgRelationValueControl,
+    taskArgRelationValueOptions,
+    taskArgRelationValueMultiple,
+    taskArgRelationValuePrecision,
+    taskArgRelationValue,
+    taskArgRelationValuePlaceholder,
+    setTaskArgRelationParent,
+    setTaskArgRelationOperator,
+    setTaskArgRelationValue,
     handleClose,
   }
 }

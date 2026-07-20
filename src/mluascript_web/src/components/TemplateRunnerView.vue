@@ -1,6 +1,7 @@
 <script setup>
 import { computed, watch, h } from 'vue'
 import { state, actions } from '../store'
+import { isTemplateConditionActive } from '../features/templates/templateDomain.js'
 import {
   NCard,
   NSpace,
@@ -151,10 +152,7 @@ function isConditionActive(field, stepKey = '') {
   const condition = field?.if
   if (!condition?.k) return true
   const currentValue = getDependencyValue(condition.k, stepKey)
-  if (Array.isArray(condition.in) && condition.in.length) return condition.in.includes(currentValue)
-  if (Object.prototype.hasOwnProperty.call(condition, 'ne')) return currentValue !== condition.ne
-  if (Object.prototype.hasOwnProperty.call(condition, 'eq')) return currentValue === condition.eq
-  return Boolean(currentValue)
+  return isTemplateConditionActive(condition, currentValue)
 }
 
 function workflowFieldModel(stepKey, field) {

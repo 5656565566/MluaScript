@@ -19,6 +19,14 @@ function fieldType(field) {
   return type
 }
 
+function taskArgKey(arg) {
+  return typeof arg === 'string' ? arg : String(arg?.k || '')
+}
+
+function taskArgCondition(arg) {
+  return typeof arg === 'string' || !arg?.if?.k ? null : arg.if
+}
+
 export function fieldDefaultValue(field) {
   if (Object.prototype.hasOwnProperty.call(field || {}, 'default')) return cloneValue(field.default)
   if (Object.prototype.hasOwnProperty.call(field || {}, 'def')) return cloneValue(field.def)
@@ -46,6 +54,24 @@ export function normalizeRuntimeValue(field, value) {
     }
   }
   return value
+}
+
+export function isTemplateConditionActive(condition, currentValue) {
+  if (!condition?.k) return true
+  if (Array.isArray(condition.in) && condition.in.length) return condition.in.includes(currentValue)
+  const numericOperator = ['gt', 'gte', 'lt', 'lte']
+    .find(operator => Object.prototype.hasOwnProperty.call(condition, operator))
+  if (numericOperator) {
+    const targetValue = condition[numericOperator]
+    if (!Number.isFinite(currentValue) || !Number.isFinite(targetValue)) return false
+    if (numericOperator === 'gt') return currentValue > targetValue
+    if (numericOperator === 'gte') return currentValue >= targetValue
+    if (numericOperator === 'lt') return currentValue < targetValue
+    return currentValue <= targetValue
+  }
+  if (Object.prototype.hasOwnProperty.call(condition, 'ne')) return currentValue !== condition.ne
+  if (Object.prototype.hasOwnProperty.call(condition, 'eq')) return currentValue === condition.eq
+  return Boolean(currentValue)
 }
 
 export function resolveTemplateBinding(value, vars, runtimeValues = {}) {
@@ -88,7 +114,11 @@ export function normalizeTemplateMeta(meta) {
   if (!meta) return null
   const vars = meta.vars || {}
   const normalizedVars = Object.fromEntries(Object.entries(vars).map(([key, field]) => [key, normalizeTemplateField(field, key)]))
-  const tasks = Array.isArray(meta.tasks) ? meta.tasks : Array.isArray(meta.taskCatalog) ? meta.taskCatalog : []
+  const rawTasks = Array.isArray(meta.tasks) ? meta.tasks : Array.isArray(meta.taskCatalog) ? meta.taskCatalog : []
+  const tasks = rawTasks.map(task => ({
+    ...task,
+    args: Array.isArray(task.args) ? task.args.map(arg => typeof arg === 'string' ? arg : ({ ...arg, if: arg.if ? { ...arg.if } : null })) : [],
+  }))
   const taskMap = Object.fromEntries(tasks.map(task => [task.k || task.key, task]))
   const workflows = (Array.isArray(meta.flows) ? meta.flows : Array.isArray(meta.workflows) ? meta.workflows : []).map((flow) => {
     const workflowKey = flow.k || flow.key || ''
@@ -96,7 +126,8 @@ export function normalizeTemplateMeta(meta) {
     const steps = (flow.steps || flow.tasks || []).map((step) => {
       const taskRef = step.task || step.taskRef || ''
       const taskDef = taskMap[taskRef] || {}
-      const argKeys = Array.isArray(taskDef.args) ? taskDef.args : []
+      const argRefs = Array.isArray(taskDef.args) ? taskDef.args : []
+      const argKeys = argRefs.map(taskArgKey).filter(Boolean)
       return {
         ...step,
         key: step.k || step.key || '',
@@ -113,7 +144,17 @@ export function normalizeTemplateMeta(meta) {
         onFail: step.onFail || 'stop',
         allowDisable: step.allowDisable !== false,
         allowReorder: step.allowReorder !== false,
-        fields: argKeys.map(key => normalizedVars[key]).filter(Boolean),
+        fields: argRefs.map((arg) => {
+          const key = taskArgKey(arg)
+          const field = normalizedVars[key]
+          if (!field) return null
+          const condition = taskArgCondition(arg)
+          return {
+            ...field,
+            if: condition ? { ...condition, in: Array.isArray(condition.in) ? condition.in : [] } : null,
+            grp: condition?.k || '',
+          }
+        }).filter(Boolean),
         _taskArgKeys: argKeys,
       }
     })

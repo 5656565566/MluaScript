@@ -17,6 +17,10 @@ class TemplateCondition(BaseModel):
     k: str = Field(default="", description="依赖字段 key")
     eq: TemplateValue = Field(default=None, description="等于指定值时生效")
     ne: TemplateValue = Field(default=None, description="不等于指定值时生效")
+    gt: int | float | None = Field(default=None, description="大于指定数值时生效")
+    gte: int | float | None = Field(default=None, description="大于等于指定数值时生效")
+    lt: int | float | None = Field(default=None, description="小于指定数值时生效")
+    lte: int | float | None = Field(default=None, description="小于等于指定数值时生效")
     in_: list[TemplateValue] = Field(default_factory=list, alias="in", description="位于集合内时生效")
 
     model_config = {
@@ -31,8 +35,6 @@ class TemplateOptionDef(BaseModel):
     v: TemplateValue = Field(default=None, description="选项值")
     t: str = Field(default="", description="显示标题")
     d: str = Field(default="", description="说明")
-    children: list["TemplateVarDef"] = Field(default_factory=list, description="语法糖：选项下挂字段")
-
     model_config = {
         "extra": "ignore",
     }
@@ -53,10 +55,7 @@ class TemplateVarDef(BaseModel):
     pat: str = Field(default="", description="正则约束")
     note: str = Field(default="", description="注解/帮助")
     as_: str = Field(default="", alias="as", description="注入别名")
-    grp: str = Field(default="", description="归组 key，用于 UI 下挂显示")
-    if_: TemplateCondition | None = Field(default=None, alias="if", description="显示条件")
     one_of: list[TemplateOptionDef] = Field(default_factory=list, alias="oneOf", description="枚举选项")
-    children: list["TemplateVarDef"] = Field(default_factory=list, description="语法糖：字段下挂字段")
     ext: dict[str, Any] = Field(default_factory=dict, description="扩展字段")
 
     model_config = {
@@ -64,7 +63,7 @@ class TemplateVarDef(BaseModel):
         "extra": "ignore",
     }
 
-    @field_validator("k", "t", "d", "pat", "note", "grp", mode="before")
+    @field_validator("k", "t", "d", "pat", "note", mode="before")
     @classmethod
     def _normalize_text(cls, value: Any) -> str:
         if value is None:
@@ -85,6 +84,21 @@ class TemplateVarDef(BaseModel):
         return self
 
 
+class TemplateTaskArgDef(BaseModel):
+    """任务对模板参数的引用及任务内关系"""
+
+    k: str = Field(default="", description="引用字段 key")
+    if_: TemplateCondition | None = Field(default=None, alias="if", description="任务内生效条件")
+
+    model_config = {
+        "populate_by_name": True,
+        "extra": "ignore",
+    }
+
+
+TemplateTaskArgRef = str | TemplateTaskArgDef
+
+
 class TemplateTaskDef(BaseModel):
     """任务原型定义"""
 
@@ -94,13 +108,30 @@ class TemplateTaskDef(BaseModel):
     ut: str = Field(default="", description="用户标题")
     ud: str = Field(default="", description="用户说明")
     fn: str = Field(default="", description="Lua 函数引用")
-    args: list[str] = Field(default_factory=list, description="引用字段 key 列表")
+    args: list[TemplateTaskArgRef] = Field(default_factory=list, description="字段 key 或带任务内关系的字段引用")
     defaults: dict[str, Any] = Field(default_factory=dict, description="任务级默认参数")
     ext: dict[str, Any] = Field(default_factory=dict, description="扩展字段")
 
     model_config = {
         "extra": "ignore",
     }
+
+    @model_validator(mode="after")
+    def _validate_arg_relations(self) -> "TemplateTaskDef":
+        keys = [arg if isinstance(arg, str) else arg.k for arg in self.args]
+        if any(not key for key in keys):
+            raise ValueError(f"任务 {self.k or '未命名任务'} 存在空参数引用")
+        if len(keys) != len(set(keys)):
+            raise ValueError(f"任务 {self.k or '未命名任务'} 存在重复参数引用")
+        key_set = set(keys)
+        for arg in self.args:
+            if isinstance(arg, str) or arg.if_ is None:
+                continue
+            if arg.if_.k == arg.k:
+                raise ValueError(f"任务参数 {arg.k} 不能依赖自身")
+            if arg.if_.k not in key_set:
+                raise ValueError(f"任务参数 {arg.k} 依赖了任务未引用的参数: {arg.if_.k}")
+        return self
 
 
 class TemplateStepDef(BaseModel):

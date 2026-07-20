@@ -10,7 +10,7 @@ export function createEmptyTemplate() {
   }
 }
 
-export function createTemplateVariable(parentKey = '', eqValue = undefined) {
+export function createTemplateVariable() {
   return {
     _key: '',
     t: '',
@@ -22,13 +22,111 @@ export function createTemplateVariable(parentKey = '', eqValue = undefined) {
     min: undefined,
     max: undefined,
     oneOf: [],
-    if: parentKey ? { k: parentKey, eq: eqValue !== undefined ? String(eqValue) : '' } : null,
-    _showAdvanced: Boolean(parentKey),
+    if: null,
+    _showAdvanced: false,
   }
 }
 
 export function createTemplateTask() {
   return { k: '', t: '', fn: '', args: [], _fnArgs: ['args'] }
+}
+
+export function taskArgKey(arg) {
+  return typeof arg === 'string' ? arg : String(arg?.k || '')
+}
+
+export function taskArgKeys(args) {
+  return (args || []).map(taskArgKey).filter(Boolean)
+}
+
+export function taskArgCondition(arg) {
+  return typeof arg === 'string' || !arg?.if?.k ? null : arg.if
+}
+
+const TASK_ARG_CONDITION_OPERATORS = ['in', 'gt', 'gte', 'lt', 'lte', 'ne', 'eq']
+const TASK_ARG_CONDITION_OPERATORS_BY_TYPE = {
+  bool: ['eq'],
+  enum: ['eq', 'ne', 'in'],
+  int: ['eq', 'ne', 'gt', 'gte', 'lt', 'lte'],
+  num: ['eq', 'ne', 'gt', 'gte', 'lt', 'lte'],
+  str: ['eq', 'ne', 'in'],
+  json: ['eq', 'ne'],
+}
+
+export function taskArgConditionOperatorsForType(type) {
+  return [...(TASK_ARG_CONDITION_OPERATORS_BY_TYPE[type] || TASK_ARG_CONDITION_OPERATORS_BY_TYPE.str)]
+}
+
+function resolveTaskArgConditionOperator(condition) {
+  if (!condition) return 'eq'
+  if ((Array.isArray(condition.in) && condition.in.length) || typeof condition.in === 'string') return 'in'
+  const scalarOperator = TASK_ARG_CONDITION_OPERATORS
+    .filter(operator => operator !== 'in')
+    .find(operator => Object.prototype.hasOwnProperty.call(condition, operator))
+  if (scalarOperator) return scalarOperator
+  return Object.prototype.hasOwnProperty.call(condition, 'in') ? 'in' : 'eq'
+}
+
+export function taskArgConditionOperator(arg) {
+  return resolveTaskArgConditionOperator(taskArgCondition(arg))
+}
+
+export function updateTaskArgCondition(args, argKey, condition) {
+  return (args || []).map((arg) => {
+    if (taskArgKey(arg) !== argKey) return arg
+    if (!condition?.k) return argKey
+    const operator = TASK_ARG_CONDITION_OPERATORS.find(item => Object.prototype.hasOwnProperty.call(condition, item))
+    return { k: argKey, if: { k: condition.k, ...(operator ? { [operator]: condition[operator] } : {}) } }
+  })
+}
+
+export function mergeTaskArgSelection(args, selectedKeys) {
+  const existing = new Map((args || []).map(arg => [taskArgKey(arg), arg]))
+  return (selectedKeys || []).map(key => existing.get(key) || key)
+}
+
+export function buildTaskArgTreeRows(args) {
+  const nodes = (args || [])
+    .map((arg, index) => ({
+      arg,
+      key: taskArgKey(arg),
+      condition: taskArgCondition(arg),
+      index,
+      children: [],
+    }))
+    .filter(node => node.key)
+  const nodeByKey = new Map(nodes.map(node => [node.key, node]))
+  const roots = []
+
+  for (const node of nodes) {
+    const parent = node.condition?.k ? nodeByKey.get(node.condition.k) : null
+    if (!parent || parent === node) roots.push(node)
+    else parent.children.push(node)
+  }
+
+  const rows = []
+  const visited = new Set()
+  const appendNode = (node, depth) => {
+    if (visited.has(node.key)) return
+    visited.add(node.key)
+    rows.push({
+      arg: node.arg,
+      key: node.key,
+      condition: node.condition,
+      depth,
+      detached: depth === 0 && Boolean(node.condition?.k),
+    })
+    node.children
+      .sort((left, right) => left.index - right.index)
+      .forEach(child => appendNode(child, depth + 1))
+  }
+
+  roots
+    .sort((left, right) => left.index - right.index)
+    .forEach(root => appendNode(root, 0))
+  // Invalid cyclic relationships have no natural root. Keep every parameter editable.
+  nodes.forEach(node => appendNode(node, 0))
+  return rows
 }
 
 export function createTemplateFlow() {
@@ -101,7 +199,11 @@ function normalizeTask(task = {}) {
     k: task.k || '',
     t: task.t || '',
     fn: task.fn || '',
-    args: Array.isArray(task.args) ? task.args.filter(Boolean) : [],
+    args: Array.isArray(task.args) ? task.args.map((arg) => {
+      const key = taskArgKey(arg)
+      const condition = taskArgCondition(arg)
+      return condition ? { k: key, if: { ...condition } } : key
+    }).filter(taskArgKey) : [],
     _fnArgs: ['args'],
   }
 }
@@ -140,30 +242,41 @@ export function flattenParsedVars(varsObject) {
 }
 
 export function normalizeTemplateEditorData(data = {}) {
-  return {
-    localData: {
-      v: data.v || 1,
-      id: data.id || '',
-      t: data.t || '',
-      d: data.d || '',
-      tasks: Array.isArray(data.tasks) ? data.tasks.map(normalizeTask) : [],
-      flows: Array.isArray(data.flows) ? data.flows.map(flow => ({
-        k: flow.k || '',
-        t: flow.t || '',
-        g: Array.isArray(flow.g) ? [...flow.g] : [],
-        steps: Array.isArray(flow.steps) ? flow.steps.map(step => ({
-          k: step.k || '',
-          task: step.task || '',
-          args: step.args && typeof step.args === 'object' ? { ...step.args } : {},
-          onSuccess: step.onSuccess || 'continue',
-          successGoto: step.successGoto || '',
-          onFail: step.onFail || 'stop',
-          goto: step.goto || '',
-        })) : [],
+  const localData = {
+    v: data.v || 1,
+    id: data.id || '',
+    t: data.t || '',
+    d: data.d || '',
+    tasks: Array.isArray(data.tasks) ? data.tasks.map(normalizeTask) : [],
+    flows: Array.isArray(data.flows) ? data.flows.map(flow => ({
+      k: flow.k || '',
+      t: flow.t || '',
+      g: Array.isArray(flow.g) ? [...flow.g] : [],
+      steps: Array.isArray(flow.steps) ? flow.steps.map(step => ({
+        k: step.k || '',
+        task: step.task || '',
+        args: step.args && typeof step.args === 'object' ? { ...step.args } : {},
+        onSuccess: step.onSuccess || 'continue',
+        successGoto: step.successGoto || '',
+        onFail: step.onFail || 'stop',
+        goto: step.goto || '',
       })) : [],
-    },
-    varsList: flattenParsedVars(data.vars || {}),
+    })) : [],
   }
+  const varsList = flattenParsedVars(data.vars || {})
+  const legacyConditions = new Map(varsList.filter(variable => variable.if?.k).map(variable => [variable._key, variable.if]))
+  for (const task of localData.tasks) {
+    const keys = new Set(taskArgKeys(task.args))
+    task.args = task.args.map((arg) => {
+      if (taskArgCondition(arg)) return arg
+      const key = taskArgKey(arg)
+      const condition = legacyConditions.get(key)
+      return condition?.k && keys.has(condition.k) ? { k: key, if: { ...condition } } : key
+    })
+  }
+  // Parameter definitions no longer own presentation or activation relationships.
+  for (const variable of varsList) variable.if = null
+  return { localData, varsList }
 }
 
 function mapUniqueValues(values, from, to) {
@@ -183,11 +296,15 @@ export function renameVariableReferences({ varsList, localData, from, to }) {
   const newKey = String(to || '').trim()
   if (!oldKey || oldKey === newKey) return
 
-  for (const variable of varsList || []) {
-    if (variable?.if?.k === oldKey) variable.if.k = newKey
-  }
   for (const task of localData?.tasks || []) {
-    task.args = mapUniqueValues(task.args, oldKey, newKey)
+    task.args = (task.args || []).map((arg) => {
+      const key = taskArgKey(arg)
+      const condition = taskArgCondition(arg)
+      const nextKey = key === oldKey ? newKey : key
+      if (!condition) return nextKey
+      const nextCondition = { ...condition, k: condition.k === oldKey ? newKey : condition.k }
+      return { k: nextKey, if: nextCondition }
+    })
   }
   for (const flow of localData?.flows || []) {
     flow.g = mapUniqueValues(flow.g, oldKey, newKey)
@@ -212,11 +329,11 @@ export function countVariableReferences({ varsList, localData, key }) {
   const targetKey = String(key || '').trim()
   if (!targetKey) return 0
   let count = 0
-  for (const variable of varsList || []) {
-    if (variable?.if?.k === targetKey) count += 1
-  }
   for (const task of localData?.tasks || []) {
-    count += (task.args || []).filter(item => item === targetKey).length
+    for (const arg of task.args || []) {
+      if (taskArgKey(arg) === targetKey) count += 1
+      if (taskArgCondition(arg)?.k === targetKey) count += 1
+    }
   }
   for (const flow of localData?.flows || []) {
     count += (flow.g || []).filter(item => item === targetKey).length
@@ -233,11 +350,10 @@ export function countVariableReferences({ varsList, localData, key }) {
 export function removeVariableReferences({ varsList, localData, key }) {
   const targetKey = String(key || '').trim()
   if (!targetKey) return
-  for (const variable of varsList || []) {
-    if (variable?.if?.k === targetKey) variable.if = null
-  }
   for (const task of localData?.tasks || []) {
-    task.args = (task.args || []).filter(item => item !== targetKey)
+    task.args = (task.args || [])
+      .filter(arg => taskArgKey(arg) !== targetKey)
+      .map(arg => taskArgCondition(arg)?.k === targetKey ? taskArgKey(arg) : arg)
   }
   for (const flow of localData?.flows || []) {
     flow.g = (flow.g || []).filter(item => item !== targetKey)
@@ -286,6 +402,7 @@ export function removeTaskReferences(localData, key) {
 export function validateTemplateDraft(localData, varsList, { procedureNames = null } = {}) {
   const errors = []
   const variableKeys = (varsList || []).map(item => String(item?._key || '').trim())
+  const variablesByKey = new Map((varsList || []).map(item => [String(item?._key || '').trim(), item]))
   const taskKeys = (localData?.tasks || []).map(item => String(item?.k || '').trim())
   const flowKeys = (localData?.flows || []).map(item => String(item?.k || '').trim())
 
@@ -307,11 +424,6 @@ export function validateTemplateDraft(localData, varsList, { procedureNames = nu
   const variableKeySet = new Set(variableKeys.filter(Boolean))
   const taskKeySet = new Set(taskKeys.filter(Boolean))
   const procedureNameSet = Array.isArray(procedureNames) ? new Set(procedureNames.filter(Boolean)) : null
-  for (const variable of varsList || []) {
-    if (variable?.if?.k && !variableKeySet.has(variable.if.k)) {
-      errors.push(`参数 ${variable._key || '未命名参数'} 引用了不存在的条件参数：${variable.if.k}`)
-    }
-  }
   for (const task of localData?.tasks || []) {
     const taskLabel = task.k || '未命名任务'
     const functionName = String(task.fn || '').trim()
@@ -320,8 +432,36 @@ export function validateTemplateDraft(localData, varsList, { procedureNames = nu
     } else if (procedureNameSet && !procedureNameSet.has(functionName)) {
       errors.push(`任务 ${taskLabel} 引用的 Blockly 函数不存在：${functionName}`)
     }
-    for (const argKey of task.args || []) {
+    const argKeys = taskArgKeys(task.args)
+    for (const argKey of argKeys) {
       if (!variableKeySet.has(argKey)) errors.push(`任务 ${taskLabel} 引用了不存在的参数：${argKey}`)
+    }
+    for (const arg of task.args || []) {
+      const argKey = taskArgKey(arg)
+      const condition = taskArgCondition(arg)
+      if (!condition) continue
+      if (condition.k === argKey) errors.push(`任务 ${taskLabel} 的参数 ${argKey} 不能依赖自身`)
+      if (!argKeys.includes(condition.k)) errors.push(`任务 ${taskLabel} 的参数 ${argKey} 依赖了任务未选择的参数：${condition.k}`)
+      const operator = resolveTaskArgConditionOperator(condition)
+      const parent = variablesByKey.get(condition.k)
+      const parentType = parent?.tp || 'str'
+      if (!taskArgConditionOperatorsForType(parentType).includes(operator)) {
+        errors.push(`任务 ${taskLabel} 的参数 ${argKey} 使用了不适用于 ${parentType} 的条件：${operator}`)
+      }
+      if (['gt', 'gte', 'lt', 'lte'].includes(operator)) {
+        const value = condition[operator]
+        if (value === '' || value === null || typeof value === 'undefined' || !Number.isFinite(Number(value))) {
+          errors.push(`任务 ${taskLabel} 的参数 ${argKey} 的数值比较条件必须是有效数字`)
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(condition, 'in')) {
+        try {
+          const values = Array.isArray(condition.in) ? condition.in : JSON.parse(condition.in)
+          if (!Array.isArray(values)) errors.push(`任务 ${taskLabel} 的参数 ${argKey} 的“在集合中”条件必须是 JSON 数组`)
+        } catch {
+          errors.push(`任务 ${taskLabel} 的参数 ${argKey} 的“在集合中”条件必须是 JSON 数组`)
+        }
+      }
     }
   }
   for (const flow of localData?.flows || []) {
@@ -337,9 +477,9 @@ export function validateTemplateDraft(localData, varsList, { procedureNames = nu
       if (!step.task || !taskKeySet.has(step.task)) {
         errors.push(`步骤 ${stepLabel} 引用了不存在的任务：${step.task || '未选择'}`)
       }
-      const taskArgKeys = new Set(task?.args || [])
+      const taskArgKeySet = new Set(taskArgKeys(task?.args))
       for (const [argKey, value] of Object.entries(step.args || {})) {
-        if (!taskArgKeys.has(argKey)) errors.push(`步骤 ${stepLabel} 覆盖了任务未声明的参数：${argKey}`)
+        if (!taskArgKeySet.has(argKey)) errors.push(`步骤 ${stepLabel} 覆盖了任务未声明的参数：${argKey}`)
         if (value?.$bind === 'var' && !variableKeySet.has(value.key)) {
           errors.push(`步骤 ${stepLabel} 绑定了不存在的参数：${value.key || '未选择'}`)
         }
@@ -364,12 +504,25 @@ function cleanEnumOptions(options) {
     .filter(option => option.v !== '')
 }
 
-function parseIfEqValue(value) {
+function parseConditionScalar(value) {
   if (value === undefined || value === null || value === '') return undefined
   if (value === 'true') return true
   if (value === 'false') return false
   if (!Number.isNaN(Number(value)) && String(Number(value)) === String(value)) return Number(value)
   return value
+}
+
+function parseTaskArgCondition(condition) {
+  const operator = resolveTaskArgConditionOperator(condition)
+  if (!operator) return { k: condition.k }
+  if (operator !== 'in') return { k: condition.k, [operator]: parseConditionScalar(condition[operator]) }
+  if (Array.isArray(condition.in)) return { k: condition.k, in: condition.in }
+  try {
+    const values = JSON.parse(condition.in)
+    return { k: condition.k, in: Array.isArray(values) ? values : condition.in }
+  } catch {
+    return { k: condition.k, in: condition.in }
+  }
 }
 
 function buildVariablePayload(variable) {
@@ -390,30 +543,7 @@ function buildVariablePayload(variable) {
     const options = cleanEnumOptions(variable.oneOf)
     if (options.length) field.oneOf = options
   }
-  if (variable.if?.k) {
-    field.if = { k: variable.if.k }
-    const eqValue = parseIfEqValue(variable.if.eq)
-    if (eqValue !== undefined) field.if.eq = eqValue
-  }
   return { key, field }
-}
-
-function attachEnumChildren(parentKey, parentPayload, payloadMap) {
-  if (!Array.isArray(parentPayload?.oneOf)) return
-  for (const option of parentPayload.oneOf) {
-    const children = [...payloadMap.values()].filter(payload => (
-      !payload.mounted
-      && payload.field.if?.k === parentKey
-      && String(payload.field.if?.eq ?? '') === String(option?.v ?? '')
-    ))
-    if (!children.length) continue
-    option.children = children.map(payload => ({ k: payload.key, ...payload.field }))
-    children.forEach((payload, index) => {
-      payload.mounted = true
-      delete payload.field.if
-      delete option.children[index].if
-    })
-  }
 }
 
 export function buildTemplatePayload(localData, varsList, { clone = false } = {}) {
@@ -427,7 +557,11 @@ export function buildTemplatePayload(localData, varsList, { clone = false } = {}
       k: task.k,
       t: task.t,
       fn: task.fn,
-      args: Array.isArray(task.args) ? task.args.filter(Boolean) : [],
+      args: Array.isArray(task.args) ? task.args.map((arg) => {
+        const key = taskArgKey(arg)
+        const condition = taskArgCondition(arg)
+        return condition ? { k: key, if: parseTaskArgCondition(condition) } : key
+      }).filter(taskArgKey) : [],
     })),
     flows: (localData.flows || []).map(flow => ({
       k: flow.k,
@@ -445,30 +579,10 @@ export function buildTemplatePayload(localData, varsList, { clone = false } = {}
     })),
   }
 
-  const payloadMap = new Map()
   for (const variable of varsList || []) {
     const payload = buildVariablePayload(variable)
     if (!payload) continue
-    payloadMap.set(payload.key, payload)
     result.vars[payload.key] = payload.field
-  }
-
-  for (const payload of payloadMap.values()) {
-    const conditionKey = payload.field.if?.k
-    if (!conditionKey) continue
-    const parent = payloadMap.get(conditionKey)?.field
-    if (!parent || parent.tp === 'enum') continue
-    parent.children = parent.children || []
-    parent.children.push({ k: payload.key, ...payload.field })
-    payload.mounted = true
-    delete payload.field.if
-  }
-  // Rebuild enum-dependent children after ordinary conditional children are mounted.
-  for (const [key, payload] of payloadMap.entries()) {
-    attachEnumChildren(key, payload.field, payloadMap)
-  }
-  for (const payload of payloadMap.values()) {
-    if (payload.mounted) delete result.vars[payload.key]
   }
   return clone ? JSON.parse(JSON.stringify(result)) : result
 }

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   buildWorkflowDefaults,
+  isTemplateConditionActive,
   normalizeRuntimeValue,
   normalizeTemplateMeta,
 } from '../src/features/templates/templateDomain.js'
@@ -62,6 +63,16 @@ test('runtime values normalize numeric and structured inputs', () => {
   assert.deepEqual(normalizeRuntimeValue({ tp: 'json' }, '[1, 2]'), [1, 2])
 })
 
+test('runtime conditions apply numeric comparisons and enum sets', () => {
+  assert.equal(isTemplateConditionActive({ k: 'count', gt: 2 }, 3), true)
+  assert.equal(isTemplateConditionActive({ k: 'count', gte: 3 }, 3), true)
+  assert.equal(isTemplateConditionActive({ k: 'count', lt: 3 }, 3), false)
+  assert.equal(isTemplateConditionActive({ k: 'count', lte: 3 }, 3), true)
+  assert.equal(isTemplateConditionActive({ k: 'count', gt: -1 }, null), false)
+  assert.equal(isTemplateConditionActive({ k: 'count', gt: 2 }, '3'), false)
+  assert.equal(isTemplateConditionActive({ k: 'mode', in: ['debug', 'trace'] }, 'trace'), true)
+})
+
 test('path is a string input style instead of a standalone type', () => {
   const meta = normalizeTemplateMeta({
     vars: { file: { tp: 'str', ui: 'path' } },
@@ -72,4 +83,32 @@ test('path is a string input style instead of a standalone type', () => {
   assert.equal(meta.vars.file.rawType, 'str')
   assert.equal(meta.vars.file.type, 'string')
   assert.equal(meta.vars.file.ui, 'path')
+})
+
+test('task parameter relations do not leak to another task', () => {
+  const meta = normalizeTemplateMeta({
+    vars: {
+      test: { tp: 'bool', def: false },
+      gugu: { tp: 'str', def: '' },
+    },
+    tasks: [
+      { k: 'task_a', args: ['test', { k: 'gugu', if: { k: 'test', eq: true } }] },
+      { k: 'task_b', args: ['gugu'] },
+    ],
+    flows: [{
+      k: 'main',
+      steps: [
+        { k: 'a1', task: 'task_a' },
+        { k: 'b1', task: 'task_b' },
+      ],
+    }],
+  })
+
+  const [taskA, taskB] = meta.workflows[0].tasks
+  assert.deepEqual(taskA.fields.find(field => field.key === 'gugu').if, {
+    k: 'test',
+    eq: true,
+    in: [],
+  })
+  assert.equal(taskB.fields.find(field => field.key === 'gugu').if, null)
 })

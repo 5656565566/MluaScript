@@ -76,15 +76,19 @@ class TemplateStore:
             task = task_map.get(step.task)
             if task is None:
                 continue
+            task_args = {
+                arg if isinstance(arg, str) else arg.k: arg
+                for arg in task.args
+            }
             enabled = step_enabled.get(step.k, step.enabled)
             merged = {}
-            for field_key in task.args:
+            for field_key in task_args:
                 field_def = meta.vars.get(field_key)
                 if field_def is None:
                     continue
                 merged[field_key] = field_def.def_
             merged.update({key: _resolve_template_binding(value, template_values) for key, value in task.defaults.items()})
-            merged.update({key: value for key, value in globals_values.items() if key in task.args})
+            merged.update({key: value for key, value in globals_values.items() if key in task_args})
             merged.update({key: _resolve_template_binding(value, template_values) for key, value in step.args.items()})
             merged.update(step_args.get(step.k, {}))
             active_values = {
@@ -97,7 +101,9 @@ class TemplateStore:
                 if field_def is None:
                     final_args[field_key] = value
                     continue
-                if not is_condition_active(field_def.if_, active_values):
+                task_arg = task_args.get(field_key)
+                condition = None if isinstance(task_arg, str) or task_arg is None else task_arg.if_
+                if not is_condition_active(condition, active_values):
                     continue
                 inject_key = field_def.as_ or field_key
                 final_args[inject_key] = value

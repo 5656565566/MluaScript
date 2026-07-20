@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  buildTaskArgTreeRows,
   buildTemplatePayload,
   countTaskReferences,
   countVariableReferences,
@@ -11,8 +12,88 @@ import {
   removeTaskReferences,
   removeVariableReferences,
   renameVariableReferences,
+  taskArgConditionOperator,
+  taskArgConditionOperatorsForType,
+  updateTaskArgCondition,
   validateTemplateDraft,
 } from '../src/features/templates/editor/templateEditorDomain.js'
+
+test('task arguments are expanded into stable dependency tree rows', () => {
+  const args = [
+    { k: 'leaf', if: { k: 'child', eq: 'ready' } },
+    'root',
+    { k: 'child', if: { k: 'root', eq: true } },
+    'other',
+  ]
+
+  assert.deepEqual(buildTaskArgTreeRows(args).map(row => [row.key, row.depth]), [
+    ['root', 0],
+    ['child', 1],
+    ['leaf', 2],
+    ['other', 0],
+  ])
+})
+
+test('task argument tree keeps cyclic relationships editable', () => {
+  const args = [
+    { k: 'left', if: { k: 'right', eq: true } },
+    { k: 'right', if: { k: 'left', eq: true } },
+  ]
+
+  const rows = buildTaskArgTreeRows(args)
+  assert.deepEqual(rows.map(row => row.key), ['left', 'right'])
+  assert.equal(rows[0].depth, 0)
+  assert.equal(rows[0].detached, true)
+})
+
+test('task argument conditions preserve switchable operators', () => {
+  const source = ['mode', { k: 'tag', if: { k: 'mode', eq: 'safe' } }]
+
+  const notEqual = updateTaskArgCondition(source, 'tag', { k: 'mode', ne: 'safe' })
+  const inSet = updateTaskArgCondition(notEqual, 'tag', { k: 'mode', in: '["debug","trace"]' })
+  const payload = buildTemplatePayload({
+    v: 1,
+    tasks: [{ k: 'run', fn: 'run_task', args: inSet }],
+    flows: [],
+  }, [
+    { _key: 'mode', t: '', tp: 'enum', req: false, note: '', oneOf: [] },
+    { _key: 'tag', t: '', tp: 'str', req: false, note: '' },
+  ])
+
+  assert.deepEqual(notEqual[1], { k: 'tag', if: { k: 'mode', ne: 'safe' } })
+  assert.deepEqual(payload.tasks[0].args[1], { k: 'tag', if: { k: 'mode', in: ['debug', 'trace'] } })
+  assert.equal(taskArgConditionOperator({ k: 'tag', if: { k: 'mode', eq: 'safe', in: [] } }), 'eq')
+})
+
+test('task argument operators follow the controlling parameter type', () => {
+  assert.deepEqual(taskArgConditionOperatorsForType('bool'), ['eq'])
+  assert.deepEqual(taskArgConditionOperatorsForType('enum'), ['eq', 'ne', 'in'])
+  assert.deepEqual(taskArgConditionOperatorsForType('int'), ['eq', 'ne', 'gt', 'gte', 'lt', 'lte'])
+  assert.deepEqual(taskArgConditionOperatorsForType('num'), ['eq', 'ne', 'gt', 'gte', 'lt', 'lte'])
+  assert.deepEqual(taskArgConditionOperatorsForType('json'), ['eq', 'ne'])
+
+  const args = ['count', { k: 'delay', if: { k: 'count', eq: 0 } }]
+  const greaterThan = updateTaskArgCondition(args, 'delay', { k: 'count', gt: 2 })
+  const payload = buildTemplatePayload({
+    v: 1,
+    tasks: [{ k: 'run', fn: 'run_task', args: greaterThan }],
+    flows: [],
+  }, [
+    { _key: 'count', t: '', tp: 'int', req: false, note: '', def: 0 },
+    { _key: 'delay', t: '', tp: 'num', req: false, note: '', def: 0 },
+  ])
+
+  assert.deepEqual(payload.tasks[0].args[1], { k: 'delay', if: { k: 'count', gt: 2 } })
+
+  const invalidErrors = validateTemplateDraft({
+    tasks: [{ k: 'run', fn: 'run_task', args: ['count', { k: 'delay', if: { k: 'count', gt: null } }] }],
+    flows: [],
+  }, [
+    { _key: 'count', tp: 'int' },
+    { _key: 'delay', tp: 'num' },
+  ])
+  assert.ok(invalidErrors.some(error => error.includes('数值比较条件必须是有效数字')))
+})
 
 test('template editor data survives normalization and serialization', () => {
   const source = {
@@ -34,15 +115,15 @@ test('template editor data survives normalization and serialization', () => {
 
   assert.equal(normalized.varsList.length, 2)
   assert.equal(payload.id, source.id)
-  assert.deepEqual(payload.vars.mode.oneOf[0].children, [{
-    k: 'count',
+  assert.deepEqual(payload.vars.mode.oneOf, [{ v: 'fast', t: 'Fast' }])
+  assert.deepEqual(payload.vars.count, {
     t: '',
     tp: 'int',
     req: false,
     note: '',
     def: 2,
-  }])
-  assert.deepEqual(payload.tasks[0].args, ['mode', 'count'])
+  })
+  assert.deepEqual(payload.tasks[0].args, ['mode', { k: 'count', if: { k: 'mode', eq: 'fast' } }])
   assert.deepEqual(payload.flows[0].steps[0].args, { count: 3 })
 })
 
@@ -96,28 +177,24 @@ test('step parameter overrides and transition targets survive serialization', ()
   assert.equal(payload.flows[0].steps[0].goto, 'battle_1')
 })
 
-test('renaming a variable updates tasks, flows, conditions, and step values', () => {
-  const varsList = flattenParsedVars({ enabled: { tp: 'bool' }, child: { tp: 'str', if: { k: 'enabled', eq: true } } })
+test('renaming a variable updates task-local conditions, flows, and step values', () => {
+  const varsList = flattenParsedVars({ enabled: { tp: 'bool' }, child: { tp: 'str' } })
   const localData = {
-    tasks: [{ args: ['enabled'] }],
+    tasks: [{ args: ['enabled', { k: 'child', if: { k: 'enabled', eq: true } }] }],
     flows: [{ g: ['enabled'], steps: [{ args: { enabled: 'enabled' } }] }],
   }
 
   renameVariableReferences({ varsList, localData, from: 'enabled', to: 'active' })
 
-  assert.equal(varsList[1].if.k, 'active')
-  assert.deepEqual(localData.tasks[0].args, ['active'])
+  assert.deepEqual(localData.tasks[0].args, ['active', { k: 'child', if: { k: 'active', eq: true } }])
   assert.deepEqual(localData.flows[0].g, ['active'])
   assert.deepEqual(localData.flows[0].steps[0].args, { active: 'active' })
 })
 
 test('deleting a variable clears every dependent template reference', () => {
-  const varsList = flattenParsedVars({
-    enabled: { tp: 'bool' },
-    child: { tp: 'str', if: { k: 'enabled', eq: true } },
-  })
+  const varsList = flattenParsedVars({ enabled: { tp: 'bool' }, child: { tp: 'str' } })
   const localData = {
-    tasks: [{ k: 'run', args: ['enabled'] }],
+    tasks: [{ k: 'run', args: ['enabled', { k: 'child', if: { k: 'enabled', eq: true } }] }],
     flows: [{
       k: 'main',
       g: ['enabled'],
@@ -135,8 +212,7 @@ test('deleting a variable clears every dependent template reference', () => {
   assert.equal(countVariableReferences({ varsList, localData, key: 'enabled' }), 5)
   removeVariableReferences({ varsList, localData, key: 'enabled' })
 
-  assert.equal(varsList[1].if, null)
-  assert.deepEqual(localData.tasks[0].args, [])
+  assert.deepEqual(localData.tasks[0].args, ['child'])
   assert.deepEqual(localData.flows[0].g, [])
   assert.deepEqual(localData.flows[0].steps[0].args, {})
 })

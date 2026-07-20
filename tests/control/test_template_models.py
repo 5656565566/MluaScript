@@ -67,22 +67,27 @@ def test_normalize_template_meta_flattens_children_and_option_children() -> None
     )
 
     assert set(meta.vars.keys()) == {"useDrug", "drugCount", "energy", "stoneCount"}
-    assert meta.vars["drugCount"].grp == "useDrug"
-    assert meta.vars["drugCount"].if_ is not None
-    assert meta.vars["drugCount"].if_.k == "useDrug"
-    assert meta.vars["drugCount"].if_.eq is True
-    assert meta.vars["stoneCount"].grp == "energy"
-    assert meta.vars["stoneCount"].if_ is not None
-    assert meta.vars["stoneCount"].if_.eq == "stone"
+    task_args = {arg if isinstance(arg, str) else arg.k: arg for arg in meta.tasks[0].args}
+    assert task_args["drugCount"].if_ is not None
+    assert task_args["drugCount"].if_.k == "useDrug"
+    assert task_args["drugCount"].if_.eq is True
+    assert task_args["stoneCount"].if_ is not None
+    assert task_args["stoneCount"].if_.k == "energy"
+    assert task_args["stoneCount"].if_.eq == "stone"
     assert [option.v for option in meta.vars["energy"].one_of] == ["none", "stone"]
     assert meta.entry.flow == "main"
     assert meta.entry.task == "battle"
 
 
-def test_is_condition_active_supports_eq_ne_and_in() -> None:
+def test_is_condition_active_supports_typed_comparisons() -> None:
     assert is_condition_active({"k": "mode", "eq": "safe"}, {"mode": "safe"}) is True
     assert is_condition_active({"k": "mode", "ne": "fast"}, {"mode": "safe"}) is True
     assert is_condition_active({"k": "mode", "in": ["safe", "debug"]}, {"mode": "debug"}) is True
+    assert is_condition_active({"k": "count", "gt": 2}, {"count": 3}) is True
+    assert is_condition_active({"k": "count", "gte": 3}, {"count": 3}) is True
+    assert is_condition_active({"k": "ratio", "lt": 1.5}, {"ratio": 1.25}) is True
+    assert is_condition_active({"k": "ratio", "lte": 1.25}, {"ratio": 1.25}) is True
+    assert is_condition_active({"k": "count", "gt": 2}, {"count": "invalid"}) is False
     assert is_condition_active({"k": "enabled"}, {"enabled": True}) is True
     assert is_condition_active({"k": "enabled"}, {"enabled": False}) is False
 
@@ -113,6 +118,26 @@ def test_template_variable_removed_types_are_rejected(removed_type: str) -> None
 def test_path_ui_hint_is_rejected_for_non_string_type() -> None:
     with pytest.raises(ValueError, match="ui 仅适用于 str 字段"):
         normalize_template_meta({"vars": {"invalid": {"tp": "json", "ui": "path"}}})
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["test", {"k": "gugu", "if": {"k": "gugu", "eq": True}}], "不能依赖自身"),
+        ([{"k": "gugu", "if": {"k": "test", "eq": True}}], "任务未引用的参数"),
+    ],
+)
+def test_task_parameter_relations_must_stay_within_the_task(args: list[object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        normalize_template_meta(
+            {
+                "vars": {
+                    "test": {"tp": "bool"},
+                    "gugu": {"tp": "str"},
+                },
+                "tasks": [{"k": "task", "args": args}],
+            }
+        )
 
 
 def test_parse_template_meta_and_dump_template_block_roundtrip() -> None:
@@ -146,10 +171,12 @@ def test_parse_template_meta_and_dump_template_block_roundtrip() -> None:
     assert source is not None
     assert source.script_path == "demo.lua"
     assert source.meta is not None
-    assert source.meta.vars["drugCount"].if_ is not None
+    task_args = {arg if isinstance(arg, str) else arg.k: arg for arg in source.meta.tasks[0].args}
+    assert task_args["drugCount"].if_ is not None
     dumped = dump_template_block(source.meta)
     assert "-- @mlua-template:start" in dumped
     assert '"drugCount"' in dumped
+    assert '"if"' in dumped
 
 
 def test_parse_template_meta_raises_for_invalid_json() -> None:

@@ -12,6 +12,7 @@ from mluascript.control.workspace.template_store import (
     _python_to_lua_literal,
 )
 from mluascript.control.workspace.template_models import SavedFlowConfig, TemplateSavedConfig
+from mluascript.control.workspace.template_normalizer import normalize_template_meta
 
 
 def test_template_store_loads_meta_and_builds_runtime_payload_with_conditional_fields(tmp_path: Path) -> None:
@@ -63,6 +64,55 @@ def test_template_store_loads_meta_and_builds_runtime_payload_with_conditional_f
     saved.flows["main"].stepArgs["s1"]["useDrug"] = True
     runtime = store.build_runtime_payload(meta, saved, flow_key="main")
     assert runtime["steps"][0]["args"]["drugCount"] == 9
+
+
+def test_template_store_scopes_parameter_relations_to_each_task(tmp_path: Path) -> None:
+    meta = normalize_template_meta(
+        {
+            "vars": {
+                "test": {"tp": "bool", "def": False},
+                "gugu": {"tp": "str", "def": "default"},
+            },
+            "tasks": [
+                {
+                    "k": "task_a",
+                    "fn": "run_a",
+                    "args": ["test", {"k": "gugu", "if": {"k": "test", "eq": True}}],
+                },
+                {"k": "task_b", "fn": "run_b", "args": ["gugu"]},
+            ],
+            "flows": [
+                {
+                    "k": "main",
+                    "steps": [
+                        {"k": "a1", "task": "task_a"},
+                        {"k": "b1", "task": "task_b"},
+                    ],
+                }
+            ],
+        }
+    )
+    saved = TemplateSavedConfig(
+        scriptPath="demo.lua",
+        flows={
+            "main": SavedFlowConfig(
+                stepArgs={
+                    "a1": {"test": False, "gugu": "A"},
+                    "b1": {"gugu": "B"},
+                }
+            )
+        },
+    )
+    store = TemplateStore(WorkspaceManager(tmp_path))
+
+    runtime = store.build_runtime_payload(meta, saved, flow_key="main")
+
+    assert runtime["steps"][0]["args"] == {"test": False}
+    assert runtime["steps"][1]["args"] == {"gugu": "B"}
+
+    saved.flows["main"].stepArgs["a1"]["test"] = True
+    runtime = store.build_runtime_payload(meta, saved, flow_key="main")
+    assert runtime["steps"][0]["args"] == {"test": True, "gugu": "A"}
 
 
 def test_template_store_persists_saved_config(tmp_path: Path) -> None:

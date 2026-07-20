@@ -106,14 +106,6 @@ export default {
       if (clone) await showVariableOnItsPage(clone)
     }
 
-    async function addDependentVariable(parent, eqValue = undefined) {
-      const previousLength = variableList.value.length
-      props.editor.handleAddDependentVar(parent, eqValue)
-      if (variableList.value.length === previousLength) return
-      const child = variableList.value[variableList.value.indexOf(parent) + 1]
-      if (child) await showVariableOnItsPage(child)
-    }
-
     function toggleAllVariableAdvanced() {
       const expanded = !allVariablesExpanded.value
       variableList.value.forEach(item => {
@@ -139,7 +131,6 @@ export default {
       taskPagination,
       addVariableDefinition,
       duplicateVariableDefinition,
-      addDependentVariable,
       toggleAllVariableAdvanced,
       addTaskDefinition,
     }
@@ -222,7 +213,6 @@ export default {
           <template v-for="value in variablePagination.options" :key="value">
             <div
               class="editor-card editor-card-full"
-              :class="{ 'is-dependent': value.if?.k }"
             >
               <div class="card-header">
                 <div class="card-title-wrap">
@@ -261,18 +251,6 @@ export default {
                 <n-collapse-item name="advanced">
                   <template #header><span></span></template>
                   <div class="advanced-panel">
-                    <div v-if="value.if?.k" class="sub-panel dependent-variable-panel">
-                      <div class="sub-panel-title dependent-variable-title">
-                        <span>受控关联参数</span>
-                        <n-button size="small" type="error" quaternary @click="value.if = null">取消关联</n-button>
-                      </div>
-                      <n-text depth="3" class="dependent-variable-copy">
-                        当参数 <n-tag size="small" type="info">{{ value.if.k }}</n-tag>
-                        的值为 <n-tag size="small" type="warning">{{ value.if.eq !== '' && value.if.eq !== undefined ? String(value.if.eq) : '(任意)' }}</n-tag>
-                        时，该参数才会显示并生效。
-                      </n-text>
-                    </div>
-
                     <div class="form-grid cols-2 compact-grid">
                       <div class="inline-switch-field">
                         <n-switch v-model:value="value.req" />
@@ -307,9 +285,6 @@ export default {
                               <n-input v-model:value="opt.v" placeholder="值 (value)" />
                               <n-input v-model:value="opt.t" placeholder="显示名称 (t)" />
                             </div>
-                            <n-button size="small" dashed @click="addDependentVariable(value, opt.v)">
-                              以此选项作为条件添加关联参数
-                            </n-button>
                           </div>
                         </template>
                       </n-dynamic-input>
@@ -318,9 +293,6 @@ export default {
                       </div>
                     </div>
 
-                    <n-button v-if="value.tp === 'bool'" dashed @click="addDependentVariable(value, 'true')">
-                      以此开关开启作为条件添加关联参数
-                    </n-button>
                   </div>
                 </n-collapse-item>
               </n-collapse>
@@ -407,8 +379,65 @@ export default {
                 <div class="picker-summary-text">已选择 {{ value.args?.length || 0 }} 项</div>
                 <n-button size="small" @click="openTaskVarPicker(value)">选择参数</n-button>
               </div>
-              <div v-if="value.args?.length" class="task-selected-tags">
-                <n-tag v-for="arg in value.args" :key="arg" size="small" type="info" round>{{ arg }}</n-tag>
+              <div v-if="value.args?.length" class="task-parameter-tree">
+                <div class="task-parameter-tree-title">参数结构</div>
+                <div class="task-parameter-tree-list">
+                  <div
+                    v-for="row in taskArgTreeRows(value)"
+                    :key="`relation-${row.key}`"
+                    class="task-parameter-tree-row"
+                    :class="{ 'is-child-parameter': row.depth > 0, 'has-detached-relation': row.detached }"
+                    :style="{ '--task-parameter-depth': row.depth }"
+                  >
+                    <div class="task-parameter-identity">
+                      <div class="task-parameter-name-row">
+                        <span class="task-parameter-name">{{ row.label }}</span>
+                        <span v-if="row.label !== row.key" class="task-parameter-key">{{ row.key }}</span>
+                        <n-tag size="small" :bordered="false">{{ row.type }}</n-tag>
+                      </div>
+                    </div>
+                    <div class="task-parameter-relation-editor">
+                      <n-select
+                        :value="taskArgRelationKey(row.arg)"
+                        :options="taskArgRelationOptions(value, row.arg)"
+                        clearable
+                        placeholder="约束条件"
+                        @update:value="parentKey => setTaskArgRelationParent(value, row.arg, parentKey)"
+                      />
+                      <div v-if="taskArgRelationKey(row.arg)" class="task-parameter-condition-editor">
+                        <n-select
+                          class="task-parameter-operator-select"
+                          :value="taskArgConditionOperator(row.arg)"
+                          :options="taskArgRelationOperatorOptions(row.arg)"
+                          @update:value="operator => setTaskArgRelationOperator(value, row.arg, operator)"
+                        />
+                        <n-select
+                          v-if="taskArgRelationValueControl(row.arg) === 'select'"
+                          :value="taskArgRelationValue(row.arg)"
+                          :options="taskArgRelationValueOptions(row.arg)"
+                          :multiple="taskArgRelationValueMultiple(row.arg)"
+                          placeholder="选择条件值"
+                          @update:value="conditionValue => setTaskArgRelationValue(value, row.arg, conditionValue)"
+                        />
+                        <n-input-number
+                          v-else-if="taskArgRelationValueControl(row.arg) === 'number'"
+                          :value="taskArgRelationValue(row.arg)"
+                          :precision="taskArgRelationValuePrecision(row.arg)"
+                          :show-button="false"
+                          placeholder="条件数值"
+                          style="width: 100%;"
+                          @update:value="conditionValue => setTaskArgRelationValue(value, row.arg, conditionValue)"
+                        />
+                        <n-input
+                          v-else
+                          :value="taskArgRelationValue(row.arg)"
+                          :placeholder="taskArgRelationValuePlaceholder(row.arg)"
+                          @update:value="conditionValue => setTaskArgRelationValue(value, row.arg, conditionValue)"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

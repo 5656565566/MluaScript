@@ -5,14 +5,16 @@ import test from 'node:test'
 const componentUrl = new URL('../src/components/TemplateEditorModal.vue', import.meta.url)
 const styleUrl = new URL('../src/ui/templateEditor/templateEditorModal.css', import.meta.url)
 const resourceDialogUrl = new URL('../src/ui/templateEditor/TemplateResourceDialogs.vue', import.meta.url)
+const resourceDialogStyleUrl = new URL('../src/ui/templateEditor/templateResourceDialogs.css', import.meta.url)
 const workbenchUrl = new URL('../src/ui/templateEditor/TemplateFlowWorkbench.vue', import.meta.url)
 const workbenchStyleUrl = new URL('../src/ui/templateEditor/templateFlowWorkbench.css', import.meta.url)
 
 test('模板配置使用占满剩余高度的单一任务流工作区', async () => {
-  const [component, style, resourceDialog, workbench, workbenchStyle] = await Promise.all([
+  const [component, style, resourceDialog, resourceDialogStyle, workbench, workbenchStyle] = await Promise.all([
     readFile(componentUrl, 'utf8'),
     readFile(styleUrl, 'utf8'),
     readFile(resourceDialogUrl, 'utf8'),
+    readFile(resourceDialogStyleUrl, 'utf8'),
     readFile(workbenchUrl, 'utf8'),
     readFile(workbenchStyleUrl, 'utf8'),
   ])
@@ -37,6 +39,15 @@ test('模板配置使用占满剩余高度的单一任务流工作区', async ()
   assert.match(resourceDialog, /title="任务管理"/)
   assert.match(resourceDialog, /v-model:value="taskSearch"[\s\S]*搜索任务 Key \/ 名称 \/ Blockly 函数/)
   assert.match(resourceDialog, /taskPagination\.options[\s\S]*<n-pagination/)
+  assert.match(resourceDialog, /taskArgTreeRows\(value\)[\s\S]*task-parameter-tree-row/)
+  assert.doesNotMatch(resourceDialog, /task-selected-tags|任务内参数关系/)
+  assert.match(resourceDialog, /taskArgRelationOperatorOptions\(row\.arg\)[\s\S]*setTaskArgRelationOperator/)
+  assert.match(resourceDialog, /taskArgRelationValueControl\(row\.arg\) === 'select'[\s\S]*taskArgRelationValueOptions\(row\.arg\)/)
+  assert.match(resourceDialog, /taskArgRelationValueMultiple\(row\.arg\)/)
+  assert.match(resourceDialog, /<n-input-number[\s\S]*taskArgRelationValueControl\(row\.arg\) === 'number'/)
+  assert.doesNotMatch(resourceDialog, /task-parameter-relation-summary|>根参数<|当 \{\{ row\.parentLabel \}\}/)
+  assert.match(resourceDialogStyle, /--task-parameter-tree-accent:[^;]*--color-accent-text/)
+  assert.match(resourceDialogStyle, /\.task-parameter-tree-row\.is-child-parameter\s*\{[^}]*border-left:[^}]*--task-parameter-tree-accent/s)
   assert.doesNotMatch(resourceDialog, /v-model:value="localData\.tasks"[^>]*show-sort-button/)
   assert.match(style, /\.n-card\.template-editor-modal-shell\)\s*\{[^}]*height:\s*calc\(100dvh - 32px\)/s)
   assert.match(style, /> \.n-card-content\)\s*\{[^}]*flex:\s*1[^}]*min-height:\s*0[^}]*overflow:\s*hidden/s)
