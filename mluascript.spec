@@ -36,7 +36,7 @@ def build_frontend():
     print("Building frontend...")
     
     try:
-        # 打包前移除旧产物，避免构建失败时把过期 Web 资源带入新可执行文件。
+        # 打包前移除旧产物 避免构建失败时把过期 Web 资源带入新可执行文件
         if webui_dist_path.exists():
             shutil.rmtree(webui_dist_path)
 
@@ -94,7 +94,7 @@ upx_dir = os.path.abspath('dev/upx-5.1.1-win64')
 resolved_upx_dir = upx_dir if os.path.isdir(upx_dir) else None
 resolved_icon = 'logo.ico' if sys.platform.startswith('win') and os.path.exists('logo.ico') else None
 
-# Android 端触控程序是独立数据包，PyInstaller 不会随 maa Python 模块自动收集。
+# Android 端触控程序是独立数据包 PyInstaller 不会随 maa Python 模块自动收集
 required_agent_assets = {
     'MaaAgentBinary/maatouch/universal/maatouch',
     'MaaAgentBinary/minitouch/arm64-v8a/minitouch',
@@ -145,7 +145,7 @@ a = Analysis(
     noarchive=False,
 )
 
-# Analysis 会把 Android ELF 误判为宿主机二进制；在分类完成后按数据文件追加，保留完整 Agent 包。
+# Analysis 会把 Android ELF 误判为宿主机二进制 在分类完成后按数据文件追加 保留完整 Agent 包
 a.datas.extend(maa_agent_toc)
 
 pyz = PYZ(a.pure)

@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from lupa import LuaRuntime
 
 from mluascript.control.workspace.manager import WorkspaceManager
-from mluascript.control.workspace.template_store import (
-    TemplateStore,
+from mluascript.control.workspace.template_lua_emitter import (
     _is_safe_lua_identifier,
     _lua_global_ref_expr,
     _python_to_lua_literal,
 )
+from mluascript.control.workspace.template_store import TemplateStore
 from mluascript.control.workspace.template_models import SavedFlowConfig, TemplateSavedConfig
 from mluascript.control.workspace.template_normalizer import normalize_template_meta
 
@@ -321,3 +322,101 @@ def test_python_to_lua_literal_and_runtime_script_generation(tmp_path: Path) -> 
     assert 'local __mlua_template_fn_1 = _G["_E6_9C_AA_E5_91_BD_E5_90_8D"]' in runtime_script
     assert "pcall(__mlua_template_fn_1, __mlua_template_args_1)" in runtime_script
     assert "log_error('[template] step failed:" in runtime_script
+
+
+def test_python_to_lua_literal_quotes_lua_reserved_keys() -> None:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+
+    for key in ("local", "function", "end", "goto"):
+        literal = _python_to_lua_literal({key: 1})
+        result = lua.execute("return " + literal)
+
+        assert literal == f'{{ ["{key}"] = 1 }}'
+        assert result[key] == 1
+
+
+def test_template_store_preserves_runtime_payload_contract() -> None:
+    meta = normalize_template_meta(
+        {
+            "vars": {"count": {"tp": "int", "def": 1}},
+            "tasks": [{"k": "one", "fn": "step_one"}],
+            "flows": [
+                {
+                    "k": "main",
+                    "g": ["count"],
+                    "steps": [
+                        {
+                            "k": "s1",
+                            "task": "one",
+                            "successBranches": [{"if": {"k": "count", "gt": 2}, "goto": "s1"}],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    runtime = TemplateStore().build_runtime_payload(meta, TemplateSavedConfig(), flow_key="main")
+
+    assert runtime == {
+        "flowKey": "main",
+        "steps": [
+            {
+                "key": "s1",
+                "task": "one",
+                "fn": "step_one",
+                "enabled": True,
+                "args": {},
+                "successBranches": [{"if": {"k": "count", "gt": 2, "in": []}, "goto": "s1"}],
+                "onSuccess": "continue",
+                "successGoto": "",
+                "onFail": "stop",
+                "goto": "",
+            }
+        ],
+        "globals": {"count": 1},
+        "lockSteps": False,
+    }
+
+
+def test_template_store_rejects_step_with_missing_task() -> None:
+    meta = normalize_template_meta(
+        {
+            "flows": [
+                {
+                    "k": "main",
+                    "steps": [{"k": "missing", "task": "no_such_task"}],
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError, match="missing.*no_such_task"):
+        TemplateStore().build_runtime_payload(meta, TemplateSavedConfig(), flow_key="main")
+
+
+@pytest.mark.parametrize(
+    ("transition_fields", "missing_target"),
+    [
+        ({"onSuccess": "goto", "successGoto": "missing_success"}, "missing_success"),
+        ({"onFail": "goto", "goto": "missing_failure"}, "missing_failure"),
+    ],
+)
+def test_template_store_rejects_missing_transition_target(
+    transition_fields: dict[str, str],
+    missing_target: str,
+) -> None:
+    meta = normalize_template_meta(
+        {
+            "tasks": [{"k": "one", "fn": "step_one"}],
+            "flows": [
+                {
+                    "k": "main",
+                    "steps": [{"k": "s1", "task": "one", **transition_fields}],
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match=f"s1.*{missing_target}"):
+        TemplateStore().build_runtime_script(meta, TemplateSavedConfig(), flow_key="main")
