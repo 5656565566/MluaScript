@@ -19,8 +19,8 @@ if TYPE_CHECKING:
 logger: Logger = loguru.logger
 log_level = "INFO"
 logger_id: int | None = None
-_DEFAULT_BUFFER_LIMIT = 2000
-_DEFAULT_BUCKET_LIMIT = 500
+_DEFAULT_BUFFER_LIMIT = 200
+_DEFAULT_BUCKET_LIMIT = 200
 _sink_ids: dict[str, int] = {}
 _stdout_enabled = False
 _file_log_path: Path | None = None
@@ -69,9 +69,29 @@ class LogBufferManager:
 
     def append(self, entry: LogEntry) -> None:
         with self._lock:
+            # 二级索引只保留全局窗口内的条目 避免会话或频道不断增加时绕过总量限制
+            if self._all.maxlen is not None and len(self._all) == self._all.maxlen:
+                evicted = self._all[0]
+                self._discard_index_entry(self._by_session, evicted.session_label, evicted)
+                self._discard_index_entry(self._by_channel, evicted.channel, evicted)
             self._all.append(entry)
             self._get_session_buffer(entry.session_label).append(entry)
             self._get_channel_buffer(entry.channel).append(entry)
+
+    @staticmethod
+    def _discard_index_entry(
+        index: dict[str, deque[LogEntry]],
+        key: str,
+        entry: LogEntry,
+    ) -> None:
+        buffer = index.get(key)
+        if buffer is None:
+            return
+        retained = deque((item for item in buffer if item is not entry), maxlen=buffer.maxlen)
+        if retained:
+            index[key] = retained
+        else:
+            index.pop(key, None)
 
     def _get_session_buffer(self, session_label: str) -> deque[LogEntry]:
         if session_label not in self._by_session:
@@ -220,6 +240,7 @@ def register_sink(
     format: str | None = None,
     diagnose: bool = False,
     colorize: bool | None = None,
+    **sink_options: Any,
 ) -> int:
     if name in _sink_ids:
         logger.remove(_sink_ids.pop(name))
@@ -230,6 +251,7 @@ def register_sink(
         format=format or default_format,
         diagnose=diagnose,
         colorize=colorize,
+        **sink_options,
     )
     _sink_ids[name] = sink_id
     return sink_id
@@ -281,6 +303,8 @@ def configure_file_logging(log_path: Path | str | None) -> None:
         level=0,
         diagnose=False,
         colorize=False,
+        rotation="10 MB",
+        retention=5,
     )
     _file_log_path = file_path
 

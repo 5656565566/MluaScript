@@ -50,7 +50,7 @@ class LogPage(Container):
     ]
 
     def compose(self) -> ComposeResult:
-        self.viewer = RichLog(id="log-viewer", markup=False, wrap=True, auto_scroll=True)
+        self.viewer = RichLog(id="log-viewer", markup=False, wrap=True, auto_scroll=True, max_lines=200)
         yield self.viewer
 
     def on_mount(self) -> None:

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 import tempfile
+import time
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -298,7 +300,18 @@ def test_create_maa_context_enables_tasker_log_dir(monkeypatch) -> None:
         )
         monkeypatch.setattr(
             "mluascript.maa.lifecycle.runtime._stabilize_maa_log_file",
-            lambda path: calls.setdefault("stabilize_log_file", Path(path)),
+            lambda path, runtime_dir=None: calls.setdefault(
+                "stabilize_log_file",
+                (Path(path), Path(runtime_dir) if runtime_dir is not None else None),
+            ),
+        )
+        monkeypatch.setattr(
+            "mluascript.maa.lifecycle.runtime._prune_maa_log_backups",
+            lambda path: calls.setdefault("prune_log_backups", Path(path)),
+        )
+        monkeypatch.setattr(
+            "mluascript.maa.lifecycle.runtime._ensure_maa_log_maintenance",
+            lambda path: calls.setdefault("maintain_log_backups", Path(path)),
         )
         monkeypatch.setattr(
             "mluascript.maa.lifecycle.runtime._redirect_native_stdio",
@@ -311,7 +324,12 @@ def test_create_maa_context_enables_tasker_log_dir(monkeypatch) -> None:
         assert context.paths.plugin_dir == runtime_dir / "plugins"
         assert calls["toolkit_init_option"] == str(runtime_dir)
         assert calls["set_log_dir"] == (runtime_dir / "logs").resolve()
-        assert calls["stabilize_log_file"] == (runtime_dir / "logs" / "maa.log").resolve()
+        assert calls["stabilize_log_file"] == (
+            (runtime_dir / "logs" / "maa.log").resolve(),
+            runtime_dir,
+        )
+        assert calls["prune_log_backups"] == (runtime_dir / "logs").resolve()
+        assert calls["maintain_log_backups"] == (runtime_dir / "logs").resolve()
         assert "set_stdout_level" in calls
 
 
@@ -333,7 +351,30 @@ def test_cleanup_maa_runtime_artifacts_uses_custom_runtime_dir(monkeypatch) -> N
         cleanup_maa_runtime_artifacts(custom_runtime_dir)
 
         maa_log_file = custom_runtime_dir / "logs" / "maa.log"
-        assert maa_log_file.read_text(encoding="utf-8") == "custom-rootcustom-debug"
+        native_log_file = custom_runtime_dir / "logs" / "maafw.log"
+        assert native_log_file.read_text(encoding="utf-8") == "custom-rootcustom-debug"
         assert default_generated_file.read_text(encoding="utf-8") == "default"
         assert not custom_generated_file.exists()
         assert not custom_debug_generated_file.parent.exists()
+
+
+def test_cleanup_maa_runtime_artifacts_moves_and_prunes_backups(monkeypatch) -> None:
+    with temp_runtime_dir() as runtime_dir:
+        load_config(str(runtime_dir / "config.yaml"))
+        monkeypatch.setattr("mluascript.maa.lifecycle.runtime.get_runtime_dir", lambda: runtime_dir)
+
+        debug_dir = runtime_dir / "debug"
+        debug_dir.mkdir()
+        base_time = time.time_ns()
+        for index in range(7):
+            backup = debug_dir / f"maafw.bak.2026.01.01-00.00.0{index}.log"
+            backup.write_text(str(index), encoding="utf-8")
+            timestamp = base_time + index * 1_000_000_000
+            os.utime(backup, ns=(timestamp, timestamp))
+
+        cleanup_maa_runtime_artifacts(runtime_dir)
+
+        backups = sorted((runtime_dir / "logs").glob("maafw.bak.*.log"))
+        assert len(backups) == 5
+        assert {item.read_text(encoding="utf-8") for item in backups} == {"2", "3", "4", "5", "6"}
+        assert not debug_dir.exists()

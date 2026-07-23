@@ -8,7 +8,7 @@ export function createRuntimeStreams({
   onLog,
   onTaskLogs,
   onTaskOutput,
-  maxLogs = 2000,
+  maxLogs = 200,
 }) {
   let logsStream = null
   let logsReconnectTimer = null

@@ -148,7 +148,7 @@ class RunScreen(ScrollableContainer):
             with TabPane("运行日志", id="run-tab-log"):
                 with Vertical(classes="tab-area"):
                     yield Static("运行日志: 当前未选择脚本任务", id="runtime-log-summary")
-                    yield RichLog(id="runtime-log-view", markup=False, wrap=True, auto_scroll=True)
+                    yield RichLog(id="runtime-log-view", markup=False, wrap=True, auto_scroll=True, max_lines=200)
 
     def on_mount(self) -> None:
         self._refresh_timer = self.set_interval(0.5, self._refresh_all)

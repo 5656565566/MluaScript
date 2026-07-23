@@ -6,6 +6,7 @@ import sys
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Event, Lock, Thread
 
 from maa.library import Library
 from maa.resource import Resource
@@ -18,6 +19,16 @@ from mluascript.shared.config.manager import get_runtime_dir
 
 from ..types import MaaContextState, MaaPaths
 from .bootstrap import resolve_maa_log_dir, resolve_maa_log_file, resolve_maa_paths, resolve_tasker_stdout_level
+
+
+_MAA_LOG_FILENAME = "maafw.log"
+_MAA_LOG_BACKUP_PATTERN = "maafw.bak.*.log"
+_MAA_LOG_BACKUP_LIMIT = 5
+_MAA_LOG_MAINTENANCE_INTERVAL_SECONDS = 60
+_maa_log_maintenance_lock = Lock()
+_maa_log_maintenance_stop = Event()
+_maa_log_maintenance_thread: Thread | None = None
+_maa_log_maintenance_dir: Path | None = None
 
 
 @dataclass(slots=True)
@@ -55,9 +66,13 @@ def create_maa_context() -> MaaContext:
         except Exception as exc:
             logger.error(f"Failed to init Toolkit option: {exc}")
 
+        # Toolkit 配置阶段关闭临时日志，先归拢旧文件，再只在目标目录启动 MAA 日志。
+        _stabilize_maa_log_file(maa_log_file, runtime_dir)
+
         try:
             if Tasker.set_log_dir(maa_log_dir):
-                _stabilize_maa_log_file(maa_log_file)
+                _prune_maa_log_backups(maa_log_dir)
+                _ensure_maa_log_maintenance(maa_log_dir)
                 logger.info(f"MAA 底层日志已启用: {maa_log_file}")
             else:
                 logger.warning(f"MAA 底层日志目录设置失败: {maa_log_dir}")
@@ -66,7 +81,6 @@ def create_maa_context() -> MaaContext:
 
         try:
             Tasker.set_stdout_level(resolve_tasker_stdout_level())
-            _stabilize_maa_log_file(maa_log_file)
         except Exception as exc:
             logger.error(f"MAA stdout 日志级别设置失败: {exc}")
     return MaaContext(paths=resolve_maa_paths())
@@ -180,58 +194,107 @@ def _prepare_maa_option_config(runtime_dir: Path) -> None:
         except Exception:
             option_data = {}
 
-    option_data["logging"] = True
+    # MAA 日志目录由 Tasker.set_log_dir 统一设置，避免 Toolkit 先在 debug 或工作目录落盘。
+    option_data["logging"] = False
     option_data["stdout_level"] = 0
     option_path.write_text(json.dumps(option_data, ensure_ascii=False, indent=4), encoding="utf-8")
 
 
 def _stabilize_maa_log_file(target_file: Path, runtime_dir: Path | None = None) -> None:
     target_runtime_dir = runtime_dir or get_runtime_dir()
-    root_generated_file = target_runtime_dir / "maafw.log"
-    debug_generated_file = target_runtime_dir / "debug" / "maafw.log"
-    generated_file = target_file.parent / "maafw.log"
-    target_file.parent.mkdir(parents=True, exist_ok=True)
+    target_dir = target_file.parent
+    native_log_file = target_dir / _MAA_LOG_FILENAME
+    target_dir.mkdir(parents=True, exist_ok=True)
 
-    for candidate in (root_generated_file, debug_generated_file):
-        if not candidate.exists():
-            continue
+    # 只归拢 MAA 自身的固定文件名，避免处理程序根目录中的其他日志。
+    for source_dir in (target_runtime_dir, target_runtime_dir / "debug"):
+        source_log_file = source_dir / _MAA_LOG_FILENAME
+        if source_log_file != native_log_file:
+            _merge_maa_log_file(source_log_file, native_log_file)
+        for backup_file in source_dir.glob(_MAA_LOG_BACKUP_PATTERN):
+            _move_maa_backup_file(backup_file, target_dir)
+
+    _prune_maa_log_backups(target_dir)
+    _cleanup_maa_debug_dir(target_runtime_dir)
+
+
+def _merge_maa_log_file(source_file: Path, target_file: Path) -> None:
+    if not source_file.is_file():
+        return
+    try:
+        incoming = source_file.read_bytes()
+        if incoming:
+            with target_file.open("ab") as stream:
+                stream.write(incoming)
+        source_file.unlink()
+    except OSError:
+        pass
+
+
+def _move_maa_backup_file(source_file: Path, target_dir: Path) -> None:
+    if not source_file.is_file() or source_file.parent == target_dir:
+        return
+    destination = target_dir / source_file.name
+    suffix_index = 1
+    while destination.exists():
+        destination = target_dir / f"{source_file.stem}.migrated-{suffix_index}{source_file.suffix}"
+        suffix_index += 1
+    try:
+        source_file.replace(destination)
+    except OSError:
+        pass
+
+
+def _prune_maa_log_backups(log_dir: Path, keep: int = _MAA_LOG_BACKUP_LIMIT) -> None:
+    try:
+        backups = sorted(
+            (item for item in log_dir.glob(_MAA_LOG_BACKUP_PATTERN) if item.is_file()),
+            key=lambda item: item.stat().st_mtime_ns,
+            reverse=True,
+        )
+    except OSError:
+        return
+
+    for backup_file in backups[max(0, keep):]:
         try:
-            current = target_file.read_bytes() if target_file.exists() else b""
-            incoming = candidate.read_bytes()
-            if incoming:
-                target_file.write_bytes(current + incoming)
-            candidate.unlink()
-        except Exception:
+            backup_file.unlink()
+        except OSError:
             pass
 
-    if generated_file == target_file or not generated_file.exists():
-        _cleanup_maa_debug_dir(target_runtime_dir)
-        return
 
-    if target_file.exists():
-        try:
-            existing = target_file.read_bytes()
-            current = generated_file.read_bytes()
-            generated_file.write_bytes(existing + current)
-            target_file.unlink()
-        except Exception:
-            try:
-                target_file.unlink()
-            except Exception:
-                return
+def _ensure_maa_log_maintenance(log_dir: Path) -> None:
+    global _maa_log_maintenance_dir, _maa_log_maintenance_thread
+    with _maa_log_maintenance_lock:
+        _maa_log_maintenance_dir = log_dir.resolve()
+        if _maa_log_maintenance_thread is not None and _maa_log_maintenance_thread.is_alive():
+            return
+        _maa_log_maintenance_stop.clear()
+        _maa_log_maintenance_thread = Thread(
+            target=_run_maa_log_maintenance,
+            name="maa-log-maintenance",
+            daemon=True,
+        )
+        _maa_log_maintenance_thread.start()
 
-    try:
-        generated_file.replace(target_file)
-        _cleanup_maa_debug_dir(target_runtime_dir)
-        return
-    except Exception:
-        pass
 
-    try:
-        os.link(generated_file, target_file)
-    except Exception:
-        pass
-    _cleanup_maa_debug_dir(target_runtime_dir)
+def _run_maa_log_maintenance() -> None:
+    while not _maa_log_maintenance_stop.wait(_MAA_LOG_MAINTENANCE_INTERVAL_SECONDS):
+        with _maa_log_maintenance_lock:
+            log_dir = _maa_log_maintenance_dir
+        if log_dir is not None:
+            _prune_maa_log_backups(log_dir)
+
+
+def _stop_maa_log_maintenance() -> None:
+    global _maa_log_maintenance_dir, _maa_log_maintenance_thread
+    with _maa_log_maintenance_lock:
+        thread = _maa_log_maintenance_thread
+        _maa_log_maintenance_stop.set()
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=1)
+    with _maa_log_maintenance_lock:
+        _maa_log_maintenance_dir = None
+        _maa_log_maintenance_thread = None
 
 
 def _cleanup_maa_debug_dir(runtime_dir: Path | None = None) -> None:
@@ -244,6 +307,7 @@ def _cleanup_maa_debug_dir(runtime_dir: Path | None = None) -> None:
 
 
 def cleanup_maa_runtime_artifacts(runtime_dir: Path | None = None) -> None:
+    _stop_maa_log_maintenance()
     target_runtime_dir = runtime_dir or get_runtime_dir()
     maa_log_file = resolve_maa_log_file(target_runtime_dir)
     _stabilize_maa_log_file(maa_log_file, target_runtime_dir)

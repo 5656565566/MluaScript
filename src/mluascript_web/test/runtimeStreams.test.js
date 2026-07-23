@@ -78,6 +78,28 @@ test('runtime logs are bounded and stop closes the owned stream', () => {
   assert.equal(harness.sources[0].closed, true)
 })
 
+test('runtime logs keep the latest 200 entries by default', () => {
+  const harness = createHarness()
+  let logs = []
+  const streams = createRuntimeStreams({
+    ...harness,
+    isAuthenticated: () => true,
+    getSelectedTaskId: () => '',
+    getLogParams: () => ({}),
+    onLogsSnapshot: (items) => { logs = items },
+    onLog: (item, limit) => { logs = [...logs, item].slice(-limit) },
+    onTaskLogs: () => {},
+    onTaskOutput: () => {},
+  })
+
+  streams.startLogs()
+  harness.sources[0].emit('snapshot', { items: Array.from({ length: 201 }, (_, index) => index) })
+
+  assert.equal(logs.length, 200)
+  assert.equal(logs[0], 1)
+  assert.equal(logs.at(-1), 200)
+})
+
 test('switching selected tasks closes both previous task streams', () => {
   const harness = createHarness()
   let selectedTaskId = 'a'
