@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import threading
-
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
 from textual.widgets import Footer
 
-from mluascript.shared.logging import configure_logging, register_tui_sink
+from mluascript.shared.config import config as config_registry
+from mluascript.shared.config.models import WebServerConfig
+from mluascript.shared.logging import configure_logging, logger, register_tui_sink
 
 from .components.page import TopTabBar
 from .screens.device import DevicesScreen
@@ -18,6 +19,7 @@ from .screens.logview import LogPage
 from .screens.run import RunScreen
 from .screens.template_run import TemplateRunScreen
 from .screens.web import WebScreen
+from .web_service import WebServiceController
 
 
 class TuiApp(App[None]):
@@ -57,9 +59,31 @@ class TuiApp(App[None]):
         Binding("ctrl+q", "help_force_quit", show=False),
     ]
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.web_service = WebServiceController(self)
+
     def on_mount(self) -> None:
         self.active_tab = "home"
         configure_logging(stdout=False)
+        # Web 服务由 Textual Worker 托管，等待应用挂载完成后再按配置启动。
+        self.call_later(self._schedule_configured_web_server_start)
+
+    def _schedule_configured_web_server_start(self) -> None:
+        web_config = config_registry.get(WebServerConfig)
+        if not web_config.enabled:
+            logger.info("MluaScript Web 自动启动已关闭")
+            return
+        self._start_configured_web_server(web_config.host, web_config.port)
+
+    @work(group="configured-web-server", exclusive=True, exit_on_error=False)
+    async def _start_configured_web_server(self, host: str, port: int) -> None:
+        try:
+            url = await self.web_service.start(host, port)
+            logger.info(f"已按配置自动启动 MluaScript Web: {url}")
+        except Exception as exc:
+            # Web 启动失败不应阻止已显示的 TUI，用户仍可在 Web 页面修正地址后重试。
+            logger.error(f"按配置启动 MluaScript Web 失败: {exc}")
 
     def compose(self) -> ComposeResult:
         yield TopTabBar()
@@ -78,6 +102,9 @@ class TuiApp(App[None]):
         if hasattr(self, "active_tab") and self.active_tab:
             try:
                 current_widget = self.query_one(f"#{self.active_tab}")
+                set_active = getattr(current_widget, "set_active", None)
+                if callable(set_active):
+                    set_active(False)
                 current_widget.add_class("hidden")
             except Exception:
                 pass
@@ -85,6 +112,9 @@ class TuiApp(App[None]):
         try:
             new_widget = self.query_one(f"#{mode}")
             new_widget.remove_class("hidden")
+            set_active = getattr(new_widget, "set_active", None)
+            if callable(set_active):
+                set_active(True)
         except Exception:
             pass
 
@@ -141,13 +171,14 @@ class TuiApp(App[None]):
     def _stop_background_tasks(self) -> int:
         return 0
 
-    def _force_quit(self) -> None:
+    async def _force_quit(self) -> None:
         stopped_units = self._stop_background_tasks()
         self.notify(
             f"已请求停止任务并关闭 MluaScript Web 控制台，共处理 {stopped_units} 个运行单元，正在退出",
             title="强制退出",
             severity="warning",
         )
+        await self.web_service.stop(timeout=1.0, cancel_on_timeout=True)
         self.exit()
 
     async def action_quit(self) -> None:
@@ -160,6 +191,7 @@ class TuiApp(App[None]):
             return
 
         self.notify("正在安全退出 MluaScript", title="退出程序")
+        await self.web_service.stop(timeout=5.0, cancel_on_timeout=True)
         self.exit()
 
     def action_help_quit(self) -> None:
@@ -191,7 +223,7 @@ class TuiApp(App[None]):
         if (now - self.force_exit_flag) < 3:
             self.force_exit_flag = 0
             self.exit_flag = 0
-            self._force_quit()
+            self.call_next(self._force_quit)
             return
 
         self.exit_flag = 0

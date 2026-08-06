@@ -24,12 +24,17 @@ class WebServerConfig(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    enabled: bool = Field(default=False, description="程序启动时自动启动 MluaScript Web 服务")
     host: str = Field(default="127.0.0.1", description="MluaScript Web 监听地址")
     port: int = Field(default=18080, ge=1, le=65535, description="MluaScript Web 监听端口")
     username: str = Field(default="admin", description="MluaScript Web 登录用户名")
     password: str = Field(default_factory=_random_config_secret, min_length=1, description="MluaScript Web 登录密码")
     session_secret: str = Field(default_factory=_random_config_secret, min_length=16, description="MluaScript Web 登录会话签名密钥")
     session_max_age_seconds: int = Field(default=604800, ge=60, description="MluaScript Web 登录有效期 秒")
+    project_roots: list[str] = Field(
+        default_factory=lambda: ["./.mluascript_web/projects"],
+        description="Web 项目管理允许访问的项目根目录列表",
+    )
 
 
 
@@ -39,7 +44,7 @@ class GlobalConfig(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    log_level: str = Field(default="DEBUG", description="日志级别")
+    log_level: str = Field(default="INFO", description="日志级别")
     log_dir: str = Field(default="./logs/app.log", description="宿主程序日志文件路径")
     stop_key: str = Field(default="F9", description="停止所有任务快捷键")
     start_key: str = Field(default="F10", description="启动上一个任务快捷键")

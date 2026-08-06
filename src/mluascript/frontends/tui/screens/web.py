@@ -2,21 +2,10 @@
 
 from __future__ import annotations
 
-import time
-import webbrowser
-
 from textual import work
 from textual.app import ComposeResult
-from textual.containers import Container, Vertical, Horizontal
+from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Button, Input, Static
-
-from mluascript.frontends.web import (
-    get_mluascript_web_host_port,
-    get_mluascript_web_url,
-    is_mluascript_web_running,
-    run_mluascript_web_server_in_thread,
-    stop_mluascript_web_server,
-)
 
 
 class WebScreen(Container):
@@ -67,7 +56,7 @@ class WebScreen(Container):
     """
 
     def compose(self) -> ComposeResult:
-        host, port = get_mluascript_web_host_port()
+        host, port = self.app.web_service.configured_host_port()
         with Vertical(id="web-shell"):
             with Vertical(id="web-card"):
                 yield Static("", id="web-status")
@@ -81,7 +70,16 @@ class WebScreen(Container):
                     yield Button("打开 Web", id="btn-open-web", classes="web-btn")
 
     def on_mount(self) -> None:
-        self._refresh_status()
+        self._web_operation_active = False
+        self._status_refresh_pending = False
+        self._unsubscribe_web_service = self.app.web_service.subscribe(self._on_web_service_status_changed)
+
+    def on_unmount(self) -> None:
+        self._unsubscribe_web_service()
+
+    def _on_web_service_status_changed(self, _status: str) -> None:
+        if self.is_attached:
+            self._refresh_status()
 
     def _get_runtime_host_port(self) -> tuple[str, int] | None:
         host_text = self.query_one("#web-host-input", Input).value.strip()
@@ -98,52 +96,111 @@ class WebScreen(Container):
         return host, port
 
     def _refresh_status(self) -> None:
-        default_host, default_port = get_mluascript_web_host_port()
+        controller = self.app.web_service
+        default_host, default_port = controller.configured_host_port()
         status = self.query_one("#web-status", Static)
         url_widget = self.query_one("#web-url", Static)
-        if is_mluascript_web_running():
+        toggle_button = self.query_one("#btn-toggle-web", Button)
+        runtime_status = controller.status
+        if runtime_status == "running":
             status.update("[green]Web 运行中[/green]")
-            url_widget.update(f"[cyan]{get_mluascript_web_url()}[/cyan]")
+            url_widget.update(f"[cyan]{controller.url}[/cyan]")
+            toggle_button.label = "关闭 Web"
+        elif runtime_status == "starting":
+            status.update("[cyan]Web 正在启动[/cyan]")
+            url_widget.update(f"[dim]{controller.url}[/dim]")
+            toggle_button.label = "取消启动"
+        elif runtime_status == "stopping":
+            status.update("[yellow]Web 正在关闭[/yellow]")
+            url_widget.update(f"[dim]{controller.url}[/dim]")
+            toggle_button.label = "正在关闭"
+            if not self._status_refresh_pending:
+                self._status_refresh_pending = True
+                self.set_timer(0.25, self._refresh_stopping_status)
+        elif runtime_status == "failed":
+            status.update("[red]Web 启动失败[/red]")
+            url_widget.update(f"[red]{controller.last_error or '未知错误'}[/red]")
+            toggle_button.label = "重试启动"
         else:
             status.update("[yellow]Web 未启动[/yellow]")
             url_widget.update(f"[dim]默认地址: http://{default_host}:{default_port}[/dim]")
+            toggle_button.label = "启动 Web"
+        toggle_button.disabled = self._web_operation_active or runtime_status == "stopping"
+        self.query_one("#btn-open-web", Button).disabled = self._web_operation_active or runtime_status == "stopping"
+
+    def _refresh_stopping_status(self) -> None:
+        self._status_refresh_pending = False
+        self._refresh_status()
+
+    def _set_operation_active(self, active: bool) -> None:
+        self._web_operation_active = active
+        self._refresh_status()
 
     def action_refresh_status(self) -> None:
         self._refresh_status()
         self.notify("已刷新 Web 状态")
 
-    @work(thread=True)
     def action_toggle_web(self) -> None:
+        if self._web_operation_active:
+            return
+        controller = self.app.web_service
+        if controller.status == "stopping":
+            self.notify("Web 正在关闭，请稍候", title="Web", severity="warning")
+            return
+        if controller.status in {"running", "starting"}:
+            self._set_operation_active(True)
+            self._toggle_web_worker(None, None, True)
+            return
         runtime = self._get_runtime_host_port()
         if runtime is None:
             return
-        host, port = runtime
-        if is_mluascript_web_running():
-            ok = stop_mluascript_web_server()
-            if ok:
-                self.app.call_from_thread(self.notify, "Web 已关闭", title="Web")
-            else:
-                self.app.call_from_thread(self.notify, "Web 关闭超时", title="Web", severity="error")
-            self.app.call_from_thread(self._refresh_status)
-            return
+        self._set_operation_active(True)
+        self._toggle_web_worker(runtime[0], runtime[1], False)
 
-        url = run_mluascript_web_server_in_thread(host, port)
-        self.app.call_from_thread(self.notify, f"Web 已启动: {url}", title="MluaScript Web")
-        self.app.call_from_thread(self._refresh_status)
+    @work(group="web-screen-operation", exclusive=True, exit_on_error=False)
+    async def _toggle_web_worker(self, host: str | None, port: int | None, should_stop: bool) -> None:
+        try:
+            if should_stop:
+                stopped = await self.app.web_service.stop()
+                if stopped:
+                    self.notify("Web 已关闭", title="Web")
+                else:
+                    self.notify("Web 关闭超时", title="Web", severity="error")
+                return
 
-    @work(thread=True)
+            url = await self.app.web_service.start(host, port)
+            self.notify(f"Web 已启动: {url}", title="MluaScript Web")
+        except Exception as exc:
+            self.notify(str(exc), title="Web 操作失败", severity="error")
+        finally:
+            self._set_operation_active(False)
+
     def action_open_web(self) -> None:
-        runtime = self._get_runtime_host_port()
-        if runtime is None:
+        if self._web_operation_active:
             return
-        host, port = runtime
-        if not is_mluascript_web_running():
-            run_mluascript_web_server_in_thread(host, port)
-            time.sleep(0.5)
-        url = get_mluascript_web_url()
-        webbrowser.open(url)
-        self.app.call_from_thread(self.notify, f"已打开 {url}", title="Web")
-        self.app.call_from_thread(self._refresh_status)
+        controller = self.app.web_service
+        if controller.status == "stopping":
+            self.notify("Web 正在关闭，请稍候", title="Web", severity="warning")
+            return
+        host: str | None = None
+        port: int | None = None
+        if controller.status != "running":
+            runtime = self._get_runtime_host_port()
+            if runtime is None:
+                return
+            host, port = runtime
+        self._set_operation_active(True)
+        self._open_web_worker(host, port)
+
+    @work(group="web-screen-operation", exclusive=True, exit_on_error=False)
+    async def _open_web_worker(self, host: str | None, port: int | None) -> None:
+        try:
+            url = await self.app.web_service.open(host, port)
+            self.notify(f"已打开 {url}", title="Web")
+        except Exception as exc:
+            self.notify(str(exc), title="打开 Web 失败", severity="error")
+        finally:
+            self._set_operation_active(False)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-toggle-web":

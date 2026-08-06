@@ -94,7 +94,13 @@ class FakeWorkspaceManager(WorkspaceManager):
     def __init__(self) -> None:
         super().__init__(Path("."))
 
-    def build_script_run_locator(self, script_path: str, *, allow_missing: bool = False) -> ScriptRunLocator:
+    def build_script_run_locator(
+        self,
+        script_path: str,
+        *,
+        allow_missing: bool = False,
+        source_overrides: dict[str, str] | None = None,
+    ) -> ScriptRunLocator:
         _ = allow_missing
         project = WorkspaceProject(
             project_id="demo",
@@ -118,6 +124,7 @@ class FakeWorkspaceManager(WorkspaceManager):
             script_dir="project/demo",
             working_dir=project.root_dir,
             resource_dir=project.resource_dir,
+            source_overrides=source_overrides or {},
         )
 
     def build_pipeline_run_locator(self, project_path: str) -> PipelineRunLocator:
@@ -266,6 +273,23 @@ def test_script_start_registers_context_and_locator_metadata() -> None:
     assert task.summary["target"] == "ADB:1"
     assert context.host_task is not None
     assert context.host_task.is_done is False
+
+
+def test_script_start_uses_explicit_task_title() -> None:
+    state_manager = StateManager()
+    facade = FakeIntegrationFacade(script_runtime_factory=lambda: FakeRuntime(result="done"))
+    use_case = make_script_use_case(state_manager, facade=facade, thread_manager=DeferredRuntimeThreadManager())
+
+    task_id = use_case.start_script(
+        "runtime/tasks/package-demo/scripts/main.lua",
+        "return 1",
+        "LOCAL",
+        title=".mluascript_web/builds/demo.mlspkg",
+    )
+
+    task = state_manager.get_task(task_id)
+    assert task is not None
+    assert task.title == ".mluascript_web/builds/demo.mlspkg"
 
 
 def test_script_background_success_updates_status_and_cleans_context() -> None:

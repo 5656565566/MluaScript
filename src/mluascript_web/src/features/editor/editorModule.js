@@ -49,6 +49,39 @@ export function createEditorActions({
     }
   }
 
+  async function saveLuaDocument({ rebuildFromBlockly }) {
+    const actions = getActions()
+    if (rebuildFromBlockly) {
+      actions.rebuildLuaCode()
+      assertBlocklyLuaReady()
+    }
+    const currentFilename = state.filename.value || 'script.lua'
+    const previousPath = state.savePath.value || ''
+    const savedPathFilename = previousPath ? previousPath.split('/').pop() : ''
+    const hasPersistedFile = state.luaSaveMode.value === 'update' && Boolean(previousPath)
+    const filenameChanged = hasPersistedFile && savedPathFilename && savedPathFilename !== currentFilename
+    const effectivePath = filenameChanged
+      ? replaceFilenameInPath(previousPath, currentFilename)
+      : (previousPath || currentFilename)
+    const payload = {
+      path: effectivePath,
+      content: state.luaCode.value,
+      expectedMtime: state.luaDocumentMtime.value,
+      previousPath: filenameChanged ? previousPath : null,
+    }
+    // “保存”是幂等写入：已有文件更新，文件被外部删除后则由后端重建。
+    const data = await editorApi.updateLuaFile(payload)
+
+    state.filename.value = data.filename || state.filename.value
+    state.savePath.value = data.path || state.savePath.value
+    state.luaDocumentMtime.value = data.mtime ?? null
+    state.luaSaveMode.value = 'update'
+    await actions.syncWorkspace()
+    await actions.loadLuaFiles()
+    actions.setStatus(`Lua 文件已保存到 ${state.savePath.value}`, 'success')
+    return data
+  }
+
   return {
     invalidateEditorOperations() {
       blocklySaves.beginDocumentTransition()
@@ -72,42 +105,19 @@ export function createEditorActions({
     },
 
     async syncWorkspace() {
-      if (!state.blocklyEditor.value || !state.editorSessionHydrated.value) return
-      getActions().rebuildLuaCode()
+      if (!state.editorSessionHydrated.value) return
+      if (state.blocklyEditor.value) getActions().rebuildLuaCode()
       const payload = buildEditorSessionPayload(state)
       await editorApi.syncSession(payload)
       rememberEditorSessionSnapshot(state, payload)
     },
 
     async saveLuaScript() {
-      const actions = getActions()
-      actions.rebuildLuaCode()
-      assertBlocklyLuaReady()
-      const currentFilename = state.filename.value || 'script.lua'
-      const previousPath = state.savePath.value || ''
-      const savedPathFilename = previousPath ? previousPath.split('/').pop() : ''
-      const hasPersistedFile = state.luaSaveMode.value === 'update' && Boolean(previousPath)
-      const filenameChanged = hasPersistedFile && savedPathFilename && savedPathFilename !== currentFilename
-      const effectivePath = filenameChanged
-        ? replaceFilenameInPath(previousPath, currentFilename)
-        : (previousPath || currentFilename)
-      const payload = {
-        path: effectivePath,
-        content: state.luaCode.value,
-        expectedMtime: state.luaDocumentMtime.value,
-        previousPath: filenameChanged ? previousPath : null,
-      }
-      // “保存”是幂等写入：已有文件更新，文件被外部删除后则由后端重建。
-      // 显式新建文件仍使用 createLuaFile，并继续保留重名保护。
-      const data = await editorApi.updateLuaFile(payload)
+      return await saveLuaDocument({ rebuildFromBlockly: true })
+    },
 
-      state.filename.value = data.filename || state.filename.value
-      state.savePath.value = data.path || state.savePath.value
-      state.luaDocumentMtime.value = data.mtime ?? null
-      state.luaSaveMode.value = 'update'
-      await actions.syncWorkspace()
-      await actions.loadLuaFiles()
-      actions.setStatus(`Lua 文件已保存到 ${state.savePath.value}`, 'success')
+    async saveStandaloneLuaFile() {
+      return await saveLuaDocument({ rebuildFromBlockly: false })
     },
 
     async runCurrentBlocklyLua() {
@@ -169,24 +179,27 @@ export function createEditorActions({
           state.blocklySaveMode.value = data.saveMode || 'update'
           state.lastSavedBlocklyXml.value = state.blocklyXml.value
           actions.setStatus(`已加载 Blockly XML: ${state.blocklyFilename.value}`)
-          if (!state.blocklyEditor.value) return
-          await applyBlocklyXmlToEditor()
-          actions.rebuildLuaCode()
+          if (state.blocklyEditor.value) {
+            await applyBlocklyXmlToEditor()
+            actions.rebuildLuaCode()
+          }
           await actions.syncWorkspace()
         },
       })
     },
 
-    async createNewBlocklyWorkspace(path) {
+    async createNewBlocklyWorkspace(path, { blank = false } = {}) {
       const actions = getActions()
       const documentGeneration = blocklySaves.beginDocumentTransition()
-      const xml = state.blocklyXml.value || '<xml xmlns="https://developers.google.com/blockly/xml"></xml>'
+      const emptyXml = '<xml xmlns="https://developers.google.com/blockly/xml"></xml>'
+      const xml = blank ? emptyXml : (state.blocklyXml.value || emptyXml)
       return await blocklySaves.enqueue({
         documentGeneration,
         execute: async () => await editorApi.createBlocklyFile({ path, xml }),
         commit: async (data) => {
           state.blocklyFilename.value = data.filename || state.blocklyFilename.value
           state.blocklySavePath.value = data.path || state.blocklySavePath.value
+          state.blocklyXml.value = xml
           state.blocklyDocumentMtime.value = data.mtime ?? null
           state.blocklySaveMode.value = 'update'
           state.lastSavedBlocklyXml.value = xml
@@ -227,6 +240,21 @@ export function createEditorActions({
       state.luaDocumentMtime.value = data.mtime ?? null
       state.luaSaveMode.value = 'update'
       await actions.syncWorkspace()
+      actions.setStatus(`已创建 Lua 文件: ${state.filename.value}`, 'success')
+      return data
+    },
+
+    async createStandaloneLuaFile(path) {
+      const actions = getActions()
+      const content = "-- MluaScript Lua script\n\n"
+      const data = await editorApi.createLuaFile({ path, content })
+      state.filename.value = data.filename || path
+      state.savePath.value = data.path || path
+      state.luaCode.value = data.content ?? content
+      state.luaDocumentMtime.value = data.mtime ?? null
+      state.luaSaveMode.value = 'update'
+      await actions.syncWorkspace()
+      await actions.loadLuaFiles()
       actions.setStatus(`已创建 Lua 文件: ${state.filename.value}`, 'success')
       return data
     },

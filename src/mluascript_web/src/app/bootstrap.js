@@ -1,4 +1,5 @@
 import { applyEditorSession } from '../features/editor/editorSession'
+import { applyWebPreferences } from './preferences'
 
 export function applyBootstrapState({
   state,
@@ -12,6 +13,7 @@ export function applyBootstrapState({
   const deviceOverview = bootstrap.deviceOverview || {}
   const taskSummary = bootstrap.taskSummary || {}
   const editorHydration = applyEditorSession(state, editorSession)
+  applyWebPreferences(state, bootstrap.preferences || {})
 
   state.tasks.value = Array.isArray(taskSummary.items) ? taskSummary.items : []
   state.blocklyFiles.value = Array.isArray(bootstrap.blocklyFiles) ? bootstrap.blocklyFiles : []

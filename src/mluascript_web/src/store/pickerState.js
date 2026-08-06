@@ -1,5 +1,6 @@
 import { computed, defineAsyncComponent, ref } from 'vue'
 import { closeModal, getModalInstance, openModal, updateModalProps, updateModalOptions } from '../modalStore'
+import { mergePickerHandlers } from './pickerConfig.js'
 
 const PickerModalShell = defineAsyncComponent(() => import('../components/PickerModalShell.vue'))
 
@@ -165,14 +166,12 @@ export const pickerActions = {
 
   update(patch = {}) {
     if (!pickerStateRef.value.modalId) return
+    const handlers = mergePickerHandlers(pickerStateRef.value.handlers, patch)
     const merged = normalizePickerConfig({
       ...pickerStateRef.value,
       ...patch,
-      onSelect: patch.onSelect ?? pickerStateRef.value.handlers.onSelect,
-      onConfirm: patch.onConfirm ?? pickerStateRef.value.handlers.onConfirm,
-      onCreate: patch.onCreate ?? pickerStateRef.value.handlers.onCreate,
-      onManage: patch.onManage ?? pickerStateRef.value.handlers.onManage,
-      onOpenFieldPicker: patch.onOpenFieldPicker ?? pickerStateRef.value.handlers.onOpenFieldPicker,
+      // `null` 表示显式清除上一步的处理器，不能与“未提供该字段”混为一谈。
+      ...handlers,
     })
     pickerStateRef.value = {
       ...pickerStateRef.value,

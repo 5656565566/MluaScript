@@ -1,3 +1,6 @@
+import { buildWebPreferences, COLOR_THEMES, DEFAULT_CUSTOM_COLOR } from './preferences.js'
+import { applyThemeVariables, isDarkTheme } from './theme.js'
+
 export function createAppActions({
   state,
   authApi,
@@ -11,6 +14,9 @@ export function createAppActions({
   getActions,
 }) {
   let lifecycleGeneration = 0
+  let preferenceSaveTimer = null
+  let preferenceSaveQueue = Promise.resolve()
+  let lastSavedPreferences = ''
 
   function markFeatureUnavailable(name) {
     throw new Error(`${name} 暂未实现`)
@@ -25,6 +31,8 @@ export function createAppActions({
     actions.stopSelectedTaskStreams()
     actions.stopAllDevicePreviewLoops()
     void actions.closeTemplateEditor?.()
+    actions.closeProject?.()
+    if (state.projects) state.projects.value = []
     state.editorSessionHydrated.value = false
     state.lastSessionBlocklyXml.value = ''
     state.lastSessionBlocklyFilename.value = ''
@@ -48,6 +56,10 @@ export function createAppActions({
 
     const actions = getActions()
     const editorHydration = applyBootstrap(bootstrap)
+    if (state.preferencesHydrated?.value) {
+      lastSavedPreferences = JSON.stringify(buildWebPreferences(state))
+    }
+    actions.applyTheme()
     state.logs.value = logData.items || []
     state.luaFiles.value = luaFilesPayload.items || []
     state.tasks.value = tasksPayload.items || []
@@ -90,6 +102,11 @@ export function createAppActions({
     },
 
     async logout() {
+      try {
+        await getActions().flushPreferences()
+      } catch (error) {
+        console.error(error)
+      }
       lifecycleGeneration += 1
       clearAuthenticatedState()
       await authApi.logout()
@@ -146,13 +163,56 @@ export function createAppActions({
       markFeatureUnavailable('MaaFramework 初始化')
     },
 
-    applyTheme(themeValue = state.appTheme.value) {
-      state.appTheme.value = themeValue
-      const isDark = themeValue === 'dark' || (themeValue === 'system' && browserWindow.matchMedia('(prefers-color-scheme: dark)').matches)
+    applyTheme(
+      themeValue = state.appTheme.value,
+      colorTheme = state.colorTheme?.value || 'classic',
+      customColor = state.customColor?.value || DEFAULT_CUSTOM_COLOR,
+    ) {
+      const resolvedTheme = ['system', 'light', 'dark'].includes(themeValue)
+        ? themeValue
+        : state.appTheme.value
+      const resolvedColorTheme = COLOR_THEMES.includes(colorTheme)
+        ? colorTheme
+        : COLOR_THEMES.includes(state.colorTheme?.value)
+          ? state.colorTheme.value
+          : 'classic'
+      state.appTheme.value = resolvedTheme
+      if (state.colorTheme) state.colorTheme.value = resolvedColorTheme
+      if (state.customColor) state.customColor.value = customColor
+      const isDark = isDarkTheme(resolvedTheme, browserWindow)
       browserDocument.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light')
       browserDocument.documentElement.style.colorScheme = isDark ? 'dark' : 'light'
+      applyThemeVariables(browserDocument, resolvedColorTheme, customColor, isDark)
       if (state.blocklyEditor.value) updateBlocklyTheme(state.blocklyEditor.value, isDark)
       browserWindow.dispatchEvent(new Event('resize'))
+    },
+
+    schedulePreferencesSave() {
+      if (!state.preferencesHydrated?.value || !state.authenticated.value) return
+      if (preferenceSaveTimer) browserWindow.clearTimeout?.(preferenceSaveTimer)
+      preferenceSaveTimer = browserWindow.setTimeout(() => {
+        preferenceSaveTimer = null
+        void getActions().flushPreferences().catch((error) => {
+          getActions().setStatus(error?.message || '保存 Web 偏好设置失败', 'error')
+        })
+      }, 300)
+    },
+
+    flushPreferences() {
+      if (preferenceSaveTimer) {
+        browserWindow.clearTimeout?.(preferenceSaveTimer)
+        preferenceSaveTimer = null
+      }
+      if (!state.preferencesHydrated?.value || !state.authenticated.value) return preferenceSaveQueue
+      const payload = buildWebPreferences(state)
+      const serialized = JSON.stringify(payload)
+      if (serialized === lastSavedPreferences) return preferenceSaveQueue
+      const save = async () => {
+        await systemApi.putPreferences(payload)
+        lastSavedPreferences = serialized
+      }
+      preferenceSaveQueue = preferenceSaveQueue.then(save, save)
+      return preferenceSaveQueue
     },
 
     async saveCroppedImage(filename, imageBase64) {

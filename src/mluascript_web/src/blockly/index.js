@@ -6,22 +6,29 @@ import { buildToolbox } from './toolbox'
 import { getIsDarkTheme } from './utils'
 import { findVariableItemByValue } from './variableContext'
 import { applyBlocklyZhCnLocale } from './locale'
+import { getBlocklyUiPalette } from '../app/theme'
+import { collectBlocklyDiagnostics, workspaceToLua } from './generator'
+import { migrateLegacyProjectModuleCallXml, restoreProjectModuleCallState } from './projectModuleCall.js'
+import { restoreSerializedPickerLabel } from './pickerBlockState.js'
 import {
   deleteWorkspaceVariableById,
   getWorkspaceVariableById,
   getWorkspaceVariablesOfType,
 } from './workspaceVariables'
 
+const blocklyDarkUi = getBlocklyUiPalette(true)
+const blocklyLightUi = getBlocklyUiPalette(false)
+
 const BLOCKLY_DARK_THEME = Blockly.Theme.defineTheme('maa-dark', {
   name: 'maa-dark',
   // Blockly 13 不再导出 Dark 主题 继承 Classic 以保留内置积木和分类配色
   base: Blockly.Themes.Classic,
   componentStyles: {
-    workspaceBackgroundColour: '#1a1a1a',
-    toolboxBackgroundColour: '#181818',
-    toolboxForegroundColour: '#d6deeb',
-    flyoutBackgroundColour: '#181818',
-    flyoutForegroundColour: '#d6deeb',
+    workspaceBackgroundColour: blocklyDarkUi.workspace,
+    toolboxBackgroundColour: blocklyDarkUi.toolbox,
+    toolboxForegroundColour: blocklyDarkUi.text,
+    flyoutBackgroundColour: blocklyDarkUi.toolbox,
+    flyoutForegroundColour: blocklyDarkUi.text,
     flyoutOpacity: 1,
   },
 })
@@ -30,11 +37,11 @@ const BLOCKLY_LIGHT_THEME = Blockly.Theme.defineTheme('maa-light', {
   name: 'maa-light',
   base: Blockly.Themes.Classic,
   componentStyles: {
-    workspaceBackgroundColour: '#ffffff',
-    toolboxBackgroundColour: '#ffffff',
-    toolboxForegroundColour: '#222222',
-    flyoutBackgroundColour: '#ffffff',
-    flyoutForegroundColour: '#222222',
+    workspaceBackgroundColour: blocklyLightUi.workspace,
+    toolboxBackgroundColour: blocklyLightUi.toolbox,
+    toolboxForegroundColour: blocklyLightUi.text,
+    flyoutBackgroundColour: blocklyLightUi.toolbox,
+    flyoutForegroundColour: blocklyLightUi.text,
     flyoutOpacity: 1,
   },
 })
@@ -105,7 +112,8 @@ function buildFilteredVariableFlyout(workspace) {
   return xmlItems
 }
 
-export { collectBlocklyDiagnostics, workspaceToXml, workspaceToLua } from './generator'
+export { collectBlocklyDiagnostics, workspaceToLua }
+export { workspaceToXml } from './generator'
 
 applyBlocklyZhCnLocale(Blockly, ZhHans)
 
@@ -150,6 +158,7 @@ function applyBlocklyDomTheme(workspace) {
   if (!workspace) return
 
   const isDark = getIsDarkTheme()
+  const ui = getBlocklyUiPalette(isDark)
   const injectionDiv = workspace.getInjectionDiv?.()
   const svg = workspace.getParentSvg()
   const toolboxDiv = injectionDiv?.querySelector('.blocklyToolbox, .blocklyToolboxDiv')
@@ -161,13 +170,13 @@ function applyBlocklyDomTheme(workspace) {
   }
 
   if (injectionDiv) {
-    injectionDiv.style.background = isDark ? '#1a1a1a' : '#ffffff'
+    injectionDiv.style.background = ui.workspace
     injectionDiv.style.border = 'none'
     injectionDiv.style.outline = 'none'
   }
 
   if (svg) {
-    svg.style.backgroundColor = isDark ? '#1a1a1a' : '#ffffff'
+    svg.style.backgroundColor = ui.workspace
     svg.style.border = 'none'
     svg.style.outline = 'none'
   }
@@ -183,19 +192,19 @@ function applyBlocklyDomTheme(workspace) {
     }
     const lines = gridPattern.querySelectorAll('line, path')
     for (const line of lines) {
-      line.setAttribute('stroke', isDark ? '#414b5a' : '#cccccc')
+      line.setAttribute('stroke', ui.grid)
       line.setAttribute('stroke-width', '2')
       line.setAttribute('stroke-opacity', isDark ? '0.8' : '1')
       line.setAttribute('fill', 'none')
     }
   } else if (mainBackground) {
-    mainBackground.setAttribute('fill', isDark ? '#1a1a1a' : '#ffffff')
-    mainBackground.style.fill = isDark ? '#1a1a1a' : '#ffffff'
+    mainBackground.setAttribute('fill', ui.workspace)
+    mainBackground.style.fill = ui.workspace
   }
 
   if (toolboxDiv) {
-    toolboxDiv.style.background = isDark ? '#181818' : '#ffffff'
-    toolboxDiv.style.color = isDark ? '#d6deeb' : '#222222'
+    toolboxDiv.style.background = ui.toolbox
+    toolboxDiv.style.color = ui.text
   }
 }
 
@@ -307,7 +316,7 @@ export function createBlocklyWorkspace(element, initialXml = '') {
     grid: {
       spacing: 24,
       length: 3,
-      colour: isDark ? '#313846' : '#cccccc',
+      colour: getBlocklyUiPalette(isDark).initialGrid,
       snap: true,
     },
     zoom: {
@@ -339,6 +348,7 @@ export function createBlocklyWorkspace(element, initialXml = '') {
     try {
       Blockly.Events.disable()
       const dom = Blockly.utils.xml.textToDom(initialXml)
+      migrateLegacyProjectModuleCallXml(dom)
       Blockly.Xml.domToWorkspace(dom, workspace)
     } catch (error) {
       console.warn('恢复 Blockly 工作区失败', error)
@@ -346,6 +356,15 @@ export function createBlocklyWorkspace(element, initialXml = '') {
       Blockly.Events.enable()
     }
     patchCoreVariableBlocks(workspace)
+  }
+
+  // 兼容尚未带 mutation 的旧保存文件：字段加载完成后补建标签和动态参数输入。
+  for (const block of workspace.getAllBlocks(false)) {
+    if (block.type === 'lua_project_module_call_stmt' || block.type === 'lua_project_module_call_expr') {
+      restoreProjectModuleCallState(block)
+    } else {
+      restoreSerializedPickerLabel(block)
+    }
   }
 
   let previousArgumentIds = getProcedureArgumentVariableIds(workspace)
@@ -401,11 +420,35 @@ export function createBlocklyWorkspace(element, initialXml = '') {
   return workspace
 }
 
+export function compileBlocklyXml(xmlText) {
+  // 打包多 XML 时使用无界面工作区，生成规则与当前编辑器保持一致。
+  ensureBlocklyBlocks()
+  const workspace = new Blockly.Workspace()
+  try {
+    patchCoreVariableBlocks(workspace)
+    const dom = Blockly.utils.xml.textToDom(String(xmlText || ''))
+    Blockly.Xml.domToWorkspace(dom, workspace)
+    patchCoreVariableBlocks(workspace)
+    refreshFunctionReferenceDropdown(workspace)
+    const diagnostics = collectBlocklyDiagnostics(workspace)
+    if (diagnostics.length) return { code: '', diagnostics, stale: true }
+    return { code: workspaceToLua(workspace), diagnostics: [], stale: false }
+  } catch (error) {
+    return {
+      code: '',
+      diagnostics: [{ severity: 'error', message: error?.message || 'Lua 生成失败' }],
+      stale: true,
+    }
+  } finally {
+    workspace.dispose()
+  }
+}
+
 export function updateBlocklyTheme(workspace, isDark) {
   if (!workspace) return
   workspace.setTheme(getBlocklyTheme(isDark))
   if (workspace.options?.grid) {
-    workspace.options.grid.colour = isDark ? '#414b5a' : '#cccccc'
+    workspace.options.grid.colour = getBlocklyUiPalette(isDark).grid
   }
   window.requestAnimationFrame(() => {
     Blockly.svgResize(workspace)

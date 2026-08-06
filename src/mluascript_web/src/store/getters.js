@@ -34,7 +34,6 @@ export function createGetters(state) {
       return state.taskDetailById.value[state.selectedTaskId.value] || null
     }),
     logCount: computed(() => state.logs.value.length),
-    editorPaneClass: computed(() => `editor-pane layout-${state.editorLayout.value}`),
   }
 }
 

@@ -1,6 +1,7 @@
 import * as Blockly from 'blockly'
 import { actions, getters, state } from '../store'
 import { pickerActions } from '../store/pickerState'
+import { replaceCallableBlock } from './blockReplacement.js'
 
 function asNonEmptyString(value) {
   const normalized = String(value || '').trim()
@@ -55,6 +56,38 @@ const SHARED_VAR_BLOCK_TYPES = new Set([
 const BUILTIN_SHARED_VARIABLES = []
 
 export function getLuaScriptPickerItems(stripLuaExt = false) {
+  const projectType = state.currentProject?.value?.project_type || ''
+  if (projectType === 'lua-package' || projectType === 'blockly-package') {
+    const modules = new Map()
+    for (const item of state.projectTree?.value || []) {
+      if (item?.kind !== 'file') continue
+      const path = asNonEmptyString(item.path).replaceAll('\\', '/')
+      let moduleKey = ''
+      let kind = ''
+      let virtualPath = ''
+      if (path.startsWith('scripts/') && path.toLowerCase().endsWith('.lua')) {
+        moduleKey = path.slice('scripts/'.length, -'.lua'.length)
+        virtualPath = path
+        if (moduleKey.toLowerCase().endsWith('/init')) moduleKey = moduleKey.slice(0, -'/init'.length)
+        kind = 'Lua'
+      } else if (projectType === 'blockly-package' && path.startsWith('blockly/') && path.toLowerCase().endsWith('.xml')) {
+        const relativeModulePath = path.slice('blockly/'.length, -'.xml'.length)
+        moduleKey = relativeModulePath
+        virtualPath = `scripts/${relativeModulePath}.lua`
+        if (moduleKey.toLowerCase().endsWith('/init')) moduleKey = moduleKey.slice(0, -'/init'.length)
+        kind = 'Blockly'
+      }
+      if (!moduleKey) continue
+      modules.set(moduleKey.toLowerCase(), {
+        label: moduleKey,
+        value: stripLuaExt ? moduleKey : virtualPath,
+        description: path,
+        group: kind,
+      })
+    }
+    return normalizePickerItems([...modules.values()])
+  }
+
   const source = getters.luaScriptFiles?.value || getters.luaScripts?.value || []
   return normalizePickerItems(source.map((script) => {
     const rawName = asNonEmptyString(script?.name || script?.filename || script?.path)
@@ -75,6 +108,10 @@ export function getWorkspaceProcedureDefinitions(workspace = Blockly.getMainWork
     if (block.type !== 'procedures_defreturn' && block.type !== 'procedures_defnoreturn') continue
     const name = (block.getFieldValue('NAME') || '').trim()
     if (!name) continue
+    const procedureInfo = typeof block.getProcedureDef === 'function' ? block.getProcedureDef() : null
+    const params = Array.isArray(procedureInfo?.[1])
+      ? procedureInfo[1].map(item => String(item || '').trim()).filter(Boolean)
+      : []
     seenIds.add(block.id)
     definitions.push({
       id: block.id,
@@ -83,6 +120,8 @@ export function getWorkspaceProcedureDefinitions(workspace = Blockly.getMainWork
       value: name,
       type: block.type,
       hasReturn: block.type === 'procedures_defreturn',
+      params,
+      returnKind: block.type === 'procedures_defreturn' ? 'value' : 'none',
       block,
     })
   }
@@ -90,7 +129,102 @@ export function getWorkspaceProcedureDefinitions(workspace = Blockly.getMainWork
 }
 
 export function getWorkspaceFunctionPickerItems() {
-  return getWorkspaceProcedureDefinitions().map(({ label, value }) => ({ label, value }))
+  return getWorkspaceProcedureDefinitions().map(({ label, value, params, hasReturn }) => ({
+    label,
+    value,
+    description: `${label}(${params.join(', ')}) · ${hasReturn ? '有返回值' : '无返回值'}`,
+    group: hasReturn ? '返回值' : '过程',
+    params,
+    hasReturn,
+  }))
+}
+
+export function getProjectModulePickerItems() {
+  return normalizePickerItems((state.projectModules?.value || []).map(module => ({
+    label: module.key,
+    value: module.key,
+    description: `${module.source} · ${(module.exports || []).length} 个静态导出`,
+    group: module.kind === 'blockly' ? 'Blockly' : 'Lua',
+  })))
+}
+
+export function getProjectModuleExportItems(moduleKey) {
+  const module = (state.projectModules?.value || []).find(item => item.key === moduleKey)
+  return normalizePickerItems((module?.exports || []).map(item => ({
+    ...item,
+    label: item.name,
+    value: item.name,
+    description: `${item.name}(${(item.params || []).join(', ')}) · ${item.hasReturn === true ? '有返回值' : item.hasReturn === false ? '无返回值' : '返回值未知'}`,
+    group: item.hasReturn === true ? '返回值' : item.hasReturn === false ? '过程' : '未知',
+  })))
+}
+
+export function getProjectModuleFunctionPickerItems({ requireReturn = false } = {}) {
+  const items = []
+  for (const module of state.projectModules?.value || []) {
+    for (const exported of module.exports || []) {
+      if (requireReturn && exported.hasReturn === false) continue
+      items.push({
+        label: exported.name,
+        value: `${module.key}\u0000${exported.name}`,
+        moduleKey: module.key,
+        name: exported.name,
+        params: Array.isArray(exported.params) ? exported.params : [],
+        hasReturn: exported.hasReturn,
+      })
+    }
+  }
+  return normalizePickerItems(items)
+}
+
+export function createProjectModuleFunctionPickerConfig({
+  currentModuleKey = '',
+  currentFunctionName = '',
+  requireReturn = false,
+  onSelect,
+} = {}) {
+  const openModuleStep = () => {
+    pickerActions.update({
+      title: '选择项目模块',
+      subtitle: '先选择模块，再选择它显式导出的函数',
+      items: getProjectModulePickerItems(),
+      currentValue: currentModuleKey || null,
+      emptyText: '当前项目没有可搜索的 Blockly 或 Lua 模块',
+      manageButtonText: '管理',
+      onManage: null,
+      onSelect: openFunctionStep,
+    })
+    return false
+  }
+
+  const openFunctionStep = (moduleKey) => {
+    const module = (state.projectModules?.value || []).find(item => item.key === moduleKey)
+    const items = getProjectModuleExportItems(moduleKey)
+      .filter(item => !requireReturn || item.hasReturn !== false)
+    pickerActions.update({
+      title: `选择 ${moduleKey} 的导出函数`,
+      subtitle: module?.source || moduleKey,
+      items,
+      currentValue: moduleKey === currentModuleKey ? currentFunctionName || null : null,
+      emptyText: requireReturn ? '该模块没有可静态识别的返回值函数' : '该模块没有可静态识别的导出函数',
+      manageButtonText: '返回模块',
+      onManage: openModuleStep,
+      onSelect: (functionName) => {
+        const selected = items.find(item => item.value === functionName)
+        if (selected && typeof onSelect === 'function') return onSelect(moduleKey, selected)
+      },
+    })
+    return false
+  }
+
+  return {
+    title: '选择项目模块',
+    subtitle: '先选择模块，再选择它显式导出的函数',
+    items: getProjectModulePickerItems(),
+    currentValue: currentModuleKey || null,
+    emptyText: '当前项目没有可搜索的 Blockly 或 Lua 模块',
+    onSelect: openFunctionStep,
+  }
 }
 
 export function getProcedureDefinitionByName(name, workspace = Blockly.getMainWorkspace()) {
@@ -114,42 +248,17 @@ export function applyProcedureSelectionToPickerBlock(block, procedureName) {
   if (!definition) return false
 
   const targetType = definition.hasReturn ? 'procedures_callreturn' : 'procedures_callnoreturn'
-  const newBlock = workspace.newBlock(targetType)
-  const xy = typeof block.getRelativeToSurfaceXY === 'function'
-    ? block.getRelativeToSurfaceXY()
-    : { x: block.x || 0, y: block.y || 0 }
-  const parentConnection = block.outputConnection?.targetConnection
-    || block.previousConnection?.targetConnection
-  const nextConnection = block.nextConnection?.targetConnection || null
-
-  newBlock.initSvg?.()
-  newBlock.setFieldValue(procedureName, 'NAME')
-  const procedureDefinitionBlock = definition.block
-  const procedureInfo = procedureDefinitionBlock?.getProcedureDef?.()
-  if (procedureInfo?.[1]) {
-    const paramIds = Array.isArray(procedureDefinitionBlock.paramIds_)
-      ? procedureDefinitionBlock.paramIds_
-      : procedureInfo[1].map((_, index) => `${newBlock.id}_arg_${index}`)
-    newBlock.setProcedureParameters_(procedureInfo[1], paramIds)
-  }
-  newBlock.render?.()
-  newBlock.moveBy(xy.x, xy.y)
-
-  if (parentConnection) {
-    if (newBlock.outputConnection) {
-      parentConnection.connect(newBlock.outputConnection)
-    } else if (newBlock.previousConnection) {
-      parentConnection.connect(newBlock.previousConnection)
+  return Boolean(replaceCallableBlock(block, targetType, (newBlock) => {
+    newBlock.setFieldValue(procedureName, 'NAME')
+    const procedureDefinitionBlock = definition.block
+    const procedureInfo = procedureDefinitionBlock?.getProcedureDef?.()
+    if (procedureInfo?.[1]) {
+      const paramIds = Array.isArray(procedureDefinitionBlock.paramIds_)
+        ? procedureDefinitionBlock.paramIds_
+        : procedureInfo[1].map((_, index) => `${newBlock.id}_arg_${index}`)
+      newBlock.setProcedureParameters_(procedureInfo[1], paramIds)
     }
-  }
-
-  if (nextConnection && newBlock.nextConnection) {
-    newBlock.nextConnection.connect(nextConnection)
-  }
-
-  block.dispose(false)
-  newBlock.select?.()
-  return true
+  }))
 }
 
 export function openProcedurePickerForBlock(block) {

@@ -181,7 +181,25 @@ _tui_sink = TuiLogSink()
 class LoguruHandler(logging.Handler):
     """logging 与 loguru 之间的桥梁 将 logging 日志转发到 loguru"""
 
+    def __init__(
+        self,
+        *,
+        source: str = "system",
+        channel: str = "default",
+        session_label: str = "system",
+        on_record: Callable[[logging.LogRecord], None] | None = None,
+    ) -> None:
+        super().__init__()
+        self._extra = {
+            "source": source,
+            "channel": channel,
+            "session_label": session_label,
+        }
+        self._on_record = on_record
+
     def emit(self, record: logging.LogRecord) -> None:
+        if self._on_record is not None:
+            self._on_record(record)
         try:
             level = logger.level(record.levelname).name
         except ValueError:
@@ -192,7 +210,7 @@ class LoguruHandler(logging.Handler):
             frame = frame.f_back
             depth += 1
 
-        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+        logger.bind(**self._extra).opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
 
 
@@ -215,6 +233,12 @@ def runtime_filter(record: "Record") -> bool:
 
 def runtime_output_filter(record: "Record") -> bool:
     return str(record["extra"].get("channel", "")) == "runtime.output"
+
+
+def tui_filter(record: "Record") -> bool:
+    """TUI 实时控件不消费高频 Web 访问日志；缓冲区和文件仍完整保留。"""
+
+    return default_filter(record) and str(record["extra"].get("channel", "")) != "web.access"
 
 
 
@@ -321,7 +345,7 @@ def disable_stdout_sink() -> None:
 def register_tui_sink(target: RichLog | None = None) -> None:
     ensure_buffer_sink()
     _tui_sink.bind_target(target)
-    register_sink("tui", _tui_sink, colorize=True)
+    register_sink("tui", _tui_sink, colorize=True, filter=tui_filter)
 
 
 

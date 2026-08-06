@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { DEFAULT_CUSTOM_COLOR } from './preferences.js'
 
 export function createUiState() {
   return {
@@ -8,16 +9,20 @@ export function createUiState() {
     authenticated: ref(false),
     currentUser: ref(''),
     statusText: ref('准备就绪'),
-    activeView: ref('blockly'),
-    editorLayout: ref('split'),
+    activeView: ref('editor'),
     showScreenshot: ref(false),
     showScreenshotFullscreen: ref(false),
     screenshotPosition: ref({ x: 0, y: 64 }),
     appTheme: ref('system'),
+    colorTheme: ref('classic'),
+    customColor: ref(DEFAULT_CUSTOM_COLOR),
+    preferencesHydrated: ref(false),
     sidebarCollapsed: ref(false),
     logOrigin: ref('runtime'),
     autoRefresh: ref(true),
-    autoSaveBlockly: ref(true),
+    autoSaveFiles: ref(true),
+    projectTreeVisible: ref(true),
+    projectTreeWidth: ref(240),
     runLogsSelectedDevice: ref('all'),
     runLogsSelectedLevel: ref('all'),
     runLogsAutoScroll: ref(true),

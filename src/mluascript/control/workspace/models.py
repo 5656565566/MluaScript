@@ -23,6 +23,7 @@ class WorkspaceProject(BaseModel):
     resource_dir: str
     templates_dir: str | None = None
     config_file: str | None = None
+    module_search_locked: bool = False
 
 
 class ScriptAsset(BaseModel):
@@ -57,6 +58,8 @@ class ScriptRunLocator(BaseModel):
     resource_dir: str
     templates_dir: str | None = None
     resources: list[ResourceAsset] = Field(default_factory=list)
+    source_overrides: dict[str, str] = Field(default_factory=dict)
+    cleanup_dir: str | None = None
 
 
 class PipelineRunLocator(BaseModel):
@@ -68,6 +71,7 @@ class PipelineRunLocator(BaseModel):
     resource_dir: str
     templates_dir: str | None = None
     resources: list[ResourceAsset] = Field(default_factory=list)
+    cleanup_dir: str | None = None
 
 
 def path_to_str(path: Path) -> str:

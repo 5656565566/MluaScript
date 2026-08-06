@@ -1,4 +1,5 @@
 from .logger import (
+    LoguruHandler,
     logger,
     bind_tui_log_target,
     build_log_lines,
@@ -23,6 +24,7 @@ from .logger import (
 )
 
 __all__ = [
+    "LoguruHandler",
     "bind_tui_log_target",
     "build_log_lines",
     "build_runtime_output_lines",

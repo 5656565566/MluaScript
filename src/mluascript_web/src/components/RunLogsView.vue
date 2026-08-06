@@ -167,7 +167,7 @@ function getLevelType(level) {
 }
 
 .run-log-list :deep(.n-empty__description), .run-log-list :deep(.n-empty__icon) {
-  color: #858585;
+  color: var(--color-text-muted);
 }
 
 .run-log-item {
@@ -182,15 +182,15 @@ function getLevelType(level) {
 }
 
 .run-log-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-border-light);
 }
 
 .run-log-item.level-error {
-  background: rgba(244, 135, 113, 0.1);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
 }
 
 .run-log-item.level-warning {
-  background: rgba(204, 167, 0, 0.1);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
 }
 
 .run-log-meta {
@@ -198,7 +198,7 @@ function getLevelType(level) {
 }
 
 .run-log-time {
-  color: #858585;
+  color: var(--color-text-muted);
   font-size: 13px;
   font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
 }
@@ -212,15 +212,15 @@ function getLevelType(level) {
 }
 
 .text-info {
-  color: #3b8eea;
+  color: var(--color-info);
 }
 
 .text-error {
-  color: #f48771;
+  color: var(--color-danger);
 }
 
 .text-warning {
-  color: #cca700;
+  color: var(--color-warning);
 }
 
 .run-log-message {
@@ -236,11 +236,11 @@ function getLevelType(level) {
 }
 
 .run-log-item.level-error .run-log-message {
-  color: #f48771;
+  color: var(--color-danger);
 }
 
 .run-log-item.level-warning .run-log-message {
-  color: #cca700;
+  color: var(--color-warning);
 }
 
 .run-log-actions {

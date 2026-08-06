@@ -183,8 +183,8 @@ function boxStyle() {
 
 .crop-overlay-box {
   position: absolute;
-  border: 2px dashed #0ea5e9;
-  background: rgba(14, 165, 233, 0.2);
+  border: 2px dashed var(--color-info);
+  background: color-mix(in srgb, var(--color-info) 20%, transparent);
   pointer-events: none;
 }
 </style>

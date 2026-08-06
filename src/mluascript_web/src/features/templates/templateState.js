@@ -9,6 +9,8 @@ export function createTemplateState() {
     templateScriptType: ref(''),
     templateTaskFormData: ref({}),
     templateWorkflowFormData: ref({}),
+    templateReadme: ref(null),
+    templateRunnerTab: ref(''),
     selectedTaskKey: ref(''),
     selectedWorkflowKey: ref(''),
     selectedWorkflowStepKey: ref(''),

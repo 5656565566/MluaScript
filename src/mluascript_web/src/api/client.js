@@ -40,9 +40,12 @@ async function parseResponseBody(response) {
 }
 
 function createApiError(response, data) {
-  const detail = typeof data === 'object' && data !== null
+  const rawDetail = typeof data === 'object' && data !== null
     ? (data.detail || data.message || data.error)
     : data
+  const detail = rawDetail && typeof rawDetail === 'object'
+    ? (rawDetail.message || JSON.stringify(rawDetail))
+    : rawDetail
   return new ApiError(detail || `HTTP ${response.status}`, {
     status: response.status,
     code: typeof data === 'object' && data !== null ? (data.code || '') : '',
@@ -148,6 +151,19 @@ export async function apiPut(path, payload, options = {}) {
   return await request(path, {
     ...options,
     method: 'PUT',
+    headers,
+    body: JSON.stringify(payload ?? {}),
+  })
+}
+
+export async function apiPatch(path, payload, options = {}) {
+  const headers = {
+    ...(options.headers || {}),
+    'Content-Type': (options.headers || {})['Content-Type'] || 'application/json',
+  }
+  return await request(path, {
+    ...options,
+    method: 'PATCH',
     headers,
     body: JSON.stringify(payload ?? {}),
   })

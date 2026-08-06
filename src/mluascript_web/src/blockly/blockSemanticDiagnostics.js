@@ -1,3 +1,5 @@
+import { getProjectModuleRegistry } from '../features/projects/projectModuleRegistry.js'
+
 function getDefinedProcedureNames(workspace) {
   if (!workspace || typeof workspace.getTopBlocks !== 'function') return new Set()
   return new Set(
@@ -64,6 +66,30 @@ export function getBlockSemanticDiagnostic(block, workspace = block?.workspace) 
   if (block.type === 'lua_require_module_stmt' || block.type === 'lua_require_module_expr') {
     return block.getFieldValue?.('MODULE_VALUE') ? '' : '请选择要导入的模块'
   }
+  if (block.type === 'lua_project_module_call_stmt' || block.type === 'lua_project_module_call_expr') {
+    const moduleKey = block.getFieldValue?.('MODULE_VALUE') || ''
+    const functionName = block.getFieldValue?.('FUNCTION_VALUE') || ''
+    if (!moduleKey || !functionName) return '请选择项目模块导出函数'
+    const module = getProjectModuleRegistry().find(item => item.key === moduleKey)
+    if (!module) return `项目模块不存在：${moduleKey}`
+    const exported = (module.exports || []).find(item => item.name === functionName)
+    if (!exported) return `模块 ${moduleKey} 不再导出函数：${functionName}`
+    let savedParams = []
+    try { savedParams = JSON.parse(block.getFieldValue?.('PARAM_VALUES') || '[]') } catch {}
+    const currentParams = Array.isArray(exported.params) ? exported.params : []
+    if (JSON.stringify(savedParams) !== JSON.stringify(currentParams)) {
+      return `函数参数已变化，请重新选择：${moduleKey}.${functionName}`
+    }
+    const savedCallStyle = block.getFieldValue?.('CALL_STYLE') || 'function'
+    const currentCallStyle = exported.callStyle === 'method' ? 'method' : 'function'
+    if (savedCallStyle !== currentCallStyle) {
+      return `函数调用方式已变化，请重新选择：${moduleKey}.${functionName}`
+    }
+    if (block.type === 'lua_project_module_call_expr' && exported.hasReturn === false) {
+      return `函数没有返回值：${moduleKey}.${functionName}`
+    }
+    return ''
+  }
   if (block.type === 'lua_dofile_stmt') {
     return block.getFieldValue?.('FILE_VALUE') ? '' : '请选择要执行的 Lua 文件'
   }
@@ -72,9 +98,10 @@ export function getBlockSemanticDiagnostic(block, workspace = block?.workspace) 
   return ''
 }
 
-export function attachBlockSemanticWarning(block) {
+export function attachBlockSemanticWarning(block, beforeRefresh = null) {
   const refresh = () => {
     if (!block.workspace || block.isInFlyout || block.isDisposed?.()) return
+    if (typeof beforeRefresh === 'function') beforeRefresh()
     block.setWarningText(getBlockSemanticDiagnostic(block))
   }
   block.setOnChange(refresh)

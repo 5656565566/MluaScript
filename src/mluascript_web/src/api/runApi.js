@@ -4,6 +4,9 @@ export const runApi = {
   async runLua(payload) {
     return await apiPost('/api/run/lua', payload)
   },
+  async runArtifact(payload) {
+    return await apiPost('/api/run/artifact', payload)
+  },
   async stopTask(taskId, kind = 'script') {
     return await apiPost(`/api/run/${kind}/${encodeURIComponent(taskId)}/stop`, {})
   },

@@ -2,6 +2,7 @@
 import { onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { NConfigProvider, NGlobalStyle, NMessageProvider, NDialogProvider, NNotificationProvider, NLayout, NLayoutContent, darkTheme } from 'naive-ui'
 import { state, actions } from './store'
+import { buildNaiveThemeOverrides, isDarkTheme } from './app/theme'
 import { setupNaiveDiscreteApi } from './naiveDiscreteApi'
 import Sidebar from './components/Sidebar.vue'
 import DevicePreviewFloat from './components/DevicePreviewFloat.vue'
@@ -32,10 +33,17 @@ function activateAuthenticatedApp() {
 }
 
 const theme = computed(() => {
-  const themeValue = state.appTheme.value
-  const isDark = themeValue === 'dark' || (themeValue === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  const isDark = isDarkTheme(state.appTheme.value, window)
   return isDark ? darkTheme : null
 })
+
+const themeOverrides = computed(() => (
+  buildNaiveThemeOverrides(
+    state.colorTheme.value,
+    state.customColor.value,
+    isDarkTheme(state.appTheme.value, window),
+  )
+))
 
 onMounted(async () => {
   setupNaiveDiscreteApi()
@@ -57,7 +65,24 @@ onBeforeUnmount(() => {
   actions.stopRuntimeStreams()
   actions.stopSelectedTaskStreams()
   actions.stopAllDevicePreviewLoops()
+  void actions.flushPreferences()
 })
+
+watch(() => [
+  state.appTheme.value,
+  state.colorTheme.value,
+  state.customColor.value,
+  state.autoSaveFiles.value,
+  state.projectTreeVisible.value,
+  state.projectTreeWidth.value,
+  state.autoRefresh.value,
+  state.taskManagerActiveTab.value,
+  state.runLogsAutoScroll.value,
+  state.runLogsSelectedLevel.value,
+  state.logOrigin.value,
+  state.sidebarCollapsed.value,
+  state.activeView.value,
+], () => actions.schedulePreferencesSave())
 
 watch(() => state.authenticated.value, (authenticated) => {
   if (!authenticated) {
@@ -71,10 +96,16 @@ watch(() => state.authenticated.value, (authenticated) => {
   }
   activateAuthenticatedApp()
 })
+
+watch(() => state.activeView.value, (activeView, previousView) => {
+  if (activeView === 'editor' && previousView !== 'editor') {
+    state.sidebarCollapsed.value = true
+  }
+}, { immediate: true })
 </script>
 
 <template>
-  <n-config-provider :theme="theme" style="width: 100%; height: 100%;">
+  <n-config-provider :theme="theme" :theme-overrides="themeOverrides" style="width: 100%; height: 100%;">
     <n-global-style />
     <n-message-provider>
       <n-dialog-provider>
@@ -141,7 +172,7 @@ watch(() => state.authenticated.value, (authenticated) => {
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--color-overlay);
     z-index: 99;
     display: none;
   }

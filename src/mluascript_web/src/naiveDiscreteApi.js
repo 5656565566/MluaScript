@@ -1,11 +1,11 @@
 import { createDiscreteApi, darkTheme } from 'naive-ui'
 import { computed } from 'vue'
 import { state } from './store'
+import { buildNaiveThemeOverrides, isDarkTheme } from './app/theme'
 
 export function setupNaiveDiscreteApi() {
   const themeRef = computed(() => {
-    const themeValue = state.appTheme.value
-    const isDark = themeValue === 'dark' || (themeValue === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+    const isDark = isDarkTheme(state.appTheme.value, window)
     return isDark ? darkTheme : null
   })
 
@@ -13,7 +13,12 @@ export function setupNaiveDiscreteApi() {
     ['message', 'dialog', 'notification', 'loadingBar'],
     {
       configProviderProps: computed(() => ({
-        theme: themeRef.value
+        theme: themeRef.value,
+        themeOverrides: buildNaiveThemeOverrides(
+          state.colorTheme.value,
+          state.customColor.value,
+          isDarkTheme(state.appTheme.value, window),
+        ),
       }))
     }
   )

@@ -82,6 +82,14 @@ export function createRuntimeActions({ state, systemApi, runApi, runtimeStreams,
       return state.taskOutputById.value[taskId]
     },
 
+    async openArtifactReadme(artifactId) {
+      if (!artifactId) throw new Error('缺少构建产物 ID')
+      const payload = await systemApi.getArtifactReadme(artifactId)
+      state.artifactReadme.value = payload.data || payload
+      state.taskManagerActiveTab.value = 'artifact-readme'
+      return state.artifactReadme.value
+    },
+
     stopRuntimeStreams() {
       runtimeStreams.stopLogs()
     },
@@ -147,6 +155,14 @@ export function createRuntimeActions({ state, systemApi, runApi, runtimeStreams,
 
     async runLuaTask(sessionLabel = state.selectedSession.value, luaCode = state.luaCode.value, scriptPath = state.savePath.value || state.filename.value) {
       return await getActions().runLuaScript(scriptPath, luaCode, sessionLabel)
+    },
+
+    async runArtifact(artifactId, sessionLabel = state.selectedSession.value) {
+      if (!artifactId) throw new Error('缺少构建产物 ID')
+      const data = await runApi.runArtifact({ artifactId, sessionLabel: sessionLabel || null })
+      await getActions().refreshTaskManagerData()
+      getActions().setStatus(data.message || '构建产物已启动', 'success')
+      return data
     },
 
     async stopLuaTask(taskId) {

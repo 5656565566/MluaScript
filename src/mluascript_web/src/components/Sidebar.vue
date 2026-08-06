@@ -1,14 +1,15 @@
 <script setup>
 import { h, computed } from 'vue'
-import { NLayoutSider, NMenu, NCheckbox, NSelect, NButton, NIcon, NDivider, NTooltip } from 'naive-ui'
+import { NLayoutSider, NMenu, NSelect, NButton, NIcon, NDivider, NTooltip, NColorPicker, NText } from 'naive-ui'
 import { state, actions } from '../store'
+import { COLOR_THEME_OPTIONS, colorThemePreview, isDarkTheme } from '../app/theme'
 
 function renderIcon(svgContent) {
   return () => h(NIcon, null, { default: () => h('svg', { xmlns: 'http://www.w3.org/2000/svg', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'strokeWidth': '2', 'strokeLinecap': 'round', 'strokeLinejoin': 'round', innerHTML: svgContent }) })
 }
 
 const menuOptions = [
-  { label: 'Blockly', key: 'blockly', icon: renderIcon('<path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/>') },
+  { label: '编辑器', key: 'editor', icon: renderIcon('<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 9h18"/><path d="M9 13h6"/><path d="M9 16h4"/>') },
   { label: '任务管理', key: 'task-manager', icon: renderIcon('<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>') },
   { label: '模板执行', key: 'template-runner', icon: renderIcon('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><rect width="8" height="8" x="13" y="3" rx="1"/><path d="M7 12h10"/><path d="M7 16h7"/>') },
   { label: '设备连接', key: 'device', icon: renderIcon('<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>') },
@@ -21,6 +22,28 @@ const themeOptions = [
   { label: '亮色主题', value: 'light' },
   { label: '暗色主题', value: 'dark' }
 ]
+
+function applyAppTheme(value) {
+  actions.applyTheme(value, state.colorTheme.value, state.customColor.value)
+}
+
+function applyColorTheme(value) {
+  actions.applyTheme(state.appTheme.value, value, state.customColor.value)
+}
+
+function applyCustomColor(value) {
+  actions.applyTheme(state.appTheme.value, 'custom', value)
+}
+
+function paletteStyle(value) {
+  return {
+    background: colorThemePreview(
+      value,
+      state.customColor.value,
+      isDarkTheme(state.appTheme.value, window),
+    ),
+  }
+}
 
 const collapsed = computed({
   get: () => state.sidebarCollapsed.value,
@@ -65,15 +88,6 @@ const activeKey = computed({
 
       <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px; flex-shrink: 0;">
         <template v-if="!collapsed">
-          <n-checkbox v-model:checked="state.autoRefresh.value">自动刷新</n-checkbox>
-          <n-checkbox v-model:checked="state.autoSaveBlockly.value">自动保存 Blockly</n-checkbox>
-          <n-button quaternary @click="state.showScreenshot.value = !state.showScreenshot.value" style="justify-content: flex-start; padding: 0 8px;">
-            <template #icon>
-              <n-icon><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19V7a2 2 0 0 0-2-2h-4l-2-2H9L7 5H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2z"/><circle cx="12" cy="13" r="4"/></svg></n-icon>
-            </template>
-            {{ state.showScreenshot.value ? '关闭截图预览' : '打开截图预览' }}
-          </n-button>
-          
           <n-button quaternary @click="actions.toggleFullscreen()" style="justify-content: flex-start; padding: 0 8px;">
             <template #icon>
               <n-icon><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg></n-icon>
@@ -88,7 +102,35 @@ const activeKey = computed({
             退出登录
           </n-button>
 
-          <n-select v-model:value="state.appTheme.value" :options="themeOptions" @update:value="actions.applyTheme" size="small" />
+          <n-select v-model:value="state.appTheme.value" :options="themeOptions" @update:value="applyAppTheme" size="small" />
+          <div class="color-theme-picker">
+            <n-text depth="3" class="color-theme-label">颜色主题</n-text>
+            <div class="color-theme-grid" role="radiogroup" aria-label="颜色主题">
+              <button
+                v-for="option in COLOR_THEME_OPTIONS"
+                :key="option.value"
+                type="button"
+                class="color-theme-option"
+                :class="{ active: state.colorTheme.value === option.value }"
+                :title="option.label"
+                :aria-label="option.label"
+                :aria-checked="state.colorTheme.value === option.value"
+                role="radio"
+                @click="applyColorTheme(option.value)"
+              >
+                <span class="color-theme-swatch" :style="paletteStyle(option.value)" />
+                <span>{{ option.label }}</span>
+              </button>
+            </div>
+            <n-color-picker
+              v-if="state.colorTheme.value === 'custom'"
+              :value="state.customColor.value"
+              :show-alpha="false"
+              :modes="['hex']"
+              size="small"
+              @update:value="applyCustomColor"
+            />
+          </div>
         </template>
         <template v-else>
           <n-tooltip placement="right" trigger="hover">
@@ -111,6 +153,53 @@ const activeKey = computed({
 .sidebar {
   height: 100vh;
   z-index: 100;
+}
+.color-theme-picker {
+  display: grid;
+  gap: 8px;
+}
+
+.color-theme-label {
+  font-size: 12px;
+}
+
+.color-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.color-theme-option {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 5px 3px 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.color-theme-option:hover {
+  border-color: var(--color-primary);
+  color: var(--color-text-primary);
+}
+
+.color-theme-option.active {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-focus-ring);
+  color: var(--color-text-primary);
+}
+
+.color-theme-swatch {
+  width: 100%;
+  height: 14px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px var(--color-border-light);
 }
 @media (max-width: 768px) {
   .sidebar {

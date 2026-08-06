@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+import yaml
 
 from mluascript.frontends.web import app as web_app
 from mluascript.control.state.models import TaskLogEntryView, TaskLogsView, TaskOutputView
@@ -82,6 +85,34 @@ class FakeRunFacade(FakeControlFacade):
         return "run-1"
 
 
+class FakeArtifactRunFacade(FakeRunFacade):
+    def __init__(self) -> None:
+        super().__init__()
+        self.artifact_run_calls: list[dict[str, object]] = []
+
+    def run_script(
+        self,
+        script_path: str,
+        code: str,
+        target: str,
+        *,
+        title: str | None = None,
+        summary: dict[str, object] | None = None,
+        cleanup_dir: str | None = None,
+    ) -> str:
+        self.artifact_run_calls.append(
+            {
+                "script_path": script_path,
+                "code": code,
+                "target": target,
+                "title": title,
+                "summary": summary,
+                "cleanup_dir": cleanup_dir,
+            }
+        )
+        return "artifact-run-1"
+
+
 def _test_web_config() -> SimpleNamespace:
     return SimpleNamespace(
         username="admin",
@@ -97,6 +128,29 @@ def _authenticated_client(monkeypatch, tmp_path: Path) -> TestClient:
     response = client.post("/api/auth/login", json={"username": "admin", "password": "secret-pass"})
     assert response.status_code == 200
     return client
+
+
+def _write_readme_package(path: Path) -> None:
+    manifest = {
+        "schema": "mluascript.package/v1",
+        "type": "lua-package",
+        "package": {"id": "com.example.readme", "name": "说明包", "version": "1.0.0"},
+        "entrypoints": {"main": {"script": "scripts/main.lua"}},
+    }
+    files = {
+        "mluascript.yaml": yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True).encode("utf-8"),
+        "README.md": "# 说明包\n\n安全说明。\n".encode("utf-8"),
+        "scripts/main.lua": b"return true\n",
+    }
+    checksums = "".join(
+        f"{hashlib.sha256(content).hexdigest()}  {relative}\n"
+        for relative, content in sorted(files.items())
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("META-INF/files.sha256", checksums)
+        for relative, content in files.items():
+            archive.writestr(relative, content)
 
 
 def _read_stream_chunks(response, count: int) -> list[str]:
@@ -203,6 +257,61 @@ def test_run_lua_allows_unsaved_editor_code(monkeypatch, tmp_path: Path) -> None
     assert facade.run_script_calls == [
         (".mluascript_web/lua/untitled.lua", "return 42", "LOCAL")
     ]
+
+
+def test_task_resources_use_builds_instead_of_project_sources(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / ".mluascript_web" / "projects" / "demo" / "scripts" / "main.lua"
+    build = tmp_path / ".mluascript_web" / "builds" / "demo" / "1111111111111111" / "demo.lua"
+    source.parent.mkdir(parents=True)
+    build.parent.mkdir(parents=True)
+    source.write_text("return 'source'", encoding="utf-8")
+    build.write_text("return 'build'", encoding="utf-8")
+    client = _authenticated_client(monkeypatch, tmp_path)
+
+    response = client.get("/api/system/scripts")
+
+    assert response.status_code == 200
+    items = response.json()["data"]["items"]
+    build_items = [item for item in items if item["source"] == "build"]
+    assert len(build_items) == 1
+    assert build_items[0]["path"].endswith(".mluascript_web/builds/demo/1111111111111111/demo.lua")
+    assert not any(".mluascript_web/projects" in item["path"].replace("\\", "/") for item in items)
+
+
+def test_run_build_artifact_delegates_with_artifact_summary(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    build = tmp_path / ".mluascript_web" / "builds" / "demo" / "1111111111111111" / "demo.lua"
+    build.parent.mkdir(parents=True)
+    build.write_text("return 42", encoding="utf-8")
+    facade = FakeArtifactRunFacade()
+    monkeypatch.setattr(web_app, "get_control_facade", lambda: facade)
+    client = _authenticated_client(monkeypatch, tmp_path)
+    items = client.get("/api/system/scripts").json()["data"]["items"]
+    artifact_id = next(item["id"] for item in items if item["source"] == "build")
+
+    response = client.post("/api/run/artifact", json={"artifactId": artifact_id})
+
+    assert response.status_code == 200
+    assert response.json()["data"]["taskId"] == "artifact-run-1"
+    assert facade.artifact_run_calls[0]["code"] == "return 42"
+    assert facade.artifact_run_calls[0]["target"] == "LOCAL"
+    assert facade.artifact_run_calls[0]["title"].endswith(".mluascript_web/builds/demo/1111111111111111/demo.lua")
+    assert facade.artifact_run_calls[0]["summary"]["artifact_id"] == artifact_id
+
+
+def test_artifact_readme_route_returns_verified_markdown(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    _write_readme_package(tmp_path / ".mluascript_web" / "builds" / "readme.mlspkg")
+    client = _authenticated_client(monkeypatch, tmp_path)
+    items = client.get("/api/system/scripts").json()["data"]["items"]
+    artifact = next(item for item in items if item["kind"] == "package")
+
+    response = client.get(f"/api/system/scripts/{artifact['id']}/readme")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["name"] == "说明包"
+    assert response.json()["data"]["markdown"] == "# 说明包\n\n安全说明。\n"
 
 
 def test_task_detail_views_pass_task_kind_to_stop_action() -> None:

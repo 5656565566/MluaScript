@@ -4,6 +4,7 @@ import { NButton, NInput, NText, NCard, NTag, NEmpty } from 'naive-ui'
 
 const props = defineProps({
   title: { type: String, default: '选择' },
+  subtitle: { type: String, default: '' },
   items: { type: Array, default: () => [] },
   selectedValue: { type: [String, Number, Boolean, null], default: null },
   selectedValues: { type: Array, default: () => [] },
@@ -41,6 +42,7 @@ function isSelected(itemValue) {
 
 <template>
   <div class="picker-list-content">
+    <n-text v-if="subtitle" depth="3" class="picker-list-context">{{ subtitle }}</n-text>
     <n-input
       :value="searchQuery"
       :placeholder="`搜索${title}...`"

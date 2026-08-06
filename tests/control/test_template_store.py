@@ -16,6 +16,21 @@ from mluascript.control.workspace.template_models import SavedFlowConfig, Templa
 from mluascript.control.workspace.template_normalizer import normalize_template_meta
 
 
+def test_template_store_reads_project_root_readme(tmp_path: Path) -> None:
+    script = tmp_path / "scripts" / "main.lua"
+    script.parent.mkdir(parents=True)
+    script.write_text("return true\n", encoding="utf-8")
+    (tmp_path / "mluascript.yaml").write_text("type: lua-package\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# 项目说明\n", encoding="utf-8")
+
+    readme = TemplateStore(WorkspaceManager(tmp_path)).get_readme("scripts/main.lua")
+
+    assert readme is not None
+    assert readme["name"] == "README.md"
+    assert readme["path"] == "README.md"
+    assert readme["markdown"].splitlines() == ["# 项目说明"]
+
+
 def test_template_store_loads_meta_and_builds_runtime_payload_with_conditional_fields(tmp_path: Path) -> None:
     script = tmp_path / "demo.lua"
     script.write_text(
@@ -65,6 +80,25 @@ def test_template_store_loads_meta_and_builds_runtime_payload_with_conditional_f
     saved.flows["main"].stepArgs["s1"]["useDrug"] = True
     runtime = store.build_runtime_payload(meta, saved, flow_key="main")
     assert runtime["steps"][0]["args"]["drugCount"] == 9
+
+
+def test_template_store_builds_single_task_runtime_script(tmp_path: Path) -> None:
+    meta = normalize_template_meta(
+        {
+            "vars": {"value": {"tp": "int", "def": 1}},
+            "tasks": [{"k": "single", "fn": "run_single", "args": ["value"]}],
+        }
+    )
+    saved = TemplateSavedConfig(scriptPath="demo.lua", tasks={"single": {"params": {"value": 7}}})
+
+    runtime_script = TemplateStore(WorkspaceManager(tmp_path)).build_task_runtime_script(
+        meta,
+        saved,
+        task_key="single",
+    )
+
+    assert "run_single" in runtime_script
+    assert "value = 7" in runtime_script
 
 
 def test_template_store_scopes_parameter_relations_to_each_task(tmp_path: Path) -> None:

@@ -17,6 +17,10 @@ from textual.widgets import Button, ContentSwitcher, Input, Static, Switch, Tabb
 from mluascript.control.facade import get_control_facade
 from mluascript.control.state.models import TaskListItemView
 from mluascript.control.workspace import SavedFlowConfig, TemplateCondition, TemplateSavedConfig, TemplateVarDef, get_template_store, is_condition_active
+from mluascript.frontends.tui.components.pagination import paginate_items
+
+
+TEMPLATE_TASK_PAGE_SIZE = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +116,27 @@ class TemplateRunScreen(Container):
         height: 3;
         width: 100%;
         margin: 0 0 1 0;
+    }
+
+    #template-step-pagination {
+        height: auto;
+        width: 100%;
+        align-horizontal: center;
+        margin: 0 0 1 0;
+    }
+
+    #template-step-page-status {
+        width: auto;
+        min-width: 24;
+        height: 3;
+        content-align: center middle;
+        margin: 0 1;
+    }
+
+    .template-page-btn {
+        width: 10;
+        min-width: 10;
+        margin: 0;
     }
 
     .step-list-btn {
@@ -250,6 +275,7 @@ class TemplateRunScreen(Container):
         self._selected_script_path: str | None = None
         self._selected_workflow_key: str | None = None
         self._selected_step_key: str | None = None
+        self._step_page_index = 0
         self._workflow_button_map: dict[str, str] = {}
         self._step_button_map: dict[str, str] = {}
         self._field_input_map: dict[str, tuple[str, str, str]] = {}
@@ -263,6 +289,7 @@ class TemplateRunScreen(Container):
         self._selected_config_path: str = ""
         self._rendered_detail_key: tuple[str | None, str | None, str | None] = (None, None, None)
         self._rendered_global_key: tuple[str | None, str | None] = (None, None)
+        self._rendered_step_list_key: tuple[Any, ...] | None = None
 
     @property
     def _control(self):
@@ -291,6 +318,18 @@ class TemplateRunScreen(Container):
                             yield Static("任务列表", classes="section-title")
                             yield Static("点击任务跳转到配置页", classes="section-desc")
                             yield Vertical(id="template-step-list", classes="step-list")
+                            with Horizontal(id="template-step-pagination"):
+                                yield Button(
+                                    "上一页",
+                                    id="template-step-page-previous",
+                                    classes="template-page-btn",
+                                )
+                                yield Static("第 0 / 0 页", id="template-step-page-status")
+                                yield Button(
+                                    "下一页",
+                                    id="template-step-page-next",
+                                    classes="template-page-btn",
+                                )
             with TabPane("任务配置", id="template-run-tab-step"):
                 with ScrollableContainer(classes="tab-scroll-area"):
                     yield Static("任务配置", classes="section-title")
@@ -306,7 +345,18 @@ class TemplateRunScreen(Container):
 
     def on_mount(self) -> None:
         self._refresh_timer = self.set_interval(1.0, self._refresh_all)
-        self._refresh_all()
+        self.set_active(getattr(self.app, "active_tab", None) == self.id)
+
+    def set_active(self, active: bool) -> None:
+        """模板页隐藏时暂停全量状态同步和控件重绘。"""
+
+        if self._refresh_timer is None:
+            return
+        if active:
+            self._refresh_timer.resume()
+            self._refresh_all()
+        else:
+            self._refresh_timer.pause()
 
     def _refresh_all(self) -> None:
         tasks = self._control.list_task_views()
@@ -523,20 +573,54 @@ class TemplateRunScreen(Container):
         container = self.query_one("#template-step-list", Vertical)
         meta = self._get_current_meta()
         flow = self._get_current_flow()
-        
-        # We need a total rebuild of the list to ensure buttons render correctly
+
+        if meta is None or flow is None:
+            self._render_step_pagination(0, 0)
+            empty_key = (self._selected_script_path, self._selected_workflow_key, "empty")
+            if self._rendered_step_list_key == empty_key:
+                return
+            for child in list(container.children):
+                child.remove()
+            self._step_buttons.clear()
+            self._step_button_map.clear()
+            container.mount(Static("请先选择工作流", classes="muted-box"))
+            self._rendered_step_list_key = empty_key
+            return
+
+        ordered = self._ordered_steps(flow)
+        page_steps, self._step_page_index, total_pages = paginate_items(
+            ordered,
+            self._step_page_index,
+            TEMPLATE_TASK_PAGE_SIZE,
+        )
+        self._render_step_pagination(len(ordered), total_pages)
+        page_start = self._step_page_index * TEMPLATE_TASK_PAGE_SIZE
+        rendered_steps: list[tuple[Any, Any, Any, Any, Any]] = []
+        for step in page_steps:
+            task_def = next((item for item in meta.tasks if item.k == step.task), None)
+            task_title = task_def.ut or task_def.t or task_def.k if task_def else step.task
+            rendered_steps.append(
+                (step.k, step.task, task_title, self._is_step_enabled(step.k, step.enabled), step.allowReorder)
+            )
+        render_key = (
+            self._selected_script_path,
+            self._selected_workflow_key,
+            self._selected_step_key,
+            self._step_page_index,
+            tuple(rendered_steps),
+        )
+        if self._rendered_step_list_key == render_key:
+            return
+
+        # 列表发生实际变化时才重建，避免一秒一次反复挂载 Textual 控件。
         for child in list(container.children):
             child.remove()
         self._step_buttons.clear()
-        
-        if meta is None or flow is None:
-            container.mount(Static("请先选择工作流", classes="muted-box"))
-            return
-            
-        ordered = self._ordered_steps(flow)
-        self._step_button_map = {f"template-step-{index}": step.k for index, step in enumerate(ordered)}
-        
-        for index, step in enumerate(ordered):
+        self._step_button_map = {
+            f"template-step-{index}": step.k for index, step in enumerate(page_steps)
+        }
+
+        for index, step in enumerate(page_steps):
             name = f"template-step-{index}"
             enabled_text = "启用" if self._is_step_enabled(step.k, step.enabled) else "禁用"
             task_def = next((item for item in meta.tasks if item.k == step.task), None)
@@ -548,11 +632,31 @@ class TemplateRunScreen(Container):
             if step.k == self._selected_step_key:
                 button.add_class("-active")
                 
-            up_btn = Button("▲", id=f"step-list-up-{index}", classes="list-move-btn", disabled=step.allowReorder is False)
-            down_btn = Button("▼", id=f"step-list-down-{index}", classes="list-move-btn", disabled=step.allowReorder is False)
+            absolute_index = page_start + index
+            up_btn = Button("▲", id=f"step-list-up-{index}", classes="list-move-btn", disabled=step.allowReorder is False or absolute_index == 0)
+            down_btn = Button(
+                "▼",
+                id=f"step-list-down-{index}",
+                classes="list-move-btn",
+                disabled=step.allowReorder is False or absolute_index == len(ordered) - 1,
+            )
             
             row = Horizontal(button, up_btn, down_btn, classes="step-list-row")
             container.mount(row)
+        self._rendered_step_list_key = render_key
+
+    def _render_step_pagination(self, task_count: int, total_pages: int) -> None:
+        previous = self.query_one("#template-step-page-previous", Button)
+        next_page = self.query_one("#template-step-page-next", Button)
+        status = self.query_one("#template-step-page-status", Static)
+        if total_pages == 0:
+            status.update("第 0 / 0 页 · 共 0 项")
+            previous.disabled = True
+            next_page.disabled = True
+            return
+        status.update(f"第 {self._step_page_index + 1} / {total_pages} 页 · 共 {task_count} 项")
+        previous.disabled = self._step_page_index == 0
+        next_page.disabled = self._step_page_index >= total_pages - 1
 
     def _render_step_detail(self) -> None:
         header = self.query_one("#step-header", Static)
@@ -979,6 +1083,7 @@ class TemplateRunScreen(Container):
             return
         self._selected_workflow_key = meta.flows[index].k
         self._selected_step_key = None
+        self._step_page_index = 0
         self._refresh_all()
 
     def _load_template_script(self, payload: dict[str, Any]) -> None:
@@ -992,6 +1097,7 @@ class TemplateRunScreen(Container):
         if workflow_key:
             self._selected_workflow_key = workflow_key
         self._selected_step_key = None
+        self._step_page_index = 0
         self._sync_selected_template()
         self._load_selected_template_state()
         self._render_workflow_tabs()
@@ -1005,6 +1111,14 @@ class TemplateRunScreen(Container):
         button = event.button
         if button.id == "btn-template-run":
             self.action_run_selected_workflow()
+            return
+        if button.id == "template-step-page-previous":
+            self._step_page_index = max(0, self._step_page_index - 1)
+            self._render_step_list()
+            return
+        if button.id == "template-step-page-next":
+            self._step_page_index += 1
+            self._render_step_list()
             return
         if button.id and button.id.startswith("step-list-up-"):
             try:

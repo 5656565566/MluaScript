@@ -7,7 +7,7 @@ import json
 import secrets
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,7 +16,17 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from mluascript.control.facade import get_control_facade
-from mluascript.control.workspace import TemplateSavedConfig, get_template_store
+from mluascript.control.workspace import (
+    ArtifactService,
+    ArtifactServiceError,
+    ProjectService,
+    ProjectServiceError,
+    TemplateSavedConfig,
+    TemplateStore,
+    WorkspaceManager,
+    get_template_store,
+)
+from mluascript.frontends.web.preferences import WebPreferences, WebPreferenceService
 from mluascript.shared.config import WebServerConfig, config
 from mluascript.shared.logging import get_logs, get_logs_by_channel, get_logs_by_session
 
@@ -27,6 +37,7 @@ logs_router = APIRouter(prefix="/api/logs")
 streams_router = APIRouter(prefix="/api/streams")
 system_router = APIRouter(prefix="/api/system")
 run_router = APIRouter(prefix="/api/run")
+projects_router = APIRouter(prefix="/api/projects")
 
 
 class WorkspaceSyncPayload(BaseModel):
@@ -96,9 +107,75 @@ class RunPipelinePayload(BaseModel):
     projectPath: str = ""
 
 
+class RunArtifactPayload(BaseModel):
+    artifactId: str
+    sessionLabel: str | None = None
+
+
 class RunTemplatePayload(BaseModel):
     mode: str = "workflow"
     scriptPath: str
+    workflowKey: str = ""
+    workflow: dict[str, Any] = Field(default_factory=dict)
+    runtime: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectCreatePayload(BaseModel):
+    name: str
+    packageId: str = ""
+    version: str = "0.1.0"
+    author: str = ""
+    description: str = ""
+    directory: str = ""
+    template: str = "lua-package"
+
+
+class ProjectUpdatePayload(BaseModel):
+    name: str
+    packageId: str
+    version: str
+    author: str = ""
+    description: str = ""
+
+
+class ProjectFileWritePayload(BaseModel):
+    path: str
+    content: str = ""
+    expectedMtime: float | None = None
+
+
+class ProjectFileCreatePayload(BaseModel):
+    path: str
+    content: str = ""
+
+
+class ProjectDirectoryCreatePayload(BaseModel):
+    path: str
+
+
+class ProjectPathRenamePayload(BaseModel):
+    path: str
+    newName: str
+
+
+class ProjectPathMovePayload(BaseModel):
+    sourcePath: str
+    destinationPath: str
+
+
+class ProjectBuildPayload(BaseModel):
+    generatedLua: str | None = None
+    generatedFrom: str | None = None
+    generatedModules: dict[str, str] | None = None
+
+
+class ProjectDebugPayload(BaseModel):
+    mode: Literal["script", "template", "pipeline"] = "script"
+    sessionLabel: str = ""
+    entryPath: str = ""
+    luaCode: str = ""
+    sourceOverrides: dict[str, str] = Field(default_factory=dict)
+    templateMode: str = ""
     workflowKey: str = ""
     workflow: dict[str, Any] = Field(default_factory=dict)
     runtime: dict[str, Any] = Field(default_factory=dict)
@@ -549,6 +626,27 @@ def system_health() -> dict[str, Any]:
     return _ok({"service": "mluascript_web", "version": "1.0.0", "status": "up"})
 
 
+def _preferences_for_request(request: Request) -> WebPreferences:
+    username = _get_authenticated_user(request)
+    if not username:
+        raise HTTPException(status_code=401, detail="未登录")
+    return _preference_service(request).get(username)
+
+
+@system_router.get("/preferences")
+def get_web_preferences(request: Request) -> dict[str, Any]:
+    return _ok(_preferences_for_request(request).model_dump(by_alias=True))
+
+
+@system_router.put("/preferences")
+def put_web_preferences(payload: WebPreferences, request: Request) -> dict[str, Any]:
+    username = _get_authenticated_user(request)
+    if not username:
+        raise HTTPException(status_code=401, detail="未登录")
+    saved = _preference_service(request).put(username, payload)
+    return _ok(saved.model_dump(by_alias=True), message="Web 偏好设置已保存")
+
+
 @system_router.get("/bootstrap")
 def system_bootstrap(request: Request) -> dict[str, Any]:
     facade = get_control_facade()
@@ -594,6 +692,7 @@ def system_bootstrap(request: Request) -> dict[str, Any]:
             },
             "blocklyFiles": _list_editor_files("blockly"),
             "logChannels": ["default", "runtime.log", "runtime.output"],
+            "preferences": _preferences_for_request(request).model_dump(by_alias=True),
         }
     )
 
@@ -606,10 +705,18 @@ def system_tasks() -> dict[str, Any]:
 
 
 @system_router.get("/scripts")
-def system_scripts() -> dict[str, Any]:
-    facade = get_control_facade()
-    items = [item.model_dump() for item in facade.list_scripts()]
+def system_scripts(request: Request) -> dict[str, Any]:
+    items = [item.model_dump() for item in _artifact_service(request).list_artifacts()]
     return _ok({"items": items, "count": len(items)})
+
+
+@system_router.get("/scripts/{artifact_id}/readme")
+def system_script_readme(artifact_id: str, request: Request) -> dict[str, Any]:
+    try:
+        readme = _artifact_service(request).read_readme(artifact_id)
+    except ArtifactServiceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _ok(readme.model_dump())
 
 
 @system_router.get("/scripts/template")
@@ -634,6 +741,10 @@ def get_script_template(scriptPath: str = Query(...)) -> dict[str, Any]:
         )
 
     saved_config = template_store.load_saved_config(scriptPath)
+    try:
+        readme = template_store.get_readme(scriptPath)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _ok(
         {
             "hasTemplate": True,
@@ -641,6 +752,7 @@ def get_script_template(scriptPath: str = Query(...)) -> dict[str, Any]:
             "meta": meta.model_dump(by_alias=True, exclude_none=True),
             "savedConfig": saved_config.model_dump(),
             "configPath": template_store.get_saved_config_path(scriptPath),
+            "readme": readme,
         }
     )
 
@@ -848,6 +960,380 @@ def validate_lua_editor_name(payload: ValidateNamePayload) -> dict[str, Any]:
     return _ok(_validate_editor_name(payload.path, kind="lua"))
 
 
+def _project_service(request: Request) -> ProjectService:
+    return request.app.state.project_service
+
+
+def _artifact_service(request: Request) -> ArtifactService:
+    service = getattr(request.app.state, "artifact_service", None)
+    if not isinstance(service, ArtifactService):
+        raise HTTPException(status_code=503, detail="构建产物服务不可用")
+    return service
+
+
+def _preference_service(request: Request) -> WebPreferenceService:
+    service = getattr(request.app.state, "preference_service", None)
+    if not isinstance(service, WebPreferenceService):
+        raise HTTPException(status_code=503, detail="Web 偏好设置服务不可用")
+    return service
+
+
+def _project_error(exc: ProjectServiceError) -> HTTPException:
+    detail = exc.args[0] if exc.args else str(exc)
+    if isinstance(detail, dict):
+        return HTTPException(status_code=400, detail=detail)
+    return HTTPException(status_code=400, detail=str(detail))
+
+
+def _project_template_store(service: ProjectService, project_key: str, project_root: str) -> TemplateStore:
+    """为项目模板使用项目内源码和 Web 私有配置目录。"""
+
+    return TemplateStore(
+        WorkspaceManager(Path(project_root)),
+        config_dir=service.get_template_config_root(project_key),
+    )
+
+
+@projects_router.get("")
+def list_projects(request: Request) -> dict[str, Any]:
+    return _ok({"items": [item.model_dump() for item in _project_service(request).list_projects()]})
+
+
+@projects_router.post("")
+def create_project(payload: ProjectCreatePayload, request: Request) -> dict[str, Any]:
+    try:
+        project = _project_service(request).create_project(
+            name=payload.name,
+            package_id=payload.packageId,
+            version=payload.version,
+            author=payload.author,
+            description=payload.description,
+            directory=payload.directory,
+            template=payload.template,
+        )
+    except ProjectServiceError as exc:
+        raise _project_error(exc) from exc
+    return _ok(project.model_dump(), message="项目已创建")
+
+
+@projects_router.patch("/{project_key}")
+def update_project(project_key: str, payload: ProjectUpdatePayload, request: Request) -> dict[str, Any]:
+    try:
+        project = _project_service(request).update_project(
+            project_key,
+            name=payload.name,
+            package_id=payload.packageId,
+            version=payload.version,
+            author=payload.author,
+            description=payload.description,
+        )
+    except ProjectServiceError as exc:
+        raise _project_error(exc) from exc
+    return _ok(project.model_dump(), message="项目信息已更新")
+
+
+@projects_router.post("/{project_key}:open")
+def open_project(project_key: str, request: Request) -> dict[str, Any]:
+    try:
+        data = _project_service(request).open_project(project_key)
+    except ProjectServiceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _ok(data, message="项目已打开")
+
+
+@projects_router.get("/{project_key}/tree")
+def list_project_tree(project_key: str, request: Request) -> dict[str, Any]:
+    try:
+        items = _project_service(request).list_tree(project_key)
+    except ProjectServiceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _ok({"items": [item.model_dump() for item in items]})
+
+
+@projects_router.get("/{project_key}/modules")
+def list_project_modules(project_key: str, request: Request) -> dict[str, Any]:
+    try:
+        modules = _project_service(request).get_module_index(project_key)
+    except ProjectServiceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _ok({"modules": modules})
+
+
+@projects_router.get("/{project_key}/template")
+def get_project_template(project_key: str, request: Request, path: str = Query(...)) -> dict[str, Any]:
+    """按受控项目路径读取模板元数据，避免前端拼接宿主机绝对路径。"""
+
+    try:
+        target = _project_service(request).prepare_debug_target(project_key, entry_path=path)
+    except ProjectServiceError as exc:
+        raise _project_error(exc) from exc
+    template_store = _project_template_store(_project_service(request), project_key, target.project_root)
+    try:
+        meta = template_store.get_template_meta(target.entry_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="脚本不存在") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"模板解析失败: {exc}") from exc
+    if meta is None:
+        return _ok({"hasTemplate": False, "scriptPath": target.entry_path, "meta": None, "savedConfig": None})
+    saved_config = template_store.load_saved_config(target.entry_path)
+    try:
+        readme = template_store.get_readme(target.entry_path)
+    except ValueError as exc:
+        raise _project_error(ProjectServiceError(str(exc))) from exc
+    return _ok(
+        {
+            "hasTemplate": True,
+            "scriptPath": target.entry_path,
+            "meta": meta.model_dump(by_alias=True, exclude_none=True),
+            "savedConfig": saved_config.model_dump(),
+            "configPath": template_store.get_saved_config_path(target.entry_path),
+            "readme": readme,
+        }
+    )
+
+
+@projects_router.get("/{project_key}/files/content")
+def read_project_file(project_key: str, request: Request, path: str = Query(...)) -> dict[str, Any]:
+    try:
+        data = _project_service(request).read_file(project_key, path)
+    except ProjectServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _ok(data.model_dump(by_alias=True))
+
+
+@projects_router.put("/{project_key}/files/content")
+def write_project_file(project_key: str, payload: ProjectFileWritePayload, request: Request) -> dict[str, Any]:
+    try:
+        data = _project_service(request).write_file(
+            project_key,
+            payload.path,
+            payload.content,
+            payload.expectedMtime,
+        )
+    except ProjectServiceError as exc:
+        status_code = 409 if "发生变化" in str(exc) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return _ok(data.model_dump(by_alias=True), message="项目文件已保存")
+
+
+@projects_router.post("/{project_key}/files")
+def create_project_file(project_key: str, payload: ProjectFileCreatePayload, request: Request) -> dict[str, Any]:
+    try:
+        data = _project_service(request).create_file(project_key, payload.path, payload.content)
+    except ProjectServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _ok(data.model_dump(by_alias=True), message="项目文件已创建")
+
+
+@projects_router.delete("/{project_key}/files")
+def delete_project_file(project_key: str, request: Request, path: str = Query(...)) -> dict[str, Any]:
+    try:
+        deleted_path = _project_service(request).delete_file(project_key, path)
+    except ProjectServiceError as exc:
+        raise _project_error(exc) from exc
+    return _ok({"path": deleted_path}, message="项目文件已删除")
+
+
+@projects_router.post("/{project_key}/directories")
+def create_project_directory(project_key: str, payload: ProjectDirectoryCreatePayload, request: Request) -> dict[str, Any]:
+    try:
+        data = _project_service(request).create_directory(project_key, payload.path)
+    except ProjectServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _ok(data.model_dump(), message="项目目录已创建")
+
+
+@projects_router.patch("/{project_key}/tree")
+def rename_project_path(project_key: str, payload: ProjectPathRenamePayload, request: Request) -> dict[str, Any]:
+    try:
+        data = _project_service(request).rename_path(project_key, payload.path, payload.newName)
+    except ProjectServiceError as exc:
+        raise _project_error(exc) from exc
+    return _ok(data.model_dump(), message="项目路径已重命名")
+
+
+@projects_router.patch("/{project_key}/tree:move")
+def move_project_path(project_key: str, payload: ProjectPathMovePayload, request: Request) -> dict[str, Any]:
+    try:
+        data = _project_service(request).move_path(project_key, payload.sourcePath, payload.destinationPath)
+    except ProjectServiceError as exc:
+        raise _project_error(exc) from exc
+    return _ok(data.model_dump(), message="项目路径已移动")
+
+
+@projects_router.put("/{project_key}/files/binary")
+async def upload_project_file(
+    project_key: str,
+    request: Request,
+    path: str = Query(...),
+    overwrite: bool = Query(False),
+) -> dict[str, Any]:
+    service = _project_service(request)
+    try:
+        # 原始请求体按块写入临时文件，避免模型和资源文件经过 Base64 或整块驻留内存。
+        with service.open_binary_writer(project_key, path, overwrite=overwrite) as (stream, normalized):
+            async for chunk in request.stream():
+                if chunk:
+                    stream.write(chunk)
+        data = service.get_tree_item(project_key, normalized)
+    except ProjectServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _ok(data.model_dump(), message="项目文件已上传")
+
+
+@projects_router.get("/{project_key}/files/raw")
+def download_project_file(project_key: str, request: Request, path: str = Query(...)) -> FileResponse:
+    try:
+        target, normalized = _project_service(request).get_file_path(project_key, path)
+    except ProjectServiceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(target, media_type="application/octet-stream", filename=Path(normalized).name)
+
+
+@projects_router.post("/{project_key}/validate")
+def validate_project(project_key: str, request: Request) -> dict[str, Any]:
+    try:
+        diagnostics = _project_service(request).validate(project_key)
+    except ProjectServiceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _ok(
+        {
+            "valid": not any(item.severity == "error" for item in diagnostics),
+            "diagnostics": [item.model_dump() for item in diagnostics],
+        }
+    )
+
+
+@projects_router.post("/{project_key}/build")
+def build_project(project_key: str, payload: ProjectBuildPayload, request: Request) -> dict[str, Any]:
+    try:
+        result = _project_service(request).build(
+            project_key,
+            generated_lua=payload.generatedLua,
+            generated_from=payload.generatedFrom,
+            generated_modules=payload.generatedModules,
+        )
+    except ProjectServiceError as exc:
+        raise _project_error(exc) from exc
+    data = result.model_dump(exclude={"artifact_path"})
+    data["downloadPath"] = f"/api/projects/{project_key}/builds/{result.build_id}/download"
+    return _ok(data, message="项目已打包")
+
+
+@projects_router.post("/{project_key}/debug")
+def debug_project(project_key: str, payload: ProjectDebugPayload, request: Request) -> dict[str, Any]:
+    """直接执行项目源码快照；不创建包，也不把 Blockly 生成文件写回项目。"""
+
+    facade = get_control_facade()
+    overview = facade.get_device_overview()
+    session_label = payload.sessionLabel or overview.connection.label or "LOCAL"
+    service = _project_service(request)
+    if payload.mode == "pipeline":
+        try:
+            target = service.prepare_pipeline_debug_target(project_key, descriptor_path=payload.entryPath)
+            task_id = facade.run_pipeline(target.entry, target.override, session_label, target.project_path)
+        except ProjectServiceError as exc:
+            raise _project_error(exc) from exc
+        return _ok(
+            {
+                "taskId": task_id,
+                "kind": "pipeline",
+                "projectKey": project_key,
+                "entryPath": target.descriptor_path,
+            },
+            message=f"调试任务已启动: {task_id}",
+        )
+
+    try:
+        target = service.prepare_debug_target(
+            project_key,
+            entry_path=payload.entryPath,
+            source_overrides=payload.sourceOverrides,
+        )
+    except ProjectServiceError as exc:
+        raise _project_error(exc) from exc
+
+    code = payload.luaCode
+    if payload.mode == "template":
+        template_store = _project_template_store(service, project_key, target.project_root)
+        try:
+            meta = template_store.get_template_meta(target.entry_path)
+            if meta is None:
+                raise ProjectServiceError("当前脚本没有模板元数据")
+            current_saved = template_store.load_saved_config(target.entry_path)
+            if payload.templateMode == "task" or (meta.mode == "task" and not meta.flows):
+                task_key = str(payload.runtime.get("selectedTaskKey") or meta.entry.task or "").strip()
+                tasks = {
+                    str(key): {"params": value if isinstance(value, dict) else {}}
+                    for key, value in (payload.runtime.get("tasks") or {}).items()
+                }
+                saved = template_store.save_saved_config(
+                    target.entry_path,
+                    TemplateSavedConfig.model_validate({
+                        **current_saved.model_dump(),
+                        "scriptPath": target.entry_path,
+                        "selectedTaskKey": task_key,
+                        "tasks": tasks,
+                    }),
+                )
+                runtime_code = template_store.build_task_runtime_script(meta, saved, task_key=task_key)
+            else:
+                workflow_key = payload.workflowKey or meta.entry.flow
+                if not workflow_key:
+                    raise ProjectServiceError("模板调试缺少工作流入口")
+                saved = template_store.save_saved_config(
+                    target.entry_path,
+                    TemplateSavedConfig.model_validate({
+                        **current_saved.model_dump(),
+                        "scriptPath": target.entry_path,
+                        "selectedFlowKey": workflow_key,
+                        "flows": {
+                            **current_saved.model_dump().get("flows", {}),
+                            workflow_key: payload.workflow,
+                        },
+                    }),
+                )
+                runtime_code = template_store.build_runtime_script(meta, saved, flow_key=workflow_key)
+            code = f"{code}\n\n{runtime_code}\n"
+        except (KeyError, ProjectServiceError, ValueError) as exc:
+            raise _project_error(ProjectServiceError(str(exc))) from exc
+
+    try:
+        task_id = facade.run_script(
+            target.script_path,
+            code,
+            session_label,
+            source_overrides=target.source_overrides,
+            summary={
+                "debug": True,
+                "project_key": project_key,
+                "entry_path": target.entry_path,
+                "debug_mode": payload.mode,
+            },
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"启动项目调试失败: {exc}") from exc
+    return _ok(
+        {
+            "taskId": task_id,
+            "kind": "script",
+            "projectKey": project_key,
+            "entryPath": target.entry_path,
+        },
+        message=f"调试任务已启动: {task_id}",
+    )
+
+
+@projects_router.get("/{project_key}/builds/{build_id}/download")
+def download_project_build(project_key: str, build_id: str, request: Request) -> FileResponse:
+    try:
+        artifact, filename = _project_service(request).get_build_artifact(project_key, build_id)
+    except ProjectServiceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(artifact, media_type="application/octet-stream", filename=filename)
+
+
 def _editor_script_run_path(raw_path: str | None) -> str:
     """把编辑器内的相对路径转换为工作区脚本路径。"""
     if raw_path and str(raw_path).strip():
@@ -878,6 +1364,51 @@ def run_lua_script(payload: RunLuaPayload) -> dict[str, Any]:
         return _ok({"taskId": task_id, "sessionLabel": target, "scriptPath": script_path}, message=f"任务已启动: {task_id}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"启动任务失败: {e}")
+
+
+@run_router.post("/artifact")
+def run_build_artifact(payload: RunArtifactPayload, request: Request) -> dict[str, Any]:
+    facade = get_control_facade()
+    overview = facade.get_device_overview()
+    target = payload.sessionLabel or overview.connection.label or "LOCAL"
+    try:
+        prepared = _artifact_service(request).prepare_run(payload.artifactId)
+    except ArtifactServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        if prepared.mode == "script":
+            task_id = facade.run_script(
+                prepared.script_path,
+                prepared.code,
+                target,
+                title=prepared.artifact.path,
+                summary=prepared.summary,
+                cleanup_dir=prepared.cleanup_dir,
+            )
+        else:
+            task_id = facade.run_pipeline(
+                prepared.entry,
+                prepared.override,
+                target,
+                prepared.project_path,
+                title=prepared.artifact.path,
+                cleanup_dir=prepared.cleanup_dir,
+            )
+    except Exception as exc:
+        prepared.cleanup()
+        raise HTTPException(status_code=500, detail=f"启动构建产物失败: {exc}") from exc
+
+    return _ok(
+        {
+            "taskId": task_id,
+            "kind": "script" if prepared.mode == "script" else "pipeline",
+            "artifactId": prepared.artifact.id,
+            "name": prepared.artifact.name,
+            "sessionLabel": target,
+        },
+        message=f"构建产物已启动: {task_id}",
+    )
 
 
 @run_router.post("/pipeline")
@@ -1082,8 +1613,28 @@ def stream_task_output(task_id: str) -> StreamingResponse:
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-def create_web_app(dist_dir: Path) -> FastAPI:
+def create_web_app(dist_dir: Path, *, preferences_path: Path | None = None) -> FastAPI:
     app = FastAPI(title="MluaScript Web", version="1.0.0")
+    try:
+        configured_roots = list(getattr(_get_web_config(), "project_roots", []) or [])
+    except Exception:
+        configured_roots = []
+    if not configured_roots:
+        configured_roots = [str(Path.cwd() / ".mluascript_web" / "projects")]
+    primary_project_root = Path(configured_roots[0]).expanduser().resolve()
+    artifact_root = primary_project_root.parent / "builds"
+    app.state.project_service = ProjectService(
+        configured_roots,
+        artifact_root=artifact_root,
+    )
+    app.state.artifact_service = ArtifactService(
+        artifact_root,
+        runtime_root=primary_project_root.parent / "runtime" / "tasks",
+        project_service=app.state.project_service,
+    )
+    app.state.preference_service = WebPreferenceService(
+        preferences_path or (Path.cwd() / ".mluascript_web" / "settings" / "web" / "preferences.json")
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -1097,6 +1648,7 @@ def create_web_app(dist_dir: Path) -> FastAPI:
     app.include_router(device_router, dependencies=protected_dependencies)
     app.include_router(system_router, dependencies=protected_dependencies)
     app.include_router(editor_router, dependencies=protected_dependencies)
+    app.include_router(projects_router, dependencies=protected_dependencies)
     app.include_router(logs_router, dependencies=protected_dependencies)
     app.include_router(streams_router, dependencies=protected_dependencies)
     app.include_router(run_router, dependencies=protected_dependencies)

@@ -34,10 +34,22 @@ class LuaEngine:
 
     lupa: LuaRuntime | None = None
 
-    def __init__(self, path: Path, host_api: HostAPI):
+    def __init__(
+        self,
+        path: Path,
+        host_api: HostAPI,
+        *,
+        lock_project_modules: bool = False,
+        source_overrides: dict[str, str] | None = None,
+    ):
         self.virtual_io = VirtualIO()
         self.path = path
         self.host_api = host_api
+        self.lock_project_modules = bool(lock_project_modules)
+        self.source_overrides = {
+            str(path).strip().replace("\\", "/"): str(source)
+            for path, source in (source_overrides or {}).items()
+        }
         self.thread_manager = RuntimeThreadManager()
         self.global_shared_store = SharedValue({})
         self._lua_require_base_dir: Path | None = None
@@ -192,6 +204,9 @@ class LuaEngine:
         """配置标准 `require()` / `dofile()` 使用的模块搜索路径"""
         base_dir = (self.path or Path(".")).resolve()
         self._lua_require_base_dir = base_dir
+        if self.lock_project_modules:
+            self._configure_locked_project_modules(lua, base_dir)
+            return
         escaped_base = json.dumps(base_dir.as_posix(), ensure_ascii=False)
         lua.execute(
             f'''
@@ -204,6 +219,100 @@ class LuaEngine:
                 if not string.find(package.path, extra, 1, true) then
                     package.path = extra .. ";" .. package.path
                 end
+            end
+            '''
+        )
+
+    def _read_project_module(self, module_key: object) -> tuple[str | None, str]:
+        """读取受限模块空间中的 Lua 源码，不允许回退到宿主搜索路径。"""
+
+        raw_key = str(module_key or "").strip().replace("\\", "/")
+        if not raw_key or raw_key.startswith("/") or ":" in raw_key:
+            return None, f"\n\tinvalid project module: {raw_key}"
+        parts = raw_key.split("/")
+        if any(part in {"", ".", ".."} for part in parts):
+            return None, f"\n\tinvalid project module: {raw_key}"
+
+        base_dir = (self._lua_require_base_dir or self.path or Path(".")).resolve()
+        for relative in (Path(*parts).with_suffix(".lua"), Path(*parts) / "init.lua"):
+            virtual_path = f"scripts/{relative.as_posix()}"
+            if virtual_path in self.source_overrides:
+                return self.source_overrides[virtual_path], virtual_path
+            candidate = (base_dir / relative).resolve()
+            try:
+                candidate.relative_to(base_dir)
+            except ValueError:
+                continue
+            if candidate.is_file() and not candidate.is_symlink():
+                try:
+                    return candidate.read_text(encoding="utf-8"), virtual_path
+                except (OSError, UnicodeError) as exc:
+                    return None, f"\n\tfailed to read scripts/{relative.as_posix()}: {exc}"
+        return None, f"\n\tno project module 'scripts/{raw_key}.lua' or 'scripts/{raw_key}/init.lua'"
+
+    def _read_project_file(self, virtual_path: object) -> tuple[str | None, str]:
+        """为受限 loadfile/dofile 解析 scripts/ 虚拟路径。"""
+
+        raw_path = str(virtual_path or "").strip().replace("\\", "/")
+        if not raw_path.startswith("scripts/") or not raw_path.casefold().endswith(".lua"):
+            return None, f"只允许读取 scripts/ 内的 Lua 文件: {raw_path}"
+        module_key = raw_path[len("scripts/"):-len(".lua")]
+        return self._read_project_module(module_key)
+
+    def _configure_locked_project_modules(self, lua: LuaRuntime, base_dir: Path) -> None:
+        """安装只暴露 preload 与项目虚拟模块的 Lua package 环境。"""
+
+        self._lua_require_base_dir = base_dir
+        globals_table = lua.globals()
+        globals_table["__mlua_read_project_module"] = self._read_project_module
+        globals_table["__mlua_read_project_file"] = self._read_project_file
+        lua.execute(
+            r'''
+            local __real_package = package
+            local function __project_searcher(name)
+                local source, virtual_path = __mlua_read_project_module(name)
+                if not source then return virtual_path end
+                local chunk, err = load(source, "@" .. virtual_path, "t", _ENV)
+                if not chunk then return "\n\t" .. err end
+                return chunk, virtual_path
+            end
+
+            __real_package.path = "scripts/?.lua;scripts/?/init.lua"
+            __real_package.cpath = ""
+            __real_package.searchers = { __real_package.searchers[1], __project_searcher }
+
+            local __searchers_view = setmetatable({}, {
+                __index = __real_package.searchers,
+                __newindex = function() error("project package.searchers is read-only", 2) end,
+                __len = function() return #__real_package.searchers end,
+            })
+            local __package_view = {
+                loaded = __real_package.loaded,
+                preload = __real_package.preload,
+                path = __real_package.path,
+                cpath = __real_package.cpath,
+                searchers = __searchers_view,
+                searchpath = function(name)
+                    local source, virtual_path = __mlua_read_project_module(name)
+                    if source then return virtual_path end
+                    return nil, virtual_path
+                end,
+            }
+            package = setmetatable({}, {
+                __index = __package_view,
+                __newindex = function() error("project package configuration is read-only", 2) end,
+                __metatable = "locked project package",
+            })
+
+            loadfile = function(filename, mode, env)
+                local source, virtual_path = __mlua_read_project_file(filename)
+                if not source then return nil, virtual_path end
+                return load(source, "@" .. virtual_path, mode or "t", env or _ENV)
+            end
+            dofile = function(filename)
+                local chunk, err = loadfile(filename, "t", _ENV)
+                if not chunk then error(err, 2) end
+                return chunk()
             end
             '''
         )

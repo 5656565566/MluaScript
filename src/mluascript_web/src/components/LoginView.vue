@@ -58,14 +58,14 @@ async function submitLogin() {
   place-items: center;
   padding: 24px;
   background:
-    linear-gradient(135deg, rgba(26, 94, 128, 0.18), transparent 42%),
+    linear-gradient(135deg, color-mix(in srgb, var(--color-primary) 18%, transparent), transparent 42%),
     var(--color-background);
 }
 
 .login-panel {
   width: min(100%, 360px);
   border-radius: 8px;
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 18px 60px var(--color-shadow);
 }
 
 .login-brand {

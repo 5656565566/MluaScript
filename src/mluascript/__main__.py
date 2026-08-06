@@ -19,6 +19,7 @@ def _load_control_facade_getter():
     module = importlib.import_module("mluascript.control.facade")
     return module.get_control_facade
 
+
 def main() -> None:
     if system() == "Windows":
         ctypes.windll.kernel32.SetConsoleTitleW("MluaScript 控制台")

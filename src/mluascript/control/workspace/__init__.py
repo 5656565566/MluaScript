@@ -1,4 +1,18 @@
 from .manager import WorkspaceManager, get_workspace_manager
+from .artifact_service import ArtifactReadme, ArtifactService, ArtifactServiceError, PreparedArtifactRun, RunnableArtifact
+from .project_models import (
+    ProjectBuildResult,
+    ProjectDiagnostic,
+    ProjectEntrypoint,
+    ProjectFileContent,
+    ProjectManifest,
+    ProjectModelSpec,
+    ProjectPackageMetadata,
+    ProjectRuntimeSpec,
+    ProjectSummary,
+    ProjectTreeItem,
+)
+from .project_service import ProjectService, ProjectServiceError
 from .models import (
     PipelineRunLocator,
     ResourceAsset,
@@ -32,8 +46,25 @@ from .template_parser import (
 from .template_store import TemplateStore, get_template_store
 
 __all__ = [
+    "ArtifactReadme",
+    "ArtifactService",
+    "ArtifactServiceError",
     "PipelineRunLocator",
+    "PreparedArtifactRun",
+    "ProjectBuildResult",
+    "ProjectDiagnostic",
+    "ProjectEntrypoint",
+    "ProjectFileContent",
+    "ProjectManifest",
+    "ProjectModelSpec",
+    "ProjectPackageMetadata",
+    "ProjectRuntimeSpec",
+    "ProjectService",
+    "ProjectServiceError",
+    "ProjectSummary",
+    "ProjectTreeItem",
     "ResourceAsset",
+    "RunnableArtifact",
     "SavedFlowConfig",
     "SavedTaskConfig",
     "ScriptAsset",

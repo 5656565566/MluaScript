@@ -1,4 +1,4 @@
-import { authApi, deviceApi, editorApi, logApi, runApi, setUnauthorizedHandler, streamApi, systemApi, templateApi } from './api'
+import { authApi, deviceApi, editorApi, logApi, projectApi, runApi, setUnauthorizedHandler, streamApi, systemApi, templateApi } from './api'
 import {
   normalizeConnectionList,
   normalizeDesktopItems,
@@ -7,7 +7,7 @@ import {
 import { createAppActions } from './app/appModule'
 import { applyBootstrapState } from './app/bootstrap'
 import { createUiState } from './app/uiState'
-import { collectBlocklyDiagnostics, workspaceToLua, workspaceToXml, updateBlocklyTheme } from './blockly'
+import { collectBlocklyDiagnostics, compileBlocklyXml, workspaceToLua, workspaceToXml, updateBlocklyTheme } from './blockly'
 import { createDeviceActions } from './features/devices/deviceModule'
 import { createDeviceState } from './features/devices/deviceState'
 import { createEditorActions } from './features/editor/editorModule'
@@ -17,6 +17,8 @@ import { createRuntimeState } from './features/runtime/runtimeState'
 import { createRuntimeStreams } from './features/runtime/runtimeStreams'
 import { createTemplateActions } from './features/templates/templateModule'
 import { createTemplateState } from './features/templates/templateState'
+import { createProjectActions } from './features/projects/projectModule'
+import { createProjectState } from './features/projects/projectState'
 import { openModal, closeModal } from './modalStore'
 import { pickerActions } from './store/pickerState'
 import { createGetters } from './store/getters'
@@ -27,6 +29,7 @@ export const state = {
   ...createDeviceState(),
   ...createRuntimeState(),
   ...createTemplateState(),
+  ...createProjectState(),
   ...createUiState(),
 }
 
@@ -80,6 +83,14 @@ const editorActions = createEditorActions({
 const templateActions = createTemplateActions({
   state,
   templateApi,
+  projectApi,
+  getActions: () => actions,
+})
+
+const projectActions = createProjectActions({
+  state,
+  projectApi,
+  compileBlocklyXml,
   getActions: () => actions,
 })
 
@@ -117,6 +128,7 @@ export const actions = {
   ...modalActions,
   ...runtimeActions,
   ...templateActions,
+  ...projectActions,
   openBlocklyPicker(config = {}) {
     return pickerActions.open(config)
   },

@@ -1,7 +1,9 @@
 <script setup>
 import { computed, h, watch, onBeforeUnmount } from 'vue'
 import { state, getters, actions } from '../store'
-import { NTabs, NTabPane, NCard, NInput, NButton, NSpace, NTag, NText, NIcon, NDataTable, NLayout, NLayoutSider, NLayoutContent, NEmpty, NDescriptions, NDescriptionsItem, NLog, NScrollbar } from 'naive-ui'
+import { artifactTypeClass, artifactTypeLabel } from '../features/runtime/artifactTypes.js'
+import ReadmeRenderer from './ReadmeRenderer.vue'
+import { NTabs, NTabPane, NCard, NInput, NButton, NCheckbox, NSpace, NTag, NText, NIcon, NDataTable, NLayout, NLayoutSider, NLayoutContent, NEmpty, NDescriptions, NDescriptionsItem, NLog, NScrollbar, NTooltip } from 'naive-ui'
 
 const activeTab = computed({
   get: () => state.taskManagerActiveTab.value,
@@ -22,8 +24,8 @@ const statusTypeMap = {
 
 const resourceData = computed(() => {
   const pipelines = getters.pipelineTasks.value.map(t => ({ ...t, _kind: 'pipeline' }))
-  const luas = state.availableScripts.value.map(t => ({ ...t, _kind: 'lua' }))
-  let list = [...pipelines, ...luas]
+  const artifacts = state.availableScripts.value.map(t => ({ ...t, _kind: t.kind || 'lua' }))
+  let list = [...pipelines, ...artifacts]
   const q = resourceQuery.value.trim().toLowerCase()
   if (q) {
     list = list.filter(item => {
@@ -39,9 +41,15 @@ const resourceColumns = [
   { 
     title: '类型', 
     key: '_kind', 
-    width: 100,
+    width: 180,
     render(row) {
-      return h(NTag, { type: row._kind === 'pipeline' ? 'info' : 'success', size: 'small', bordered: false, round: true }, { default: () => row._kind === 'pipeline' ? 'Pipeline' : 'Lua' })
+      return h(NTag, {
+        size: 'small',
+        bordered: false,
+        class: ['task-kind-tag', artifactTypeClass(row)],
+      }, {
+        default: () => artifactTypeLabel(row),
+      })
     }
   },
   { 
@@ -67,10 +75,10 @@ const resourceColumns = [
   {
     title: '操作',
     key: 'actions',
-    width: 80,
+    width: 150,
     align: 'right',
     render(row) {
-      return h(NButton, {
+      const buttons = [h(NButton, {
         size: 'small',
         type: 'primary',
         secondary: true,
@@ -78,6 +86,11 @@ const resourceColumns = [
           actions.handleAction(async () => {
             if (row._kind === 'pipeline') {
               await actions.runPipelineTask(row.name)
+              activeTab.value = 'task-status'
+              return
+            }
+            if (row.source === 'build') {
+              await actions.runArtifact(row.id)
               activeTab.value = 'task-status'
               return
             }
@@ -98,7 +111,15 @@ const resourceColumns = [
             }
           })
         }
-      }, { default: () => '运行' })
+      }, { default: () => '运行' })]
+      if (row.has_readme) {
+        buttons.push(h(NButton, {
+          size: 'small',
+          secondary: true,
+          onClick: () => actions.handleAction(() => actions.openArtifactReadme(row.id)),
+        }, { default: () => '说明' }))
+      }
+      return h(NSpace, { size: 6, justify: 'end', wrap: false }, { default: () => buttons })
     }
   }
 ]
@@ -163,6 +184,12 @@ onBeforeUnmount(() => {
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
         <span>任务管理</span>
         <n-space>
+          <n-tooltip trigger="hover">
+            <template #trigger>
+              <n-checkbox v-model:checked="state.autoRefresh.value">自动刷新</n-checkbox>
+            </template>
+            自动刷新任务和脚本列表；系统日志不受此设置影响
+          </n-tooltip>
           <n-button size="small" type="error" secondary @click="actions.stopTasks()">停止全部运行中任务</n-button>
           <n-button size="small" :loading="state.loading.value" @click="actions.handleAction(actions.loadState)">刷新</n-button>
         </n-space>
@@ -186,6 +213,18 @@ onBeforeUnmount(() => {
               flex-height
               style="flex: 1; min-height: 0;"
             />
+          </div>
+        </n-tab-pane>
+
+        <n-tab-pane v-if="state.artifactReadme.value" name="artifact-readme" tab="说明">
+          <div class="artifact-readme-pane">
+            <div class="artifact-readme-header">
+              <div class="artifact-readme-title">{{ state.artifactReadme.value.name }}</div>
+              <n-text depth="3" class="font-mono">{{ state.artifactReadme.value.path }}</n-text>
+            </div>
+            <n-scrollbar class="artifact-readme-scroll">
+              <ReadmeRenderer :markdown="state.artifactReadme.value.markdown" />
+            </n-scrollbar>
           </div>
         </n-tab-pane>
 
@@ -291,6 +330,19 @@ onBeforeUnmount(() => {
   flex-direction: column;
 }
 
+.task-kind-tag {
+  border: 1px solid currentColor;
+  background: transparent;
+}
+
+.task-kind-pipeline {
+  color: var(--color-info);
+}
+
+.task-kind-lua {
+  color: var(--color-primary);
+}
+
 .task-manager-tabs {
   flex: 1;
   min-height: 0;
@@ -371,6 +423,32 @@ onBeforeUnmount(() => {
   flex-direction: column;
 }
 
+.artifact-readme-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.artifact-readme-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 4px 12px;
+  border-bottom: 1px solid var(--n-border-color);
+}
+
+.artifact-readme-title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.artifact-readme-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
 .task-log-shell {
   flex: 1;
   min-height: 0;
@@ -388,7 +466,7 @@ onBeforeUnmount(() => {
 }
 
 .task-log-list :deep(.n-empty__description), .task-log-list :deep(.n-empty__icon) {
-  color: #858585;
+  color: var(--color-text-muted);
 }
 
 .task-log-item {
@@ -403,15 +481,15 @@ onBeforeUnmount(() => {
 }
 
 .task-log-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-border-light);
 }
 
 .task-log-item.level-error {
-  background: rgba(244, 135, 113, 0.1);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
 }
 
 .task-log-item.level-warning {
-  background: rgba(204, 167, 0, 0.1);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
 }
 
 .task-log-meta {
@@ -427,15 +505,15 @@ onBeforeUnmount(() => {
 }
 
 .text-info {
-  color: #3b8eea;
+  color: var(--color-info);
 }
 
 .text-error {
-  color: #f48771;
+  color: var(--color-danger);
 }
 
 .text-warning {
-  color: #cca700;
+  color: var(--color-warning);
 }
 
 .task-log-message {
@@ -451,10 +529,10 @@ onBeforeUnmount(() => {
 }
 
 .task-log-item.level-error .task-log-message {
-  color: #f48771;
+  color: var(--color-danger);
 }
 
 .task-log-item.level-warning .task-log-message {
-  color: #cca700;
+  color: var(--color-warning);
 }
 </style>

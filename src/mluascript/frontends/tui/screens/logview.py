@@ -54,12 +54,23 @@ class LogPage(Container):
         yield self.viewer
 
     def on_mount(self) -> None:
-        self._sync_history()
-        register_tui_sink(self.viewer)
+        active = getattr(self.app, "active_tab", None) == self.id
+        register_tui_sink(self.viewer if active else None)
+        if active:
+            self._sync_history()
 
     def on_show(self) -> None:
-        self._sync_history()
-        bind_tui_log_target(self.viewer)
+        if getattr(self.app, "active_tab", None) == self.id:
+            self.set_active(True)
+
+    def set_active(self, active: bool) -> None:
+        """隐藏日志页只保留内存缓冲，不再触发 RichLog 实时重绘。"""
+
+        if active:
+            self._sync_history()
+            bind_tui_log_target(self.viewer)
+        else:
+            bind_tui_log_target(None)
 
     def _sync_history(self) -> None:
 

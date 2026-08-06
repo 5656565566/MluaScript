@@ -74,7 +74,13 @@ class FakeWorkspaceManager(WorkspaceManager):
             raise FileNotFoundError(rel_path)
         return "print('demo')"
 
-    def build_script_run_locator(self, script_path: str, *, allow_missing: bool = False) -> ScriptRunLocator:
+    def build_script_run_locator(
+        self,
+        script_path: str,
+        *,
+        allow_missing: bool = False,
+        source_overrides: dict[str, str] | None = None,
+    ) -> ScriptRunLocator:
         _ = allow_missing
         project = WorkspaceProject(
             project_id="demo",
@@ -98,6 +104,7 @@ class FakeWorkspaceManager(WorkspaceManager):
             script_dir="project/demo",
             working_dir=project.root_dir,
             resource_dir=project.resource_dir,
+            source_overrides=source_overrides or {},
         )
 
     def build_pipeline_run_locator(self, project_path: str) -> PipelineRunLocator:
@@ -232,6 +239,21 @@ def test_control_facade_run_script_updates_task_and_result() -> None:
     assert task.result == {"ok": True}
 
 
+def test_script_artifact_runtime_directory_is_removed_after_completion(tmp_path: Path) -> None:
+    facade = build_facade(script_runtime_factory=lambda: FakeRuntime(result={"ok": True}))
+    runtime_dir = tmp_path / ".mluascript_web" / "runtime" / "tasks" / "package-script"
+    runtime_dir.mkdir(parents=True)
+
+    facade.run_script(
+        "scripts/demo.lua",
+        "return 1",
+        "ADB:1",
+        cleanup_dir=str(runtime_dir),
+    )
+
+    assert not runtime_dir.exists()
+
+
 def test_control_facade_task_view_entrypoints() -> None:
     facade = build_facade(script_runtime_factory=lambda: FakeRuntime(result={"ok": True}))
 
@@ -298,6 +320,22 @@ def test_control_facade_run_pipeline_updates_task_and_result() -> None:
     assert task.kind == "pipeline"
     assert task.status == "success"
     assert task.result == {"pipeline": True}
+
+
+def test_pipeline_artifact_runtime_directory_is_removed_after_completion(tmp_path: Path) -> None:
+    facade = build_facade(pipeline_tasker_factory=lambda: FakeTasker(succeeded=True, detail={"ok": True}))
+    runtime_dir = tmp_path / ".mluascript_web" / "runtime" / "tasks" / "package-pipeline"
+    runtime_dir.mkdir(parents=True)
+
+    facade.run_pipeline(
+        "entry.main",
+        {},
+        "ADB:2",
+        "project/demo",
+        cleanup_dir=str(runtime_dir),
+    )
+
+    assert not runtime_dir.exists()
 
 
 def test_control_facade_system_state_contains_started_tasks() -> None:

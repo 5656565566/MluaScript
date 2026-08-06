@@ -165,7 +165,7 @@ async function copyAllTrace() {
 }
 
 .trace-list :deep(.n-empty__description), .trace-list :deep(.n-empty__icon) {
-  color: #858585;
+  color: var(--color-text-muted);
 }
 
 .trace-item {
@@ -184,15 +184,15 @@ async function copyAllTrace() {
 }
 
 .trace-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-border-light);
 }
 
 .trace-item.level-error {
-  background: rgba(244, 135, 113, 0.1);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
 }
 
 .trace-item.level-warning {
-  background: rgba(204, 167, 0, 0.1);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
 }
 
 .trace-meta {
@@ -200,7 +200,7 @@ async function copyAllTrace() {
 }
 
 .trace-index {
-  color: #858585;
+  color: var(--color-text-muted);
   font-size: 13px;
   font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
 }
@@ -214,19 +214,19 @@ async function copyAllTrace() {
 }
 
 .text-default, .text-info {
-  color: #3b8eea;
+  color: var(--color-info);
 }
 
 .text-error {
-  color: #f48771;
+  color: var(--color-danger);
 }
 
 .text-warning {
-  color: #cca700;
+  color: var(--color-warning);
 }
 
 .text-success {
-  color: #89d185;
+  color: var(--color-success);
 }
 
 .trace-message {
@@ -242,11 +242,11 @@ async function copyAllTrace() {
 }
 
 .trace-item.level-error .trace-message {
-  color: #f48771;
+  color: var(--color-danger);
 }
 
 .trace-item.level-warning .trace-message {
-  color: #cca700;
+  color: var(--color-warning);
 }
 
 .trace-actions {
@@ -261,10 +261,10 @@ async function copyAllTrace() {
 }
 
 .trace-actions :deep(.n-button) {
-  color: #858585;
+  color: var(--color-text-muted);
 }
 
 .trace-actions :deep(.n-button:hover) {
-  color: #cccccc;
+  color: var(--color-text-primary);
 }
 </style>

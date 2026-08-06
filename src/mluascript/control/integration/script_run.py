@@ -34,7 +34,12 @@ def create_script_run_context(
             maa_context.mark_connected(connection_label)
 
     runtime_root = Path(locator.script_dir)
-    placeholder_runtime = LuaEngine(path=runtime_root, host_api=RuntimeHostPlaceholder())
+    placeholder_runtime = LuaEngine(
+        path=runtime_root,
+        host_api=RuntimeHostPlaceholder(),
+        lock_project_modules=locator.project.module_search_locked,
+        source_overrides=locator.source_overrides,
+    )
     context = ScriptRunContext(
         run_id=uuid4().hex,
         runtime=placeholder_runtime,
@@ -42,7 +47,12 @@ def create_script_run_context(
         locator=locator,
         status=RunStatus.IDLE,
     )
-    runtime = LuaEngine(path=runtime_root, host_api=RuntimeHost(context))
+    runtime = LuaEngine(
+        path=runtime_root,
+        host_api=RuntimeHost(context),
+        lock_project_modules=locator.project.module_search_locked,
+        source_overrides=locator.source_overrides,
+    )
     runtime.register_namespace("maa", lambda lua: build_maa_exports(lua, context.maa))
     context.runtime = runtime
     return context

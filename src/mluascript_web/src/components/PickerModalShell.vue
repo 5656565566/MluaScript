@@ -43,6 +43,7 @@ const {
   formValues,
   effectiveItems,
   effectiveTitle,
+  effectiveSubtitle,
   effectiveEmptyText,
   effectiveAllowCreate,
   effectiveCreateButtonText,
@@ -105,6 +106,7 @@ function handleManageWithFallback() {
       <PickerListContent
         v-else
         :title="effectiveTitle"
+        :subtitle="effectiveSubtitle"
         :items="effectiveItems"
         :selected-value="selectedItem"
         :selected-values="selectedItems"

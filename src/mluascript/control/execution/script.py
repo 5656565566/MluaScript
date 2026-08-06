@@ -10,6 +10,7 @@ from mluascript.control.integration.models import RunStatus, ScriptRunContext
 from mluascript.maa.controllers.base import wait_for
 from mluascript.control.state.models import TaskInfo
 from mluascript.control.workspace.manager import WorkspaceManager, get_workspace_manager
+from mluascript.control.workspace.artifact_service import cleanup_artifact_runtime_dir
 from mluascript.runtime.exception import LuaExitException
 from mluascript.runtime.threading.manager import RuntimeThreadManager
 from mluascript.shared.logging import logger
@@ -52,6 +53,10 @@ class ScriptStartRequest:
     script_path: str
     code: str
     target: str
+    title: str | None
+    source_overrides: dict[str, str]
+    summary: dict[str, Any]
+    cleanup_dir: str | None
 
 
 class ScriptExecutionUseCase(BaseExecutionUseCase[ScriptRunContext]):
@@ -70,8 +75,26 @@ class ScriptExecutionUseCase(BaseExecutionUseCase[ScriptRunContext]):
         self.thread_manager = thread_manager or RuntimeThreadManager()
         self.workspace_manager = workspace_manager or get_workspace_manager()
 
-    def start_script(self, script_path: str, code: str, target: str) -> str:
-        self._current_request = ScriptStartRequest(script_path=script_path, code=code, target=target)
+    def start_script(
+        self,
+        script_path: str,
+        code: str,
+        target: str,
+        *,
+        title: str | None = None,
+        source_overrides: dict[str, str] | None = None,
+        summary: dict[str, Any] | None = None,
+        cleanup_dir: str | None = None,
+    ) -> str:
+        self._current_request = ScriptStartRequest(
+            script_path=script_path,
+            code=code,
+            target=target,
+            title=title,
+            source_overrides=dict(source_overrides or {}),
+            summary=dict(summary or {}),
+            cleanup_dir=cleanup_dir,
+        )
         try:
             return self.start(
                 target=target,
@@ -85,7 +108,7 @@ class ScriptExecutionUseCase(BaseExecutionUseCase[ScriptRunContext]):
 
     def build_task_title(self) -> str | None:
         request = self._require_request()
-        return request.script_path
+        return request.title or request.script_path
 
     def build_task_summary(self) -> dict[str, Any]:
         request = self._require_request()
@@ -99,7 +122,12 @@ class ScriptExecutionUseCase(BaseExecutionUseCase[ScriptRunContext]):
         request = self._require_request()
         # start_script 接收的是已经生成或读取完成的代码快照；运行上下文不应再要求
         # 对应磁盘文件存在，否则未保存的编辑器内容无法直接执行。
-        locator = self.workspace_manager.build_script_run_locator(request.script_path, allow_missing=True)
+        locator = self.workspace_manager.build_script_run_locator(
+            request.script_path,
+            allow_missing=True,
+            source_overrides=request.source_overrides,
+        )
+        locator.cleanup_dir = request.cleanup_dir
 
         device_facade = get_device_facade()
         session = device_facade._maa_facade.get_current_session()
@@ -126,6 +154,7 @@ class ScriptExecutionUseCase(BaseExecutionUseCase[ScriptRunContext]):
                 "script_dir": locator.script_dir,
                 "resource_dir": locator.resource_dir,
                 "working_dir": locator.working_dir,
+                **request.summary,
             },
             print_buffer=context.print_buffer,
             log_buffer=context.log_buffer,
@@ -171,6 +200,7 @@ class ScriptExecutionUseCase(BaseExecutionUseCase[ScriptRunContext]):
                 raise
             finally:
                 reset_script_controller_state(context)
+                cleanup_artifact_runtime_dir(context.locator.cleanup_dir)
 
         host_task = self.thread_manager.spawn(runner, name=f"script-run-{task.task_id[:8]}")
         context.host_task = host_task
@@ -186,6 +216,7 @@ class ScriptExecutionUseCase(BaseExecutionUseCase[ScriptRunContext]):
             host_task.cancel()
             host_task.join(0.2)
         reset_script_controller_state(context)
+        cleanup_artifact_runtime_dir(context.locator.cleanup_dir)
         if context.status is not RunStatus.STOPPED:
             context.status = RunStatus.STOPPED
         self.state_manager.update_task_info(

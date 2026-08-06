@@ -5,9 +5,11 @@ import {
   normalizeTemplateSavedConfig,
 } from './templateDomain.js'
 
-export function createTemplateActions({ state, templateApi, getActions }) {
-  function applyTemplateState(meta, savedConfig) {
+export function createTemplateActions({ state, templateApi, projectApi, getActions }) {
+  function applyTemplateState(meta, savedConfig, readme = null) {
     state.selectedTemplateMeta.value = meta
+    state.templateReadme.value = readme
+    state.templateRunnerTab.value = readme ? '__readme__' : ''
     if (meta?.type === 'workflow-template') {
       state.templateScriptType.value = 'workflow-template'
       state.selectedWorkflowKey.value = savedConfig?.selectedFlowKey || meta.entry?.defaultWorkflow || meta.workflows?.[0]?.key || ''
@@ -33,6 +35,8 @@ export function createTemplateActions({ state, templateApi, getActions }) {
         state.selectedWorkflowKey.value = ''
         state.templateTaskFormData.value = {}
         state.templateWorkflowFormData.value = {}
+        state.templateReadme.value = null
+        state.templateRunnerTab.value = ''
         return payload
       }
 
@@ -44,7 +48,24 @@ export function createTemplateActions({ state, templateApi, getActions }) {
       }
       state.selectedTemplateConfigPath.value = payload.configPath || ''
       state.selectedTemplateSavedConfig.value = savedConfig
-      applyTemplateState(meta, savedConfig)
+      applyTemplateState(meta, savedConfig, payload.readme || null)
+      return payload
+    },
+
+    async loadProjectTemplate(projectKey, entryPath) {
+      const payload = await projectApi.getTemplate(projectKey, entryPath)
+      if (!payload.hasTemplate) throw new Error('当前脚本没有模板元数据')
+      const meta = normalizeTemplateMeta(payload.meta)
+      const savedConfig = normalizeTemplateSavedConfig(payload.savedConfig)
+      state.selectedTemplateScript.value = {
+        path: payload.scriptPath || entryPath,
+        name: String(payload.scriptPath || entryPath).split('/').pop() || '模板脚本',
+        projectKey,
+        entryPath,
+      }
+      state.selectedTemplateConfigPath.value = payload.configPath || ''
+      state.selectedTemplateSavedConfig.value = savedConfig
+      applyTemplateState(meta, savedConfig, payload.readme || null)
       return payload
     },
 
@@ -148,13 +169,24 @@ export function createTemplateActions({ state, templateApi, getActions }) {
         mode: 'task',
         workflowKey: '',
         workflow: {},
-        runtime: { tasks: state.templateTaskFormData.value },
+        runtime: {
+          selectedTaskKey: state.selectedTaskKey.value || meta.entry?.defaultTask || meta.tasks?.[0]?.key || '',
+          tasks: state.templateTaskFormData.value,
+        },
       }
     },
 
     async runTemplateWorkflow() {
       const actions = getActions()
-      const data = await templateApi.runWorkflow(actions.buildTemplateRunPayload())
+      const payload = actions.buildTemplateRunPayload()
+      const script = state.selectedTemplateScript.value
+      const data = script?.projectKey
+        ? await actions.debugProject({
+            mode: 'template',
+            entryPath: script.entryPath || script.path,
+            templatePayload: payload,
+          })
+        : await templateApi.runWorkflow(payload)
       await actions.loadState()
       actions.setStatus(data.message || '模板任务已启动', 'success')
       return data

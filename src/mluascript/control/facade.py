@@ -20,6 +20,7 @@ from .state.models import (
 )
 from .workspace.manager import get_workspace_manager
 from .workspace.models import ScriptInfo
+from .workspace.artifact_service import ArtifactReadme, ArtifactService, PreparedArtifactRun, RunnableArtifact
 
 
 class ControlFacade:
@@ -30,6 +31,10 @@ class ControlFacade:
         self.state_mgr = get_state_manager()
         self.workspace_mgr = get_workspace_manager()
         self.device_facade = get_device_facade()
+        self.artifact_service = ArtifactService(
+            self.workspace_mgr.root_dir / ".mluascript_web" / "builds",
+            workspace_manager=self.workspace_mgr,
+        )
 
     def list_scripts(self) -> list[ScriptInfo]:
         """获取工作区下可用脚本"""
@@ -38,6 +43,40 @@ class ControlFacade:
     def read_script(self, rel_path: str) -> str:
         """读取工作区脚本"""
         return self.workspace_mgr.read_script(rel_path)
+
+    def list_build_artifacts(self) -> list[RunnableArtifact]:
+        """列出 TUI 与 Web 共用格式的 builds 构建产物。"""
+
+        return [item for item in self.artifact_service.list_artifacts() if item.source == "build"]
+
+    def get_artifact_readme(self, artifact_id: str) -> ArtifactReadme:
+        return self.artifact_service.read_readme(artifact_id)
+
+    def run_artifact(self, artifact_id: str, target: str) -> str:
+        """准备并运行构建产物，失败时回收尚未托管给任务的运行目录。"""
+
+        prepared: PreparedArtifactRun = self.artifact_service.prepare_run(artifact_id)
+        try:
+            if prepared.mode == "script":
+                return self.run_script(
+                    prepared.script_path,
+                    prepared.code,
+                    target,
+                    title=prepared.artifact.path,
+                    summary=prepared.summary,
+                    cleanup_dir=prepared.cleanup_dir,
+                )
+            return self.run_pipeline(
+                prepared.entry,
+                prepared.override,
+                target,
+                prepared.project_path,
+                title=prepared.artifact.path,
+                cleanup_dir=prepared.cleanup_dir,
+            )
+        except Exception:
+            prepared.cleanup()
+            raise
 
     def get_system_state(self) -> SystemState:
         """获取系统整体执行与连接状态"""
@@ -219,19 +258,74 @@ class ControlFacade:
             return self.run_pipeline(**params)
         return None
 
-    def run_script(self, script_path: str, code: str, target: str) -> str:
+    def run_script(
+        self,
+        script_path: str,
+        code: str,
+        target: str,
+        *,
+        title: str | None = None,
+        source_overrides: dict[str, str] | None = None,
+        summary: dict[str, object] | None = None,
+        cleanup_dir: str | None = None,
+    ) -> str:
         """启动脚本并返回任务 ID"""
-        self._last_task_params = {"kind": "script", "params": {"script_path": script_path, "code": code, "target": target}}
-        return self.exec_mgr.start_script(script_path, code, target)
+        self._last_task_params = {
+            "kind": "script",
+            "params": {
+                "script_path": script_path,
+                "code": code,
+                "target": target,
+                "title": title,
+                "source_overrides": source_overrides,
+                "summary": summary,
+                "cleanup_dir": cleanup_dir,
+            },
+        }
+        return self.exec_mgr.start_script(
+            script_path,
+            code,
+            target,
+            title=title,
+            source_overrides=source_overrides,
+            summary=summary,
+            cleanup_dir=cleanup_dir,
+        )
 
     def stop_script(self, task_id: str) -> None:
         """停止指定的脚本任务"""
         self.exec_mgr.stop_script(task_id)
 
-    def run_pipeline(self, entry: str, override: dict[str, object] | None, target: str, project_path: str) -> str:
+    def run_pipeline(
+        self,
+        entry: str,
+        override: dict[str, object] | None,
+        target: str,
+        project_path: str,
+        *,
+        title: str | None = None,
+        cleanup_dir: str | None = None,
+    ) -> str:
         """启动流水线并返回任务 ID"""
-        self._last_task_params = {"kind": "pipeline", "params": {"entry": entry, "override": override, "target": target, "project_path": project_path}}
-        return self.exec_mgr.start_pipeline(entry, override, target, project_path)
+        self._last_task_params = {
+            "kind": "pipeline",
+            "params": {
+                "entry": entry,
+                "override": override,
+                "target": target,
+                "project_path": project_path,
+                "title": title,
+                "cleanup_dir": cleanup_dir,
+            },
+        }
+        return self.exec_mgr.start_pipeline(
+            entry,
+            override,
+            target,
+            project_path,
+            title=title,
+            cleanup_dir=cleanup_dir,
+        )
 
     def stop_pipeline(self, task_id: str) -> None:
         """停止流水线任务"""

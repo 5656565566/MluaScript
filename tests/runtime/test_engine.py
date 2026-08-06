@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from lupa.lua54 import LuaRuntime
 
 from mluascript.runtime.engine import LuaEngine, python_namespace_to_lua
@@ -130,6 +131,23 @@ def test_engine_execute_runs_script_content() -> None:
     assert engine.lupa is not None
 
 
+def test_locked_project_modules_prefer_in_memory_source_override(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    module = scripts / "lib" / "math.lua"
+    module.parent.mkdir(parents=True)
+    module.write_text("return { value = 'disk' }\n", encoding="utf-8")
+    engine = LuaEngine(
+        scripts,
+        _HostAPI(),
+        lock_project_modules=True,
+        source_overrides={"scripts/lib/math.lua": "return { value = 'memory' }\n"},
+    )
+
+    result = engine.execute("return require('lib/math').value")
+
+    assert result == "memory"
+
+
 
 def test_engine_lua_print_handler_formats_lua_table_readably() -> None:
     class _PrintHostAPI(_HostAPI):
@@ -185,3 +203,34 @@ def test_engine_global_output_helpers_control_output_buffer() -> None:
     assert result == 2
     assert list(host.output) == ["after-2", "after-3"]
     assert host.output.max_lines == 2
+
+
+def test_locked_project_modules_use_virtual_scripts_paths(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    module = scripts / "lib" / "math.lua"
+    module.parent.mkdir(parents=True)
+    module.write_text("return { add = function(a, b) return a + b end }\n", encoding="utf-8")
+    engine = LuaEngine(scripts, _HostAPI(), lock_project_modules=True)
+
+    result = engine.execute(
+        '''
+        local math = require("lib/math")
+        local found = package.searchpath("lib/math", package.path)
+        return math.add(2, 3), package.path, package.cpath, found
+        '''
+    )
+
+    assert result == (5, "scripts/?.lua;scripts/?/init.lua", "", "scripts/lib/math.lua")
+
+
+def test_locked_project_modules_reject_host_fallback_and_configuration_changes(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    engine = LuaEngine(scripts, _HostAPI(), lock_project_modules=True)
+
+    with pytest.raises(Exception, match="read-only"):
+        engine.execute('package.path = "../?.lua"')
+    with pytest.raises(Exception, match="read-only"):
+        engine.execute('package.searchers[1] = function() end')
+    with pytest.raises(Exception, match="no project module"):
+        engine.execute('return require("outside")')

@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { getBlockSemanticDiagnostic } from '../src/blockly/blockSemanticDiagnostics.js'
+import { setProjectModuleRegistry } from '../src/features/projects/projectModuleRegistry.js'
 
 function createBlock(type, fields = {}, extra = {}) {
   return {
@@ -69,4 +70,35 @@ test('template tasks reject blank and stale function references', () => {
     getBlockSemanticDiagnostic(templateBlock),
     '任务 battle 引用的 Blockly 函数不存在：removed',
   )
+})
+
+test('project module calls track exported parameters and return shape', () => {
+  setProjectModuleRegistry([{
+    key: 'lib/math',
+    exports: [{ name: 'add', params: ['a', 'b'], hasReturn: true }],
+  }, {
+    key: 'lib/log',
+    exports: [{ name: 'write', params: ['message'], hasReturn: false }],
+  }])
+
+  const valid = createBlock('lua_project_module_call_expr', {
+    MODULE_VALUE: 'lib/math',
+    FUNCTION_VALUE: 'add',
+    PARAM_VALUES: JSON.stringify(['a', 'b']),
+  })
+  const stale = createBlock('lua_project_module_call_stmt', {
+    MODULE_VALUE: 'lib/math',
+    FUNCTION_VALUE: 'add',
+    PARAM_VALUES: JSON.stringify(['value']),
+  })
+  const noReturn = createBlock('lua_project_module_call_expr', {
+    MODULE_VALUE: 'lib/log',
+    FUNCTION_VALUE: 'write',
+    PARAM_VALUES: JSON.stringify(['message']),
+  })
+
+  assert.equal(getBlockSemanticDiagnostic(valid), '')
+  assert.match(getBlockSemanticDiagnostic(stale), /参数已变化/)
+  assert.match(getBlockSemanticDiagnostic(noReturn), /没有返回值/)
+  setProjectModuleRegistry([])
 })

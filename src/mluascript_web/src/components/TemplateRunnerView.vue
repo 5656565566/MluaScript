@@ -2,6 +2,7 @@
 import { computed, watch, h } from 'vue'
 import { state, actions } from '../store'
 import { buildTemplateFieldRows } from '../features/templates/templateDomain.js'
+import ReadmeRenderer from './ReadmeRenderer.vue'
 import {
   NCard,
   NSpace,
@@ -25,12 +26,29 @@ import {
   NThing,
   NText,
   NIcon,
+  NScrollbar,
 } from 'naive-ui'
 
 const templateTitle = computed(() => state.selectedTemplateMeta.value?.userTitle || state.selectedTemplateMeta.value?.title || state.selectedTemplateScript.value?.name || '模板执行')
 const isWorkflow = computed(() => state.templateScriptType.value === 'workflow-template')
 const workflows = computed(() => state.selectedTemplateMeta.value?.workflows || [])
 const currentWorkflow = computed(() => workflows.value.find(item => item.key === state.selectedWorkflowKey.value) || workflows.value[0] || null)
+const tasks = computed(() => state.selectedTemplateMeta.value?.tasks || [])
+const currentTask = computed(() => tasks.value.find(item => item.key === state.selectedTaskKey.value) || tasks.value[0] || null)
+const hasReadme = computed(() => Boolean(state.templateReadme.value?.markdown))
+const showingReadme = computed(() => hasReadme.value && state.templateRunnerTab.value === '__readme__')
+const runnerTab = computed({
+  get() {
+    if (showingReadme.value) return '__readme__'
+    return isWorkflow.value ? state.selectedWorkflowKey.value : state.selectedTaskKey.value
+  },
+  set(value) {
+    state.templateRunnerTab.value = value
+    if (value === '__readme__') return
+    if (isWorkflow.value) actions.setTemplateSelectedFlow(value)
+    else actions.setTemplateCurrentStep(value)
+  },
+})
 
 const currentWorkflowState = computed(() => {
   const workflowKey = currentWorkflow.value?.key
@@ -73,6 +91,10 @@ watch(currentWorkflow, () => {
   if (!selectedStepKey.value || !ordered.some(step => step.key === selectedStepKey.value)) {
     selectedStepKey.value = ordered[0].key
   }
+}, { immediate: true })
+
+watch(currentTask, (task) => {
+  if (task?.key && state.selectedTaskKey.value !== task.key) state.selectedTaskKey.value = task.key
 }, { immediate: true })
 
 function selectStep(stepKey) {
@@ -213,6 +235,16 @@ function groupedStepFields(step) {
   return groupedFields(step?.fields || [])
 }
 
+function groupedTaskFields(task) {
+  const values = state.templateTaskFormData.value?.[task?.key] || {}
+  return buildTemplateFieldRows(task?.fields || [], key => values[key]).filter(field => field.dependencyActive)
+}
+
+function taskFieldValue(taskKey, field) {
+  const values = state.templateTaskFormData.value?.[taskKey] || {}
+  return Object.hasOwn(values, field.key) ? values[field.key] : fieldDefaultValue(field)
+}
+
 function fieldItemStyle(field) {
   const depth = Math.max(0, Number(field.dependencyDepth) || 0)
   if (!depth) return 'margin-bottom: 18px;'
@@ -277,12 +309,11 @@ function renderFieldControl(field, value, onUpdate) {
         <n-space>
           <n-button size="small" @click="openFromScriptManager">返回脚本管理</n-button>
           <n-button
-            v-if="isWorkflow"
             type="primary"
             size="small"
-            :disabled="state.loading.value || !state.selectedTemplateScript.value || !currentWorkflow"
+            :disabled="state.loading.value || showingReadme || !state.selectedTemplateScript.value || (isWorkflow ? !currentWorkflow : !currentTask)"
             @click="actions.handleAction(() => actions.runTemplateWorkflow())"
-          >执行工作流</n-button>
+          >{{ isWorkflow ? '执行工作流' : '执行任务' }}</n-button>
         </n-space>
       </div>
     </template>
@@ -291,11 +322,16 @@ function renderFieldControl(field, value, onUpdate) {
       <n-empty v-if="!state.selectedTemplateScript.value" description="请先在脚本管理中选择一个模板脚本" style="margin: auto;" />
 
       <template v-else-if="isWorkflow">
-        <n-tabs v-if="workflows.length > 1" v-model:value="state.selectedWorkflowKey.value" type="line" size="small" style="flex-shrink: 0;">
+        <n-tabs v-if="hasReadme || workflows.length > 1" v-model:value="runnerTab" type="line" size="small" style="flex-shrink: 0;">
+          <n-tab-pane v-if="hasReadme" name="__readme__" tab="说明" />
           <n-tab-pane v-for="workflow in workflows" :key="workflow.key" :name="workflow.key" :tab="workflow.userTitle || workflow.title || workflow.key" />
         </n-tabs>
 
-        <div v-if="currentWorkflow" class="template-runner-shell">
+        <n-scrollbar v-if="showingReadme" class="template-readme-scroll">
+          <ReadmeRenderer :markdown="state.templateReadme.value.markdown" />
+        </n-scrollbar>
+
+        <div v-else-if="currentWorkflow" class="template-runner-shell">
           <div style="flex-shrink: 0;">
             <n-text style="font-size: 16px; font-weight: bold;">{{ currentWorkflow.userTitle || currentWorkflow.title || currentWorkflow.key }}</n-text>
             <p v-if="currentWorkflow.userDescription || currentWorkflow.description" style="margin: 4px 0 0; color: var(--n-text-color-3); font-size: 13px;">
@@ -378,6 +414,34 @@ function renderFieldControl(field, value, onUpdate) {
         </div>
       </template>
 
+      <template v-else>
+        <n-tabs v-if="hasReadme || tasks.length > 1" v-model:value="runnerTab" type="line" size="small" style="flex-shrink: 0;">
+          <n-tab-pane v-if="hasReadme" name="__readme__" tab="说明" />
+          <n-tab-pane v-for="task in tasks" :key="task.key" :name="task.key" :tab="task.userTitle || task.title || task.key" />
+        </n-tabs>
+        <n-scrollbar v-if="showingReadme" class="template-readme-scroll">
+          <ReadmeRenderer :markdown="state.templateReadme.value.markdown" />
+        </n-scrollbar>
+        <div v-else-if="currentTask" class="template-runner-shell">
+          <div>
+            <n-text style="font-size: 16px; font-weight: bold;">{{ currentTask.userTitle || currentTask.title || currentTask.key }}</n-text>
+            <p v-if="currentTask.userDescription || currentTask.description" style="margin: 4px 0 0; color: var(--n-text-color-3); font-size: 13px;">
+              {{ currentTask.userDescription || currentTask.description }}
+            </p>
+          </div>
+          <n-form v-if="groupedTaskFields(currentTask).length" label-placement="top" :show-feedback="false" class="template-step-form">
+            <n-form-item v-for="field in groupedTaskFields(currentTask)" :key="`${currentTask.key}-${field.key}`" :label="field.label || field.key" :style="fieldItemStyle(field)">
+              <template #label v-if="field.description">
+                <n-text>{{ field.label || field.key }}</n-text>
+                <n-text depth="3" style="font-size: 12px; margin-left: 8px;">{{ field.description }}</n-text>
+              </template>
+              <component :is="renderFieldControl(field, taskFieldValue(currentTask.key, field), value => actions.updateTemplateTaskValue(currentTask.key, field.key, value))" />
+            </n-form-item>
+          </n-form>
+          <n-empty v-else description="该任务未定义配置字段" style="margin: auto;" />
+        </div>
+      </template>
+
     </div>
 
     <template #footer v-if="state.selectedTemplateScript.value">
@@ -417,6 +481,11 @@ function renderFieldControl(field, value, onUpdate) {
   min-height: 0;
   padding-top: 12px;
   gap: 12px;
+}
+
+.template-readme-scroll {
+  flex: 1;
+  min-height: 0;
 }
 
 .template-content-grid {

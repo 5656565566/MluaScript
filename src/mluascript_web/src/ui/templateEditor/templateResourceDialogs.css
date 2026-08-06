@@ -215,7 +215,7 @@
 }
 
 .task-parameter-tree {
-  --task-parameter-tree-accent: var(--color-accent-text, #63e2b7);
+  --task-parameter-tree-accent: var(--color-primary);
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--n-border-color);

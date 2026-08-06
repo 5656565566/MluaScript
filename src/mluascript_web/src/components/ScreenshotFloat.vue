@@ -292,8 +292,8 @@ function close() {
 
 .crop-box {
   position: absolute;
-  border: 2px dashed #0ea5e9;
-  background: rgba(14, 165, 233, 0.2);
+  border: 2px dashed var(--color-info);
+  background: color-mix(in srgb, var(--color-info) 20%, transparent);
   pointer-events: none;
 }
 
@@ -302,11 +302,11 @@ function close() {
   width: 32px;
   height: 32px;
   border: 2px solid var(--n-error-color);
-  background: rgba(244, 67, 54, 0.2);
+  background: color-mix(in srgb, var(--color-danger) 20%, transparent);
   border-radius: 50%;
   transform: translate(-50%, -50%);
   pointer-events: none;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8), 0 0 10px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 0 2px var(--color-surface), 0 0 10px var(--color-shadow);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -317,7 +317,7 @@ function close() {
   content: "";
   position: absolute;
   background: var(--n-error-color);
-  box-shadow: 0 0 4px rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 4px var(--color-surface);
 }
 
 .pick-marker::before {

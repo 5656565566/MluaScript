@@ -1,10 +1,49 @@
 import * as Blockly from 'blockly'
 import { luaOrder, PICKER_ICON_TYPE } from '../constants'
-import { getLuaScriptPickerItems, getWorkspaceFunctionPickerItems } from '../utils'
+import { createProjectModuleFunctionPickerConfig, getLuaScriptPickerItems, getWorkspaceFunctionPickerItems } from '../utils'
+import {
+  applyProjectModuleFunctionSelection,
+  installProjectModuleCallSerialization,
+  restoreProjectModuleCallState,
+} from '../projectModuleCall.js'
+import { restoreSerializedPickerLabel } from '../pickerBlockState.js'
 import { MaaPickerIcon } from '../fields'
 import { attachBlockSemanticWarning, getBlockSemanticDiagnostic } from '../blockSemanticDiagnostics'
 import { luaMathBlocks } from './lua_math'
 import { luaStringBlocks } from './lua_string'
+
+function initializeProjectModuleCall(block) {
+  block.appendDummyInput().appendField(new Blockly.FieldTextInput(''), 'MODULE_VALUE').setVisible(false)
+  block.appendDummyInput().appendField(new Blockly.FieldTextInput(''), 'FUNCTION_VALUE').setVisible(false)
+  block.appendDummyInput().appendField(new Blockly.FieldTextInput('[]'), 'PARAM_VALUES').setVisible(false)
+  block.appendDummyInput().appendField(new Blockly.FieldTextInput('function'), 'CALL_STYLE').setVisible(false)
+  installProjectModuleCallSerialization(block)
+  if (!block.getIcon(PICKER_ICON_TYPE)) {
+    block.addIcon(new MaaPickerIcon(block, () => createProjectModuleFunctionPickerConfig({
+      currentModuleKey: block.getFieldValue('MODULE_VALUE'),
+      currentFunctionName: block.getFieldValue('FUNCTION_VALUE'),
+      onSelect: (moduleKey, item) => {
+        return Boolean(applyProjectModuleFunctionSelection(block, moduleKey, item))
+      },
+    })))
+  }
+  restoreProjectModuleCallState(block)
+  attachBlockSemanticWarning(block, () => restoreProjectModuleCallState(block))
+}
+
+function generateProjectModuleCall(block, generator) {
+  const moduleKey = block.getFieldValue('MODULE_VALUE') || ''
+  const functionName = block.getFieldValue('FUNCTION_VALUE') || ''
+  let params = []
+  try { params = JSON.parse(block.getFieldValue('PARAM_VALUES') || '[]') } catch {}
+  const args = (Array.isArray(params) ? params : []).map((_, index) =>
+    generator.valueToCode(block, `ARG_${index}`, luaOrder) || 'nil'
+  )
+  if (block.getFieldValue('CALL_STYLE') === 'method') {
+    return `require(${JSON.stringify(moduleKey)}):${functionName}(${args.join(', ')})`
+  }
+  return `require(${JSON.stringify(moduleKey)})[${JSON.stringify(functionName)}](${args.join(', ')})`
+}
 
 export const luaCoreBlocks = [
   {
@@ -167,15 +206,41 @@ export const luaCoreBlocks = [
     },
   },
   {
+    type: 'lua_project_module_call_stmt',
+    category: '模块 / 文件',
+    colour: '#7c3aed',
+    definition: {
+      message0: '调用项目函数 %1',
+      args0: [{ type: 'field_label', name: 'CALL_LABEL', text: '未选择' }],
+      previousStatement: null,
+      nextStatement: null,
+      tooltip: '按项目路径调用 Blockly 或 Lua 模块显式导出的函数。',
+      helpUrl: '',
+    },
+    init(block) { initializeProjectModuleCall(block) },
+    generator(block, generator) { return `${generateProjectModuleCall(block, generator)}\n` },
+  },
+  {
+    type: 'lua_project_module_call_expr',
+    category: '模块 / 文件',
+    colour: '#7c3aed',
+    definition: {
+      message0: '获取项目函数结果 %1',
+      args0: [{ type: 'field_label', name: 'CALL_LABEL', text: '未选择' }],
+      output: null,
+      tooltip: '调用具有返回值的项目模块导出函数。',
+      helpUrl: '',
+    },
+    init(block) { initializeProjectModuleCall(block) },
+    generator(block, generator) { return [generateProjectModuleCall(block, generator), luaOrder] },
+  },
+  {
     type: 'lua_require_module_stmt',
     category: '模块 / 文件',
     colour: '#7c3aed',
     definition: {
-      message0: '导入模块 %1 %2',
-      args0: [
-        { type: 'field_label', name: 'MODULE_LABEL', text: '未选择' },
-        { type: 'field_label', name: 'CONFIG_TEXT', text: '配置' }
-      ],
+      message0: '导入模块 %1',
+      args0: [{ type: 'field_label', name: 'MODULE_LABEL', text: '未选择' }],
       previousStatement: null,
       nextStatement: null,
       tooltip: '执行 require("模块名") 导入模块。适合只触发模块初始化、副作用加载。',
@@ -194,12 +259,8 @@ export const luaCoreBlocks = [
           }
         })))
       }
-      // 从隐藏值字段恢复显示标签（XML 加载后 field_label 不会被序列化）
-      const savedValue = block.getFieldValue('MODULE_VALUE')
-      if (savedValue) {
-        block.setFieldValue(savedValue, 'MODULE_LABEL')
-      }
-      attachBlockSemanticWarning(block)
+      restoreSerializedPickerLabel(block)
+      attachBlockSemanticWarning(block, () => restoreSerializedPickerLabel(block))
     },
     generator(block) {
       const diagnostic = getBlockSemanticDiagnostic(block)
@@ -213,11 +274,8 @@ export const luaCoreBlocks = [
     category: '模块 / 文件',
     colour: '#7c3aed',
     definition: {
-      message0: '导入模块值 %1 %2',
-      args0: [
-        { type: 'field_label', name: 'MODULE_LABEL', text: '未选择' },
-        { type: 'field_label', name: 'CONFIG_TEXT', text: '配置' }
-      ],
+      message0: '导入模块值 %1',
+      args0: [{ type: 'field_label', name: 'MODULE_LABEL', text: '未选择' }],
       output: null,
       tooltip: '生成 require("模块名") 表达式，可接变量赋值或函数调用。',
       helpUrl: '',
@@ -235,12 +293,8 @@ export const luaCoreBlocks = [
           }
         })))
       }
-      // 从隐藏值字段恢复显示标签（XML 加载后 field_label 不会被序列化）
-      const savedValue = block.getFieldValue('MODULE_VALUE')
-      if (savedValue) {
-        block.setFieldValue(savedValue, 'MODULE_LABEL')
-      }
-      attachBlockSemanticWarning(block)
+      restoreSerializedPickerLabel(block)
+      attachBlockSemanticWarning(block, () => restoreSerializedPickerLabel(block))
     },
     generator(block) {
       const diagnostic = getBlockSemanticDiagnostic(block)
@@ -254,11 +308,8 @@ export const luaCoreBlocks = [
     category: '模块 / 文件',
     colour: '#7c3aed',
     definition: {
-      message0: '执行 Lua 文件 %1 %2',
-      args0: [
-        { type: 'field_label', name: 'FILE_LABEL', text: '未选择' },
-        { type: 'field_label', name: 'CONFIG_TEXT', text: '配置' }
-      ],
+      message0: '执行 Lua 文件 %1',
+      args0: [{ type: 'field_label', name: 'FILE_LABEL', text: '未选择' }],
       previousStatement: null,
       nextStatement: null,
       tooltip: '执行 dofile("相对路径.lua")。路径相对当前主脚本所在目录。',
@@ -277,12 +328,8 @@ export const luaCoreBlocks = [
           }
         })))
       }
-      // 从隐藏值字段恢复显示标签（XML 加载后 field_label 不会被序列化）
-      const savedValue = block.getFieldValue('FILE_VALUE')
-      if (savedValue) {
-        block.setFieldValue(savedValue, 'FILE_LABEL')
-      }
-      attachBlockSemanticWarning(block)
+      restoreSerializedPickerLabel(block)
+      attachBlockSemanticWarning(block, () => restoreSerializedPickerLabel(block))
     },
     generator(block) {
       const diagnostic = getBlockSemanticDiagnostic(block)
@@ -296,11 +343,8 @@ export const luaCoreBlocks = [
     category: '模块 / 文件',
     colour: '#7c3aed',
     definition: {
-      message0: '模块导出 %1 %2',
-      args0: [
-        { type: 'field_label', name: 'FUNC_LABEL', text: '未选择函数' },
-        { type: 'field_label', name: 'CONFIG_TEXT', text: '配置' }
-      ],
+      message0: '模块导出 %1',
+      args0: [{ type: 'field_label', name: 'FUNC_LABEL', text: '未选择函数' }],
       tooltip: '模块导出根块。用于声明文件末尾 return 导出表，只允许工作区存在一个。',
       helpUrl: '',
     },
@@ -334,20 +378,11 @@ export const luaCoreBlocks = [
           }
         })))
       }
-      // 从隐藏值字段恢复显示标签（XML 加载后 field_label 不会被序列化）
-      try {
-        const savedFuncValues = JSON.parse(block.getFieldValue('FUNC_VALUES') || '[]')
-        if (Array.isArray(savedFuncValues) && savedFuncValues.length > 0) {
-          if (savedFuncValues.length <= 2) {
-            block.setFieldValue(savedFuncValues.join('，'), 'FUNC_LABEL')
-          } else {
-            block.setFieldValue(`${savedFuncValues[0]} 等 ${savedFuncValues.length} 个`, 'FUNC_LABEL')
-          }
-        }
-      } catch (e) {}
+      restoreSerializedPickerLabel(block)
       block.setOnChange((event) => {
         const workspace = block.workspace
         if (!workspace) return
+        restoreSerializedPickerLabel(block)
 
         // 自动同步函数改名
         if (event && event.type === Blockly.Events.BLOCK_CHANGE && event.element === 'field' && event.name === 'NAME') {

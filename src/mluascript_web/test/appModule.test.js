@@ -30,6 +30,8 @@ function createState() {
     blocklyEditor: ref(null),
     screenshotPosition: ref({ x: 0, y: 0 }),
     appTheme: ref('system'),
+    colorTheme: ref('classic'),
+    customColor: ref('#18a058'),
   }
 }
 
@@ -111,4 +113,13 @@ test('logout invalidates an in-flight authenticated bootstrap', async () => {
 
   assert.equal(state.authenticated.value, false)
   assert.equal(applyCount, 0)
+})
+
+test('applyTheme ignores a select option object passed as the color theme', () => {
+  const { actions, state } = createModule()
+
+  actions.applyTheme('light', { label: '亮色主题', value: 'light' })
+
+  assert.equal(state.appTheme.value, 'light')
+  assert.equal(state.colorTheme.value, 'classic')
 })

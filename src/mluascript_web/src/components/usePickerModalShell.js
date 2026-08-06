@@ -20,6 +20,7 @@ export function usePickerModalShell(props) {
   })
 
   const effectiveTitle = computed(() => isStoreDriven.value ? (storeSnapshot.value?.title || props.title) : props.title)
+  const effectiveSubtitle = computed(() => isStoreDriven.value ? (storeSnapshot.value?.subtitle || props.subtitle) : props.subtitle)
   const effectiveEmptyText = computed(() => isStoreDriven.value ? (storeSnapshot.value?.emptyText || props.emptyText) : props.emptyText)
   const effectiveAllowCreate = computed(() => {
     if (isStoreDriven.value) return Boolean(storeSnapshot.value?.allowCreate)
@@ -42,11 +43,12 @@ export function usePickerModalShell(props) {
     return props.form
   })
   const effectiveHandlers = computed(() => ({
-    onSelect: isStoreDriven.value ? (storeSnapshot.value?.handlers?.onSelect || props.onSelect) : props.onSelect,
-    onConfirm: isStoreDriven.value ? (storeSnapshot.value?.handlers?.onConfirm || props.onConfirm) : props.onConfirm,
-    onCreate: isStoreDriven.value ? (storeSnapshot.value?.handlers?.onCreate || props.onCreate) : props.onCreate,
-    onManage: isStoreDriven.value ? (storeSnapshot.value?.handlers?.onManage || props.onManage) : props.onManage,
-    onOpenFieldPicker: isStoreDriven.value ? (storeSnapshot.value?.handlers?.onOpenFieldPicker || props.onOpenFieldPicker) : props.onOpenFieldPicker,
+    // Store 快照是当前步骤的完整状态；显式 null 不能回退到弹窗初始 props 的旧处理器。
+    onSelect: isStoreDriven.value ? storeSnapshot.value?.handlers?.onSelect : props.onSelect,
+    onConfirm: isStoreDriven.value ? storeSnapshot.value?.handlers?.onConfirm : props.onConfirm,
+    onCreate: isStoreDriven.value ? storeSnapshot.value?.handlers?.onCreate : props.onCreate,
+    onManage: isStoreDriven.value ? storeSnapshot.value?.handlers?.onManage : props.onManage,
+    onOpenFieldPicker: isStoreDriven.value ? storeSnapshot.value?.handlers?.onOpenFieldPicker : props.onOpenFieldPicker,
   }))
   const showManageButton = computed(() => typeof effectiveHandlers.value.onManage === 'function')
 
@@ -107,6 +109,7 @@ export function usePickerModalShell(props) {
     isStoreDriven,
     effectiveItems,
     effectiveTitle,
+    effectiveSubtitle,
     effectiveEmptyText,
     effectiveAllowCreate,
     effectiveCreateButtonText,

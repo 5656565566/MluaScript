@@ -9,6 +9,7 @@ from mluascript.control.integration.facade import IntegrationFacade
 from mluascript.control.integration.models import MaaPipelineRunContext, RunStatus
 from mluascript.control.state.models import TaskInfo
 from mluascript.control.workspace.manager import WorkspaceManager, get_workspace_manager
+from mluascript.control.workspace.artifact_service import cleanup_artifact_runtime_dir
 from mluascript.maa.tasks import TaskRequest, build_pipeline_override, run_task
 from mluascript.runtime.threading.manager import RuntimeThreadManager
 
@@ -21,6 +22,8 @@ class PipelineStartRequest:
     override: Optional[Dict[str, Any]]
     target: str
     project_path: str
+    title: str | None
+    cleanup_dir: str | None
 
 
 class PipelineExecutionUseCase(BaseExecutionUseCase[MaaPipelineRunContext]):
@@ -39,8 +42,24 @@ class PipelineExecutionUseCase(BaseExecutionUseCase[MaaPipelineRunContext]):
         self.thread_manager = thread_manager or RuntimeThreadManager()
         self.workspace_manager = workspace_manager or get_workspace_manager()
 
-    def start_pipeline(self, entry: str, override: Optional[Dict[str, Any]], target: str, project_path: str) -> str:
-        self._current_request = PipelineStartRequest(entry=entry, override=override, target=target, project_path=project_path)
+    def start_pipeline(
+        self,
+        entry: str,
+        override: Optional[Dict[str, Any]],
+        target: str,
+        project_path: str,
+        *,
+        title: str | None = None,
+        cleanup_dir: str | None = None,
+    ) -> str:
+        self._current_request = PipelineStartRequest(
+            entry=entry,
+            override=override,
+            target=target,
+            project_path=project_path,
+            title=title,
+            cleanup_dir=cleanup_dir,
+        )
         try:
             return self.start(
                 target=target,
@@ -54,7 +73,7 @@ class PipelineExecutionUseCase(BaseExecutionUseCase[MaaPipelineRunContext]):
 
     def build_task_title(self) -> str | None:
         request = self._require_request()
-        return request.entry
+        return request.title or request.entry
 
     def build_task_summary(self) -> dict[str, Any]:
         request = self._require_request()
@@ -68,6 +87,7 @@ class PipelineExecutionUseCase(BaseExecutionUseCase[MaaPipelineRunContext]):
     def create_context(self) -> MaaPipelineRunContext:
         request = self._require_request()
         locator = self.workspace_manager.build_pipeline_run_locator(request.project_path)
+        locator.cleanup_dir = request.cleanup_dir
         
         device_facade = get_device_facade()
         session = device_facade._maa_facade.get_current_session()
@@ -115,6 +135,8 @@ class PipelineExecutionUseCase(BaseExecutionUseCase[MaaPipelineRunContext]):
                 context.status = RunStatus.FAILED
                 self.state_manager.finish_task(task.task_id, "failed", error=str(exc))
                 raise
+            finally:
+                cleanup_artifact_runtime_dir(context.locator.cleanup_dir)
 
         host_task = self.thread_manager.spawn(runner, name=f"pipeline-run-{task.task_id[:8]}")
         context.host_task = host_task
@@ -131,6 +153,7 @@ class PipelineExecutionUseCase(BaseExecutionUseCase[MaaPipelineRunContext]):
             host_task.join(0.2)
         if context.status is not RunStatus.STOPPED:
             context.status = RunStatus.STOPPED
+        cleanup_artifact_runtime_dir(context.locator.cleanup_dir)
         self.state_manager.finish_task(task.task_id, "stopped")
 
     def _execute_pipeline(self, context: MaaPipelineRunContext, entry: str, override: Optional[Dict[str, Any]]) -> Any:

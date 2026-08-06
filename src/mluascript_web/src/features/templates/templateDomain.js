@@ -154,10 +154,30 @@ export function normalizeTemplateMeta(meta) {
   const vars = meta.vars || {}
   const normalizedVars = Object.fromEntries(Object.entries(vars).map(([key, field]) => [key, normalizeTemplateField(field, key)]))
   const rawTasks = Array.isArray(meta.tasks) ? meta.tasks : Array.isArray(meta.taskCatalog) ? meta.taskCatalog : []
-  const tasks = rawTasks.map(task => ({
-    ...task,
-    args: Array.isArray(task.args) ? task.args.map(arg => typeof arg === 'string' ? arg : ({ ...arg, if: arg.if ? { ...arg.if } : null })) : [],
-  }))
+  const tasks = rawTasks.map((task) => {
+    const args = Array.isArray(task.args)
+      ? task.args.map(arg => typeof arg === 'string' ? arg : ({ ...arg, if: arg.if ? { ...arg.if } : null }))
+      : []
+    return {
+      ...task,
+      key: task.k || task.key || '',
+      title: task.t || task.title || task.k || task.key || '',
+      description: task.d || task.description || '',
+      userTitle: task.ut || task.userTitle || task.t || task.title || task.k || task.key || '',
+      userDescription: task.ud || task.userDescription || task.d || task.description || '',
+      args,
+      fields: args.map((arg) => {
+        const field = normalizedVars[taskArgKey(arg)]
+        if (!field) return null
+        const condition = taskArgCondition(arg)
+        return {
+          ...field,
+          if: condition ? { ...condition, in: Array.isArray(condition.in) ? condition.in : [] } : null,
+          grp: condition?.k || '',
+        }
+      }).filter(Boolean),
+    }
+  })
   const taskMap = Object.fromEntries(tasks.map(task => [task.k || task.key, task]))
   const workflows = (Array.isArray(meta.flows) ? meta.flows : Array.isArray(meta.workflows) ? meta.workflows : []).map((flow) => {
     const workflowKey = flow.k || flow.key || ''
@@ -226,6 +246,7 @@ export function normalizeTemplateMeta(meta) {
     entry: {
       ...(meta.entry || {}),
       defaultWorkflow: meta.entry?.defaultWorkflow || meta.entry?.flow || workflows[0]?.key || '',
+      defaultTask: meta.entry?.defaultTask || meta.entry?.task || tasks[0]?.key || '',
     },
   }
 }

@@ -109,10 +109,10 @@ function stopDrag() {
   position: fixed;
   width: 360px;
   max-width: calc(100vw - 24px);
-  background: color-mix(in srgb, var(--n-color) 92%, #0b1220 8%);
+  background: color-mix(in srgb, var(--n-color) 92%, var(--color-background) 8%);
   border: 1px solid color-mix(in srgb, var(--n-border-color) 70%, var(--n-primary-color) 30%);
   border-radius: 14px;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.24);
+  box-shadow: 0 14px 36px var(--color-shadow);
   overflow: hidden;
   pointer-events: auto;
   backdrop-filter: blur(8px);
@@ -162,8 +162,8 @@ function stopDrag() {
   align-items: center;
   justify-content: center;
   background:
-    linear-gradient(45deg, rgba(255,255,255,0.03) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.03) 75%),
-    linear-gradient(45deg, rgba(255,255,255,0.03) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.03) 75%),
+    linear-gradient(45deg, color-mix(in srgb, var(--color-text-primary) 3%, transparent) 25%, transparent 25%, transparent 75%, color-mix(in srgb, var(--color-text-primary) 3%, transparent) 75%),
+    linear-gradient(45deg, color-mix(in srgb, var(--color-text-primary) 3%, transparent) 25%, transparent 25%, transparent 75%, color-mix(in srgb, var(--color-text-primary) 3%, transparent) 75%),
     color-mix(in srgb, var(--n-color-embedded) 90%, black 10%);
   background-size: 24px 24px;
   background-position: 0 0, 12px 12px;

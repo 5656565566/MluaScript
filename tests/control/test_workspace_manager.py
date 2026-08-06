@@ -98,3 +98,34 @@ def test_list_scripts_includes_default_mluascript_web_lua_directory(tmp_path: Pa
     scripts = manager.list_scripts()
 
     assert [item.path for item in scripts] == [".mluascript_web/lua/debug.lua"]
+
+
+def test_list_scripts_includes_new_single_file_projects(tmp_path: Path) -> None:
+    project_dir = tmp_path / ".mluascript_web" / "projects" / "daily-task"
+    project_dir.mkdir(parents=True)
+    (project_dir / "daily-task.lua").write_text("return true\n", encoding="utf-8")
+
+    scripts = WorkspaceManager(tmp_path).list_scripts()
+
+    assert [item.path for item in scripts] == [".mluascript_web/projects/daily-task/daily-task.lua"]
+
+
+def test_manifest_project_uses_scripts_and_maa_resource_roots(tmp_path: Path) -> None:
+    project_dir = tmp_path / "projects" / "demo"
+    (project_dir / "scripts" / "tasks").mkdir(parents=True)
+    (project_dir / "resources" / "maa").mkdir(parents=True)
+    (project_dir / "mluascript.yaml").write_text("schema: mluascript.package/v1\n", encoding="utf-8")
+    script_file = project_dir / "scripts" / "tasks" / "login.lua"
+    script_file.write_text("return true", encoding="utf-8")
+    resource_file = project_dir / "resources" / "maa" / "button.png"
+    resource_file.write_bytes(b"png")
+
+    manager = WorkspaceManager(tmp_path)
+    project = manager.resolve_project("projects/demo/scripts/tasks/login.lua")
+    locator = manager.build_script_run_locator("projects/demo/scripts/tasks/login.lua")
+
+    assert Path(project.root_dir) == project_dir.resolve()
+    assert Path(project.scripts_dir) == (project_dir / "scripts").resolve()
+    assert Path(project.resource_dir) == (project_dir / "resources" / "maa").resolve()
+    assert Path(locator.script_dir) == (project_dir / "scripts").resolve()
+    assert [item.relative_path for item in locator.resources] == ["resources/maa/button.png"]

@@ -5,6 +5,13 @@
   flex-direction: column;
 }
 
+.picker-list-context {
+  margin-bottom: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
 .picker-list-scroll {
   flex: 1;
   min-height: 0;
