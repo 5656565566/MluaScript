@@ -90,6 +90,16 @@ const resourceColumns = [
               return
             }
             if (row.source === 'build') {
+              try {
+                const payload = await actions.loadArtifactTemplate(row.id)
+                if (payload.hasTemplate) {
+                  state.activeView.value = 'template-runner'
+                  return
+                }
+              } catch (error) {
+                const message = String(error?.message || error || '')
+                if (!message.includes('没有模板元数据')) throw error
+              }
               await actions.runArtifact(row.id)
               activeTab.value = 'task-status'
               return

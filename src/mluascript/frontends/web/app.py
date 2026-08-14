@@ -110,6 +110,10 @@ class RunPipelinePayload(BaseModel):
 class RunArtifactPayload(BaseModel):
     artifactId: str
     sessionLabel: str | None = None
+    templateMode: str = ""
+    workflowKey: str = ""
+    workflow: dict[str, Any] = Field(default_factory=dict)
+    runtime: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunTemplatePayload(BaseModel):
@@ -179,6 +183,14 @@ class ProjectDebugPayload(BaseModel):
     workflowKey: str = ""
     workflow: dict[str, Any] = Field(default_factory=dict)
     runtime: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectTemplatePreviewPayload(BaseModel):
+    """模板预览使用前端当前源码快照，支持 Blockly 尚未落盘的生成 Lua。"""
+
+    entryPath: str = ""
+    luaCode: str = ""
+    sourceOverrides: dict[str, str] = Field(default_factory=dict)
 
 
 class LoginPayload(BaseModel):
@@ -719,6 +731,40 @@ def system_script_readme(artifact_id: str, request: Request) -> dict[str, Any]:
     return _ok(readme.model_dump())
 
 
+@system_router.get("/scripts/{artifact_id}/template")
+def system_script_template(artifact_id: str, request: Request) -> dict[str, Any]:
+    """读取构建包当前入口的唯一模板配置，不修改归档内容。"""
+
+    service = _artifact_service(request)
+    try:
+        source = service.get_template_source(artifact_id)
+        store = TemplateStore(
+            WorkspaceManager(service.builds_root.parent.parent),
+            config_dir=service.template_config_dir(artifact_id),
+        )
+        meta = store.get_template_meta_from_source(source.code, script_path=source.script_path)
+        if meta is None:
+            return _ok({"hasTemplate": False, "scriptPath": source.script_path, "meta": None, "savedConfig": None})
+        saved_config = store.load_saved_config(source.script_path)
+        readme = service.read_readme(artifact_id) if source.artifact.has_readme else None
+    except ArtifactServiceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"模板解析失败: {exc}") from exc
+    return _ok(
+        {
+            "hasTemplate": True,
+            "scriptPath": source.script_path,
+            "meta": meta.model_dump(by_alias=True, exclude_none=True),
+            "savedConfig": saved_config.model_dump(),
+            "configPath": store.get_saved_config_path(source.script_path),
+            "readme": readme.model_dump() if readme else None,
+            "artifactId": source.artifact.id,
+            "name": source.artifact.name,
+        }
+    )
+
+
 @system_router.get("/scripts/template")
 def get_script_template(scriptPath: str = Query(...)) -> dict[str, Any]:
     template_store = get_template_store()
@@ -1093,6 +1139,44 @@ def get_project_template(project_key: str, request: Request, path: str = Query(.
     )
 
 
+@projects_router.post("/{project_key}/template:preview")
+def preview_project_template(
+    project_key: str,
+    payload: ProjectTemplatePreviewPayload,
+    request: Request,
+) -> dict[str, Any]:
+    """解析当前项目入口的内存 Lua 快照，不要求生成文件真实存在。"""
+
+    service = _project_service(request)
+    try:
+        target = service.prepare_debug_target(
+            project_key,
+            entry_path=payload.entryPath,
+            source_overrides=payload.sourceOverrides,
+        )
+    except ProjectServiceError as exc:
+        raise _project_error(exc) from exc
+    template_store = _project_template_store(service, project_key, target.project_root)
+    try:
+        meta = template_store.get_template_meta_from_source(payload.luaCode, script_path=target.entry_path)
+        if meta is None:
+            return _ok({"hasTemplate": False, "scriptPath": target.entry_path, "meta": None, "savedConfig": None})
+        saved_config = template_store.load_saved_config(target.entry_path)
+        readme = template_store.get_readme(target.entry_path)
+    except ValueError as exc:
+        raise _project_error(ProjectServiceError(str(exc))) from exc
+    return _ok(
+        {
+            "hasTemplate": True,
+            "scriptPath": target.entry_path,
+            "meta": meta.model_dump(by_alias=True, exclude_none=True),
+            "savedConfig": saved_config.model_dump(),
+            "configPath": template_store.get_saved_config_path(target.entry_path),
+            "readme": readme,
+        }
+    )
+
+
 @projects_router.get("/{project_key}/files/content")
 def read_project_file(project_key: str, request: Request, path: str = Query(...)) -> dict[str, Any]:
     try:
@@ -1258,7 +1342,7 @@ def debug_project(project_key: str, payload: ProjectDebugPayload, request: Reque
     if payload.mode == "template":
         template_store = _project_template_store(service, project_key, target.project_root)
         try:
-            meta = template_store.get_template_meta(target.entry_path)
+            meta = template_store.get_template_meta_from_source(code, script_path=target.entry_path)
             if meta is None:
                 raise ProjectServiceError("当前脚本没有模板元数据")
             current_saved = template_store.load_saved_config(target.entry_path)
@@ -1378,6 +1462,58 @@ def run_build_artifact(payload: RunArtifactPayload, request: Request) -> dict[st
 
     try:
         if prepared.mode == "script":
+            if payload.templateMode:
+                artifact_service = _artifact_service(request)
+                template_script_path = Path(prepared.script_path).name
+                if prepared.project_path:
+                    try:
+                        template_script_path = Path(prepared.script_path).resolve().relative_to(
+                            Path(prepared.project_path).resolve()
+                        ).as_posix()
+                    except ValueError as exc:
+                        raise ArtifactServiceError("构建包入口路径无效") from exc
+                store = TemplateStore(
+                    WorkspaceManager(Path(prepared.project_path or Path(prepared.script_path).parent)),
+                    config_dir=artifact_service.template_config_dir(payload.artifactId),
+                )
+                meta = store.get_template_meta_from_source(prepared.code, script_path=template_script_path)
+                if meta is None:
+                    raise ArtifactServiceError("构建入口没有模板元数据")
+                current_saved = store.load_saved_config(template_script_path)
+                if payload.templateMode == "task" or (meta.mode == "task" and not meta.flows):
+                    task_key = str(payload.runtime.get("selectedTaskKey") or meta.entry.task or "").strip()
+                    tasks = {
+                        str(key): {"params": value if isinstance(value, dict) else {}}
+                        for key, value in (payload.runtime.get("tasks") or {}).items()
+                    }
+                    saved = store.save_saved_config(
+                        template_script_path,
+                        TemplateSavedConfig.model_validate({
+                            **current_saved.model_dump(),
+                            "scriptPath": template_script_path,
+                            "selectedTaskKey": task_key,
+                            "tasks": tasks,
+                        }),
+                    )
+                    runtime_code = store.build_task_runtime_script(meta, saved, task_key=task_key)
+                else:
+                    workflow_key = payload.workflowKey or meta.entry.flow
+                    if not workflow_key:
+                        raise ArtifactServiceError("模板调试缺少工作流入口")
+                    saved = store.save_saved_config(
+                        template_script_path,
+                        TemplateSavedConfig.model_validate({
+                            **current_saved.model_dump(),
+                            "scriptPath": template_script_path,
+                            "selectedFlowKey": workflow_key,
+                            "flows": {
+                                **current_saved.model_dump().get("flows", {}),
+                                workflow_key: payload.workflow,
+                            },
+                        }),
+                    )
+                    runtime_code = store.build_runtime_script(meta, saved, flow_key=workflow_key)
+                prepared.code = f"{prepared.code}\n\n{runtime_code}\n"
             task_id = facade.run_script(
                 prepared.script_path,
                 prepared.code,
@@ -1395,6 +1531,9 @@ def run_build_artifact(payload: RunArtifactPayload, request: Request) -> dict[st
                 title=prepared.artifact.path,
                 cleanup_dir=prepared.cleanup_dir,
             )
+    except ArtifactServiceError as exc:
+        prepared.cleanup()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         prepared.cleanup()
         raise HTTPException(status_code=500, detail=f"启动构建产物失败: {exc}") from exc

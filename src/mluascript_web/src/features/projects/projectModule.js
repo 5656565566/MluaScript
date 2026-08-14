@@ -168,6 +168,8 @@ export function createProjectActions({ state, projectApi, compileBlocklyXml, get
   }
 
   return {
+    buildProjectDebugSnapshot: buildDebugSnapshot,
+
     async loadProjects() {
       state.projectLoading.value = true
       try {

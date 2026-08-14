@@ -84,6 +84,7 @@ const templateActions = createTemplateActions({
   state,
   templateApi,
   projectApi,
+  artifactApi: systemApi,
   getActions: () => actions,
 })
 

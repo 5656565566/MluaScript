@@ -31,7 +31,13 @@ class TemplateStore:
 
     def get_template_meta(self, script_path: str) -> TemplateMeta | None:
         text = self.workspace_manager.read_script(script_path)
-        source = parse_template_meta(text, script_path=script_path)
+        return self.get_template_meta_from_source(text, script_path=script_path)
+
+    @staticmethod
+    def get_template_meta_from_source(text: str, *, script_path: str = "") -> TemplateMeta | None:
+        """从内存脚本快照解析模板，供 Blockly 生成 Lua 和构建包入口复用。"""
+
+        source = parse_template_meta(str(text or ""), script_path=script_path)
         return source.meta if source else None
 
     def get_readme(self, script_path: str) -> dict[str, str] | None:

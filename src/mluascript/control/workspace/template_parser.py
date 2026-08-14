@@ -29,14 +29,14 @@ class TemplateSource:
 def extract_template_block(script_text: str) -> TemplateSource | None:
     """从 Lua 脚本中提取模板注释块"""
     lines = script_text.splitlines()
-    start_idx = -1
-    end_idx = -1
-    for idx, line in enumerate(lines):
-        if line.strip() == _TEMPLATE_START:
-            start_idx = idx
-            break
-    if start_idx == -1:
+    start_indices = [idx for idx, line in enumerate(lines) if line.strip() == _TEMPLATE_START]
+    if not start_indices:
         return None
+    if len(start_indices) > 1:
+        raise TemplateParseError("一个 Lua 入口最多配置一个模板")
+
+    start_idx = start_indices[0]
+    end_idx = -1
     for idx in range(start_idx + 1, len(lines)):
         if lines[idx].strip() == _TEMPLATE_END:
             end_idx = idx

@@ -5,7 +5,7 @@ import {
   normalizeTemplateSavedConfig,
 } from './templateDomain.js'
 
-export function createTemplateActions({ state, templateApi, projectApi, getActions }) {
+export function createTemplateActions({ state, templateApi, projectApi, artifactApi, getActions }) {
   function applyTemplateState(meta, savedConfig, readme = null) {
     state.selectedTemplateMeta.value = meta
     state.templateReadme.value = readme
@@ -52,8 +52,10 @@ export function createTemplateActions({ state, templateApi, projectApi, getActio
       return payload
     },
 
-    async loadProjectTemplate(projectKey, entryPath) {
-      const payload = await projectApi.getTemplate(projectKey, entryPath)
+    async loadProjectTemplate(projectKey, entryPath, snapshot = null) {
+      const payload = snapshot
+        ? await projectApi.previewTemplate(projectKey, snapshot)
+        : await projectApi.getTemplate(projectKey, entryPath)
       if (!payload.hasTemplate) throw new Error('当前脚本没有模板元数据')
       const meta = normalizeTemplateMeta(payload.meta)
       const savedConfig = normalizeTemplateSavedConfig(payload.savedConfig)
@@ -61,7 +63,26 @@ export function createTemplateActions({ state, templateApi, projectApi, getActio
         path: payload.scriptPath || entryPath,
         name: String(payload.scriptPath || entryPath).split('/').pop() || '模板脚本',
         projectKey,
-        entryPath,
+        entryPath: payload.scriptPath || entryPath,
+      }
+      state.selectedTemplateConfigPath.value = payload.configPath || ''
+      state.selectedTemplateSavedConfig.value = savedConfig
+      applyTemplateState(meta, savedConfig, payload.readme || null)
+      return payload
+    },
+
+    async loadArtifactTemplate(artifactId) {
+      if (!artifactApi?.getArtifactTemplate) throw new Error('构建包模板接口不可用')
+      const response = await artifactApi.getArtifactTemplate(artifactId)
+      const payload = response.data || response
+      if (!payload.hasTemplate) throw new Error('构建入口没有模板元数据')
+      const meta = normalizeTemplateMeta(payload.meta)
+      const savedConfig = normalizeTemplateSavedConfig(payload.savedConfig)
+      state.selectedTemplateScript.value = {
+        path: payload.scriptPath || '',
+        name: payload.name || String(payload.scriptPath || '').split('/').pop() || '模板脚本',
+        artifactId,
+        entryPath: payload.scriptPath || '',
       }
       state.selectedTemplateConfigPath.value = payload.configPath || ''
       state.selectedTemplateSavedConfig.value = savedConfig
@@ -186,6 +207,8 @@ export function createTemplateActions({ state, templateApi, projectApi, getActio
             entryPath: script.entryPath || script.path,
             templatePayload: payload,
           })
+        : script?.artifactId
+          ? await actions.runArtifactTemplate(script.artifactId, payload)
         : await templateApi.runWorkflow(payload)
       await actions.loadState()
       actions.setStatus(data.message || '模板任务已启动', 'success')

@@ -96,6 +96,25 @@ def test_project_routes_create_open_save_validate_build_and_download(monkeypatch
     assert build_data["filename"] in download.headers["content-disposition"]
     assert download.content.startswith(b"PK")
 
+    template_source = "\n".join(
+        [
+            "-- @mlua-template:start",
+            '-- {"mode":"task","vars":{"value":{"tp":"int","def":1}},"tasks":[{"k":"single","fn":"run_single","args":["value"]}]}',
+            "-- @mlua-template:end",
+            "function run_single(args) return args.value end",
+        ]
+    )
+    preview = client.post(
+        f"/api/projects/{project['key']}/template:preview",
+        json={
+            "entryPath": "scripts/main.lua",
+            "luaCode": template_source,
+            "sourceOverrides": {"scripts/main.lua": template_source},
+        },
+    )
+    assert preview.status_code == 200
+    assert preview.json()["data"]["hasTemplate"] is True
+
 
 def test_project_routes_require_authentication(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(web_app, "_get_web_config", lambda: _web_config(tmp_path / "projects"))

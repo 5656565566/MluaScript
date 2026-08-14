@@ -51,6 +51,43 @@ test('project templates open their README as the first non-runtime tab', async (
   assert.equal(state.selectedWorkflowKey.value, 'main')
 })
 
+test('构建包模板使用当前入口配置并交给构建包运行器', async () => {
+  const state = templateState()
+  const calls = []
+  const actions = createTemplateActions({
+    state,
+    templateApi: {},
+    projectApi: {},
+    artifactApi: {
+      async getArtifactTemplate() {
+        return {
+          hasTemplate: true,
+          scriptPath: 'scripts/main.lua',
+          name: '模板包',
+          meta: { mode: 'task', tasks: [{ k: 'single', fn: 'run_single' }] },
+          savedConfig: {},
+        }
+      },
+    },
+    getActions: () => ({
+      buildTemplateRunPayload: () => actions.buildTemplateRunPayload(),
+      runArtifactTemplate: async (...args) => {
+        calls.push(args)
+        return { message: 'ok' }
+      },
+      loadState: async () => {},
+      setStatus: () => {},
+    }),
+  })
+
+  await actions.loadArtifactTemplate('artifact-id')
+  await actions.runTemplateWorkflow()
+
+  assert.equal(state.selectedTemplateScript.value.artifactId, 'artifact-id')
+  assert.equal(calls[0][0], 'artifact-id')
+  assert.equal(calls[0][1].mode, 'task')
+})
+
 test('自动保存模板数据时不会关闭编辑器', async () => {
   const saved = []
   let closeCount = 0

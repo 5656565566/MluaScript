@@ -19,6 +19,9 @@ export const systemApi = {
   async getArtifactReadme(artifactId) {
     return await apiGet(`/api/system/scripts/${encodeURIComponent(artifactId)}/readme`)
   },
+  async getArtifactTemplate(artifactId) {
+    return await apiGet(`/api/system/scripts/${encodeURIComponent(artifactId)}/template`)
+  },
   async getTaskDetail(taskId) {
     return await apiGet(`/api/system/tasks/${encodeURIComponent(taskId)}`)
   },

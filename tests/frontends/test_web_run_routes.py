@@ -153,6 +153,36 @@ def _write_readme_package(path: Path) -> None:
             archive.writestr(relative, content)
 
 
+def _write_template_package(path: Path) -> None:
+    manifest = {
+        "schema": "mluascript.package/v1",
+        "type": "lua-package",
+        "package": {"id": "com.example.template-package", "name": "模板包", "version": "1.0.0"},
+        "entrypoints": {"main": {"script": "scripts/main.lua"}},
+    }
+    source = "\n".join(
+        [
+            "-- @mlua-template:start",
+            '-- {"mode":"task","vars":{"value":{"tp":"int","def":1}},"tasks":[{"k":"single","fn":"run_single","args":["value"]}]}',
+            "-- @mlua-template:end",
+            "function run_single(args) return args.value end",
+        ]
+    ) + "\n"
+    files = {
+        "mluascript.yaml": yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True).encode("utf-8"),
+        "scripts/main.lua": source.encode("utf-8"),
+    }
+    checksums = "".join(
+        f"{hashlib.sha256(content).hexdigest()}  {relative}\n"
+        for relative, content in sorted(files.items())
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("META-INF/files.sha256", checksums)
+        for relative, content in files.items():
+            archive.writestr(relative, content)
+
+
 def _read_stream_chunks(response, count: int) -> list[str]:
     iterator = response.body_iterator
     return [asyncio.run(anext(iterator)) for _ in range(count)]
@@ -312,6 +342,31 @@ def test_artifact_readme_route_returns_verified_markdown(monkeypatch, tmp_path: 
     assert response.status_code == 200
     assert response.json()["data"]["name"] == "说明包"
     assert response.json()["data"]["markdown"] == "# 说明包\n\n安全说明。\n"
+
+
+def test_artifact_template_can_be_configured_and_run(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    _write_template_package(tmp_path / ".mluascript_web" / "builds" / "template.mlspkg")
+    facade = FakeArtifactRunFacade()
+    monkeypatch.setattr(web_app, "get_control_facade", lambda: facade)
+    client = _authenticated_client(monkeypatch, tmp_path)
+    items = client.get("/api/system/scripts").json()["data"]["items"]
+    artifact = next(item for item in items if item["package_id"] == "com.example.template-package")
+
+    template = client.get(f"/api/system/scripts/{artifact['id']}/template")
+    assert template.status_code == 200
+    assert template.json()["data"]["hasTemplate"] is True
+
+    started = client.post(
+        "/api/run/artifact",
+        json={
+            "artifactId": artifact["id"],
+            "templateMode": "task",
+            "runtime": {"selectedTaskKey": "single", "tasks": {"single": {"value": 7}}},
+        },
+    )
+    assert started.status_code == 200
+    assert "value = 7" in facade.artifact_run_calls[0]["code"]
 
 
 def test_task_detail_views_pass_task_kind_to_stop_action() -> None:

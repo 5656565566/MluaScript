@@ -242,3 +242,22 @@ def test_parse_template_meta_raises_for_invalid_json() -> None:
         assert "JSON" in str(exc)
     else:
         raise AssertionError("expected TemplateParseError")
+
+
+def test_parse_template_meta_rejects_multiple_template_blocks() -> None:
+    script = "\n".join(
+        [
+            "-- @mlua-template:start",
+            "-- {}",
+            "-- @mlua-template:start",
+            "-- {}",
+            "-- @mlua-template:end",
+        ]
+    )
+
+    try:
+        parse_template_meta(script)
+    except TemplateParseError as exc:
+        assert "最多配置一个模板" in str(exc)
+    else:
+        raise AssertionError("expected TemplateParseError")

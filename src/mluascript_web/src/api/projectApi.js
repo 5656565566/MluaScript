@@ -84,4 +84,8 @@ export const projectApi = {
   async getTemplate(projectKey, path) {
     return await apiGet(`/api/projects/${encodeURIComponent(projectKey)}/template`, { path })
   },
+
+  async previewTemplate(projectKey, payload) {
+    return await apiPost(`/api/projects/${encodeURIComponent(projectKey)}/template:preview`, payload)
+  },
 }

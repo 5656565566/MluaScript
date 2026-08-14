@@ -282,7 +282,8 @@ const debugMenuOptions = computed(() => [
     icon: editorMenuIcon(CodeSlashOutline),
     disabled: state.projectDebugLoading.value
       || !selectedFileIsText.value
-      || !String(selectedFile.value?.path || '').toLowerCase().endsWith('.lua'),
+      || !['lua', 'xml'].includes(String(selectedFile.value?.path || '').split('.').pop()?.toLowerCase() || '')
+      || !['lua-file', 'lua-package', 'blockly-file', 'blockly-package'].includes(currentProject.value?.project_type || ''),
   },
   { type: 'divider', key: 'debug-divider' },
   {
@@ -956,7 +957,8 @@ async function startProjectTemplateDebug() {
   if (!entryPath) return
   try {
     await actions.saveAllProjectFiles()
-    await actions.loadProjectTemplate(currentProject.value.key, entryPath)
+    const snapshot = await actions.buildProjectDebugSnapshot(entryPath)
+    await actions.loadProjectTemplate(currentProject.value.key, entryPath, snapshot)
     state.activeView.value = 'template-runner'
   } catch (error) {
     actions.setStatus(error?.message || '加载模板调试失败', 'error')

@@ -165,6 +165,21 @@ export function createRuntimeActions({ state, systemApi, runApi, runtimeStreams,
       return data
     },
 
+    async runArtifactTemplate(artifactId, templatePayload, sessionLabel = state.selectedSession.value) {
+      if (!artifactId) throw new Error('缺少构建产物 ID')
+      const data = await runApi.runArtifact({
+        artifactId,
+        sessionLabel: sessionLabel || null,
+        templateMode: templatePayload?.mode || 'workflow',
+        workflowKey: templatePayload?.workflowKey || '',
+        workflow: templatePayload?.workflow || {},
+        runtime: templatePayload?.runtime || {},
+      })
+      await getActions().refreshTaskManagerData()
+      getActions().setStatus(data.message || '模板任务已启动', 'success')
+      return data
+    },
+
     async stopLuaTask(taskId) {
       if (!taskId) throw new Error('缺少 taskId')
       await getActions().stopTask(taskId, 'script')

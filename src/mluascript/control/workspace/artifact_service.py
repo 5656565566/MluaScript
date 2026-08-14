@@ -32,6 +32,15 @@ class ArtifactServiceError(ValueError):
     """构建产物不可发现、不可校验或不可运行。"""
 
 
+@dataclass(slots=True)
+class ArtifactTemplateSource:
+    """单个构建入口的模板源码；一个入口只允许解析一个模板块。"""
+
+    artifact: "RunnableArtifact"
+    script_path: str
+    code: str
+
+
 def cleanup_artifact_runtime_dir(raw_path: str | Path | None) -> bool:
     """仅删除由产物服务创建的任务运行目录。"""
 
@@ -136,6 +145,36 @@ class ArtifactService:
             if artifact.id == artifact_id:
                 return artifact
         raise ArtifactServiceError("运行产物不存在或已被更新，请刷新任务列表")
+
+    def get_template_source(self, artifact_id: str) -> ArtifactTemplateSource:
+        """读取并校验当前构建入口 Lua，供模板预览和模板运行复用。"""
+
+        artifact = self.get_artifact(artifact_id)
+        if artifact.kind == "maa":
+            raise ArtifactServiceError("Maa 构建包不支持 Lua 模板")
+        if artifact.kind == "package":
+            manifest = self._read_package_manifest(Path(artifact.artifact_path))
+            entry = manifest.entrypoints.get(artifact.entrypoint)
+            if entry is None or not entry.script:
+                raise ArtifactServiceError("构建包入口没有生成后的 Lua 脚本")
+            code = self._read_verified_package_text(
+                Path(artifact.artifact_path),
+                entry.script,
+                max_bytes=4 * 1024 * 1024,
+            )
+            return ArtifactTemplateSource(artifact=artifact, script_path=entry.script, code=code)
+        path = Path(artifact.artifact_path)
+        try:
+            code = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise ArtifactServiceError(f"读取 Lua 产物失败: {exc}") from exc
+        return ArtifactTemplateSource(artifact=artifact, script_path=path.name, code=code)
+
+    def template_config_dir(self, artifact_id: str) -> Path:
+        """返回按构建产物隔离的模板配置目录，不修改包内容。"""
+
+        self.get_artifact(artifact_id)
+        return (self.builds_root.parent / "settings" / "templates" / "artifacts" / artifact_id).resolve()
 
     def prepare_run(self, artifact_id: str) -> PreparedArtifactRun:
         artifact = self.get_artifact(artifact_id)
@@ -498,6 +537,7 @@ __all__ = [
     "ArtifactService",
     "ArtifactServiceError",
     "ArtifactReadme",
+    "ArtifactTemplateSource",
     "PreparedArtifactRun",
     "RunnableArtifact",
     "cleanup_artifact_runtime_dir",
