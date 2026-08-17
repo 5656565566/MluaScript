@@ -5,6 +5,7 @@ const CropModal = defineAsyncComponent(() => import('../components/CropModal.vue
 const SharedVariableManagerModal = defineAsyncComponent(() => import('../components/SharedVariableManagerModal.vue'))
 const TaskDetailModal = defineAsyncComponent(() => import('../components/TaskDetailModal.vue'))
 const TaskTraceModal = defineAsyncComponent(() => import('../components/TaskTraceModal.vue'))
+const ImageRecognitionDebugModal = defineAsyncComponent(() => import('../components/ImageRecognitionDebugModal.vue'))
 
 export function createModalActions({ state, openModal, getActions }) {
   return {
@@ -79,6 +80,30 @@ export function createModalActions({ state, openModal, getActions }) {
           size: 'xl',
           panelClass: 'task-output-modal-panel',
           contentClass: 'task-output-modal-content',
+        },
+      })
+    },
+
+    openImageRecognitionDebugModal({ imagePath = '', templatePath = '' } = {}) {
+      if (imagePath || templatePath) {
+        state.imageRecognitionDraft.value = {
+          ...state.imageRecognitionDraft.value,
+          kind: templatePath ? 'template' : state.imageRecognitionDraft.value.kind,
+          imagePath: imagePath || state.imageRecognitionDraft.value.imagePath,
+          templatePath: templatePath || state.imageRecognitionDraft.value.templatePath,
+          imageBase64: imagePath ? '' : state.imageRecognitionDraft.value.imageBase64,
+        }
+      }
+      return openModal({
+        type: 'image-recognition-debug',
+        component: ImageRecognitionDebugModal,
+        props: {},
+        options: {
+          title: '识图调试',
+          size: 'full',
+          panelClass: 'image-recognition-debug-panel',
+          contentClass: 'image-recognition-debug-content',
+          destroyOnClose: false,
         },
       })
     },

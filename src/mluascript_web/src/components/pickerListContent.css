@@ -23,3 +23,61 @@
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
+
+.picker-file-browser-toolbar {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  margin-bottom: 0;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--n-border-color);
+  background: var(--n-color-embedded);
+}
+
+.picker-file-browser-breadcrumb {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+  overflow: auto;
+  white-space: nowrap;
+}
+
+.picker-file-browser-row {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  gap: 10px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--n-border-color);
+  cursor: pointer;
+}
+
+.picker-file-browser-row:hover {
+  background: var(--n-color-hover);
+}
+
+.picker-file-browser-row.selected {
+  background: color-mix(in srgb, var(--n-primary-color) 10%, transparent);
+  box-shadow: inset 3px 0 0 var(--n-primary-color);
+}
+
+.picker-file-browser-icon {
+  width: 20px;
+  flex: 0 0 20px;
+  color: var(--n-primary-color);
+  text-align: center;
+}
+
+.picker-file-browser-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.picker-file-browser-label .n-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

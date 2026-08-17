@@ -81,6 +81,10 @@ export const projectApi = {
     return await apiPost(`/api/projects/${encodeURIComponent(projectKey)}/debug`, payload)
   },
 
+  async recognizeImage(projectKey, payload = {}) {
+    return await apiPost(`/api/projects/${encodeURIComponent(projectKey)}/recognize-image`, payload)
+  },
+
   async getTemplate(projectKey, path) {
     return await apiGet(`/api/projects/${encodeURIComponent(projectKey)}/template`, { path })
   },

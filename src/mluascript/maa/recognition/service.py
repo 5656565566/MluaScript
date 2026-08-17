@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 import numpy as np
+from pathlib import Path
 
 from maa.pipeline import JRecognitionType
 
@@ -11,6 +12,29 @@ from ..lifecycle.runtime import MaaContext
 from ..controllers.screen import screencap
 from .models import RecognitionResult
 from .parser import parse_box, parse_best_result
+
+
+def resolve_resource_reference(context: MaaContext, value: str) -> str:
+    """将 resources 的 key 别名解析为运行时可读取的路径。"""
+
+    reference = str(value or "").strip().replace("\\", "/")
+    if ":" not in reference:
+        return reference
+    resource_key, relative = reference.split(":", 1)
+    if not resource_key or not relative.strip("/"):
+        return reference
+    relative_path = Path(relative.lstrip("/"))
+    base = Path(context.paths.resource_dir)
+    candidates = [
+        base / "resources" / resource_key / relative_path,
+        base / resource_key / relative_path,
+        base.parent / resource_key / relative_path,
+        base.parent.parent / resource_key / relative_path,
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return str(candidates[0])
 
 
 def run_recognition_direct(

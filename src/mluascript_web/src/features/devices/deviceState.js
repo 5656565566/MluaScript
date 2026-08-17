@@ -12,6 +12,8 @@ export function createDeviceState() {
     win32Windows: ref([]),
     adbAddress: ref('127.0.0.1:5555'),
     screenshotBase64: ref(''),
+    screenshotMimeType: ref('image/png'),
+    screenshotImagePath: ref(''),
     screenshotPath: ref(''),
     deviceTab: ref('adb'),
     devicePageSize: ref(DEVICE_PAGE_SIZE),

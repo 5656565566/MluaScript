@@ -98,6 +98,49 @@ export function getLuaScriptPickerItems(stripLuaExt = false) {
   }))
 }
 
+export function getProjectResourcePickerItems(kind = 'image') {
+  const treeFiles = (state.projectTree?.value || []).filter(item => item?.kind === 'file')
+  const manifest = state.currentManifest?.value || {}
+  const extensions = kind === 'model'
+    ? /\.(onnx|xml|bin|pth|engine)$/i
+    : /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico)$/i
+  const items = []
+
+  for (const [resourceKey, rawRoot] of Object.entries(manifest.resources || {})) {
+    const root = asNonEmptyString(rawRoot).replaceAll('\\', '/').replace(/\/$/, '')
+    if (!root) continue
+    for (const item of treeFiles) {
+      const path = asNonEmptyString(item.path).replaceAll('\\', '/')
+      if (!path.startsWith(`${root}/`) || !extensions.test(path)) continue
+      const relative = path.slice(root.length + 1)
+      items.push({
+        value: `${resourceKey}:${relative}`,
+        label: `${resourceKey}:${relative}`,
+        description: path,
+        group: resourceKey,
+      })
+    }
+  }
+
+  if (kind === 'model') {
+    for (const [modelKey, model] of Object.entries(manifest.models || {})) {
+      const path = asNonEmptyString(model?.path).replaceAll('\\', '/')
+      if (!path) continue
+      const candidates = extensions.test(path)
+        ? [path]
+        : treeFiles.map(item => asNonEmptyString(item.path).replaceAll('\\', '/'))
+          .filter(itemPath => itemPath.startsWith(`${path.replace(/\/$/, '')}/`) && extensions.test(itemPath))
+      for (const candidate of candidates) {
+        if (items.some(item => item.value === candidate)) continue
+        const suffix = candidate === path ? '' : `/${candidate.slice(path.replace(/\/$/, '').length + 1)}`
+        items.push({ value: candidate, label: `models/${modelKey}${suffix}`, description: candidate, group: 'models' })
+      }
+    }
+  }
+
+  return items.sort((left, right) => left.label.localeCompare(right.label, 'zh-Hans-CN'))
+}
+
 export function getWorkspaceProcedureDefinitions(workspace = Blockly.getMainWorkspace()) {
   const resolvedWorkspace = resolveBlocklyWorkspace(workspace)
   if (!resolvedWorkspace) return []

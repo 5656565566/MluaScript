@@ -1,4 +1,37 @@
-import { luaOrder, MAA_RESULT_TYPE, MAA_ITEMS_TYPE, MAA_ITEM_TYPE, MAA_BOX_TYPE, MAA_ROI_TYPE } from '../constants'
+import * as Blockly from 'blockly'
+import { luaOrder, MAA_RESULT_TYPE, MAA_ITEMS_TYPE, MAA_ITEM_TYPE, MAA_BOX_TYPE, MAA_ROI_TYPE, PICKER_ICON_TYPE } from '../constants'
+import { MaaPickerIcon } from '../fields'
+import { getProjectResourcePickerItems } from '../utils'
+
+function setTextInputValue(block, inputName, value) {
+  const connection = block.getInput(inputName)?.connection
+  if (!connection) return
+  const current = connection.targetBlock?.()
+  if (current?.type === 'text') {
+    current.setFieldValue(value, 'TEXT')
+    return
+  }
+  current?.dispose?.(true)
+  const textBlock = block.workspace.newBlock('text')
+  textBlock.setFieldValue(value, 'TEXT')
+  textBlock.setShadow(true)
+  textBlock.initSvg?.()
+  textBlock.render?.()
+  connection.connect(textBlock.outputConnection)
+}
+
+function attachResourcePicker(block, { inputName, title, kind = 'image' }) {
+  if (block.getIcon(PICKER_ICON_TYPE)) return
+  block.addIcon(new MaaPickerIcon(block, () => ({
+    title,
+    treeMode: true,
+    items: getProjectResourcePickerItems(kind),
+    emptyText: kind === 'model' ? '项目中没有合法模型资源' : '项目 resources 中没有合法图片资源',
+    onSelect: selectedValue => {
+      if (selectedValue) setTextInputValue(block, inputName, selectedValue)
+    },
+  })))
+}
 
 export const visionBlocks = [
   {
@@ -203,6 +236,9 @@ export const visionBlocks = [
       tooltip: '模板匹配，返回统一的结果集对象',
       helpUrl: '',
     },
+    init(block) {
+      attachResourcePicker(block, { inputName: 'TEMPLATE', title: '选择模板资源' })
+    },
     generator(block, generator) {
       const template = generator.valueToCode(block, 'TEMPLATE', luaOrder) || 'nil'
       const roi = generator.valueToCode(block, 'ROI', luaOrder) || 'nil'
@@ -227,6 +263,9 @@ export const visionBlocks = [
       tooltip: '按模型名和目标名执行 NND 识别，目标可用 | 分隔多个。',
       helpUrl: '',
     },
+    init(block) {
+      attachResourcePicker(block, { inputName: 'MODEL', title: '选择 NND 模型资源', kind: 'model' })
+    },
     generator(block, generator) {
       const model = generator.valueToCode(block, 'MODEL', luaOrder) || "''"
       const targets = generator.valueToCode(block, 'TARGETS', luaOrder) || 'nil'
@@ -249,6 +288,9 @@ export const visionBlocks = [
       output: MAA_RESULT_TYPE,
       tooltip: '特征匹配识别',
       helpUrl: '',
+    },
+    init(block) {
+      attachResourcePicker(block, { inputName: 'TEMPLATE', title: '选择特征模板资源' })
     },
     generator(block, generator) {
       const template = generator.valueToCode(block, 'TEMPLATE', luaOrder) || 'nil'

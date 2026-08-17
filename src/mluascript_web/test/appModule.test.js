@@ -123,3 +123,36 @@ test('applyTheme ignores a select option object passed as the color theme', () =
   assert.equal(state.appTheme.value, 'light')
   assert.equal(state.colorTheme.value, 'classic')
 })
+
+test('saveCroppedImage uploads a PNG into the current project resources', async () => {
+  const state = createState()
+  state.currentProject = ref({ key: 'demo-project' })
+  let uploaded = null
+  let actions
+  actions = createAppActions({
+    state,
+    authApi: { status: async () => ({}), login: async () => ({}), logout: async () => ({}) },
+    editorApi: { listLuaFiles: async () => ({ items: [] }) },
+    logApi: { list: async () => ({ items: [] }) },
+    systemApi: { getBootstrap: async () => ({}), listTasks: async () => ({ items: [] }), listScripts: async () => ({ items: [] }) },
+    applyBootstrap: () => ({ blocklyApplied: false }),
+    updateBlocklyTheme: () => {},
+    browserWindow: { innerWidth: 1200, dispatchEvent() {}, matchMedia: () => ({ matches: false }) },
+    browserDocument: { documentElement: { setAttribute() {}, style: {} } },
+    getActions: () => ({
+      ...actions,
+      setStatus() {},
+      uploadProjectFile: async (...args) => {
+        uploaded = args
+        return { path: args[0] }
+      },
+    }),
+  })
+
+  const result = await actions.saveCroppedImage('crop.png', 'iVBORw0KGgo=')
+
+  assert.equal(result.path, 'resources/assets/crop.png')
+  assert.equal(uploaded[0], 'resources/assets/crop.png')
+  assert.equal(uploaded[1].type, 'image/png')
+  assert.equal(uploaded[2], true)
+})

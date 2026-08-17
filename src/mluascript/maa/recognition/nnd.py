@@ -5,7 +5,7 @@ import numpy as np
 from maa.pipeline import JNeuralNetworkDetect, JRecognitionType
 
 from ..lifecycle.runtime import MaaContext
-from .service import run_recognition_direct
+from .service import resolve_resource_reference, run_recognition_direct
 
 
 def find_nnd(
@@ -16,7 +16,7 @@ def find_nnd(
     roi: list[int] | None = None,
     image: np.ndarray | None = None,
 ):
-    param = JNeuralNetworkDetect(model=model)
+    param = JNeuralNetworkDetect(model=resolve_resource_reference(context, model))
     if targets:
         if isinstance(targets, str):
             param.labels = [t.strip() for t in targets.split("|") if t.strip()]

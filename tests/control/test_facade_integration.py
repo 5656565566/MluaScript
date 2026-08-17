@@ -359,6 +359,26 @@ def test_control_facade_device_overview_entrypoint() -> None:
 
 
 
+def test_control_facade_device_overview_keeps_all_desktop_windows_for_paging() -> None:
+    facade = build_facade()
+    facade.device_facade._desktop_raw = [
+        {"handle": index + 1, "window_name": f"Window {index + 1}", "platform": "windows"}
+        for index in range(36)
+    ]
+
+    overview = facade.get_device_overview()
+
+    assert overview.desktop.total == 36
+    assert overview.desktop.page_count == 5
+    assert len(overview.desktop.items) == 8
+    assert overview.desktop.items[0].id == "desktop:0"
+
+    facade.device_facade.change_desktop_page(1)
+    second_page = facade.get_device_overview().desktop
+    assert len(second_page.items) == 8
+    assert second_page.items[0].id == "desktop:8"
+
+
 def test_control_facade_device_overview_marks_mumu_adb_as_emulator() -> None:
     facade = build_facade()
     facade.device_facade._adb_raw = [

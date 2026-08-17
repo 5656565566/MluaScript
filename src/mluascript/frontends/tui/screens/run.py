@@ -60,8 +60,9 @@ class RunScreen(ScrollableContainer):
     }
 
     .artifact-script-row {
-        height: auto;
+        height: 3;
         width: 100%;
+        align-vertical: middle;
     }
 
     Button.artifact-run-btn {
@@ -75,7 +76,8 @@ class RunScreen(ScrollableContainer):
     .artifact-script-row Button.artifact-run-btn {
         width: 10;
         min-width: 10;
-        margin: 1 0 1 1;
+        height: 3;
+        margin: 0 0 0 1;
     }
 
     #task-pagination {
@@ -606,6 +608,9 @@ class RunScreen(ScrollableContainer):
             self._refresh_all()
             return
         if button_name in self._readme_button_name_map:
+            self._activate_tab("run-tab-readme")
+            self.query_one("#artifact-readme-summary", Static).update("正在读取包说明...")
+            self.query_one("#artifact-readme-view", Markdown).update("正在读取包说明，请稍候。")
             self._open_artifact_readme(self._readme_button_name_map[button_name])
             return
         if button_name == "task-page-previous":
@@ -656,12 +661,18 @@ class RunScreen(ScrollableContainer):
             readme = self._control.get_artifact_readme(artifact_id)
             self.app.call_from_thread(self._show_artifact_readme, readme)
         except Exception as exc:
-            self.app.call_from_thread(self.notify, f"读取包说明失败: {exc}", severity="error")
+            self.app.call_from_thread(self._show_artifact_readme_error, str(exc))
 
     def _show_artifact_readme(self, readme: ArtifactReadme) -> None:
         self.query_one("#artifact-readme-summary", Static).update(f"{readme.name} · {readme.path}")
         self.query_one("#artifact-readme-view", Markdown).update(readme.markdown)
         self._activate_tab("run-tab-readme")
+
+    def _show_artifact_readme_error(self, message: str) -> None:
+        self.query_one("#artifact-readme-summary", Static).update("包说明读取失败")
+        self.query_one("#artifact-readme-view", Markdown).update(f"无法读取包说明：{message}")
+        self._activate_tab("run-tab-readme")
+        self.notify(f"读取包说明失败: {message}", severity="error")
 
     @work(thread=True)
     def _run_artifact(self, artifact_id: str) -> None:

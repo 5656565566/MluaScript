@@ -216,9 +216,23 @@ export function createAppActions({
     },
 
     async saveCroppedImage(filename, imageBase64) {
-      void filename
-      void imageBase64
-      markFeatureUnavailable('裁切图片保存')
+      const actions = getActions()
+      const cleanBase64 = String(imageBase64 || '').replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '')
+      const cleanName = String(filename || '').trim().replace(/[\\/:*?"<>|]/g, '_') || 'template.png'
+      const projectKey = state.currentProject?.value?.key || ''
+      if (!projectKey) {
+        actions.setStatus('请先打开一个项目后再保存裁切图片', 'warning')
+        throw new Error('当前未打开任何项目')
+      }
+      if (!cleanBase64) {
+        throw new Error('裁切图片数据为空')
+      }
+      const raw = atob(cleanBase64)
+      const bytes = new Uint8Array(raw.length)
+      for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i)
+      const blob = new Blob([bytes], { type: 'image/png' })
+      await actions.uploadProjectFile(`resources/assets/${cleanName}`, blob, true)
+      return { path: `resources/assets/${cleanName}` }
     },
   }
 }

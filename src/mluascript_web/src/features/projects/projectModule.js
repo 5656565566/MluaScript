@@ -440,11 +440,11 @@ export function createProjectActions({ state, projectApi, compileBlocklyXml, get
       return result
     },
 
-    async uploadProjectFile(path, file) {
+    async uploadProjectFile(path, file, overwrite = false) {
       if (!projectKey() || !file) return null
       state.projectFileOperationLoading.value = true
       try {
-        const data = await projectApi.uploadFile(projectKey(), path, file)
+        const data = await projectApi.uploadFile(projectKey(), path, file, overwrite)
         await getActions().reloadProjectTree()
         getActions().setStatus(`已上传 ${data.path}`, 'success')
         return data
@@ -455,6 +455,42 @@ export function createProjectActions({ state, projectApi, compileBlocklyXml, get
 
     projectFileDownloadUrl(path) {
       return projectKey() && path ? projectApi.fileDownloadUrl(projectKey(), path) : ''
+    },
+
+    async openProjectImageInScreenshot(path) {
+      const url = projectKey() && path ? projectApi.fileDownloadUrl(projectKey(), path) : ''
+      if (!url) throw new Error('图片路径无效')
+      const response = await fetch(url)
+      if (!response.ok) throw new Error(`读取图片失败: HTTP ${response.status}`)
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      let binary = ''
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+      }
+      state.screenshotBase64.value = btoa(binary)
+      if (state.screenshotMimeType) state.screenshotMimeType.value = response.headers.get('content-type') || 'image/png'
+      if (state.screenshotImagePath) state.screenshotImagePath.value = path
+      state.screenshotPath.value = path
+      state.showScreenshot.value = true
+    },
+
+    openProjectImageRecognition(path, { asTemplate = false } = {}) {
+      let templatePath = ''
+      if (asTemplate) {
+        const normalizedPath = String(path || '').replaceAll('\\', '/')
+        for (const [resourceKey, rawRoot] of Object.entries(state.currentManifest.value?.resources || {})) {
+          const root = String(rawRoot || '').replaceAll('\\', '/').replace(/\/$/, '')
+          if (root && normalizedPath.startsWith(`${root}/`)) {
+            templatePath = `${resourceKey}:${normalizedPath.slice(root.length + 1)}`
+            break
+          }
+        }
+        if (!templatePath) templatePath = normalizedPath
+      }
+      return getActions().openImageRecognitionDebugModal({
+        imagePath: path,
+        templatePath,
+      })
     },
 
     async reloadProjectTree() {
@@ -504,6 +540,14 @@ export function createProjectActions({ state, projectApi, compileBlocklyXml, get
       } finally {
         state.projectBuildLoading.value = false
       }
+    },
+
+    async runImageRecognition(payload = {}) {
+      const activeProjectKey = projectKey()
+      if (!activeProjectKey) throw new Error('请先打开项目')
+      const data = await projectApi.recognizeImage(activeProjectKey, payload)
+      getActions().setStatus(data.message || '识图完成', 'success')
+      return data.result
     },
 
     async debugProject({ mode = 'script', entryPath = '', templatePayload = null } = {}) {

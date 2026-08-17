@@ -2,7 +2,9 @@ import { computed } from 'vue'
 
 export function createGetters(state) {
   return {
-    imageUrl: computed(() => state.screenshotBase64.value ? `data:image/png;base64,${state.screenshotBase64.value}` : ''),
+    imageUrl: computed(() => state.screenshotBase64.value
+      ? `data:${state.screenshotMimeType?.value || 'image/png'};base64,${state.screenshotBase64.value}`
+      : ''),
     pipelineTasks: computed(() => state.tasks.value.filter(item => item.kind === 'pipeline')),
     luaScriptFiles: computed(() => state.luaFiles.value.map(item => ({
       ...item,

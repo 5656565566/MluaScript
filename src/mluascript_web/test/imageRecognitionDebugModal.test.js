@@ -1,0 +1,38 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+const srcRoot = fileURLToPath(new URL('../src/', import.meta.url))
+
+test('image recognition debug keeps results visible and supports numeric and pointer ROI selection', () => {
+  const source = readFileSync(`${srcRoot}/components/ImageRecognitionDebugModal.vue`, 'utf8')
+
+  assert.match(source, /<div class="recognition-result">/)
+  assert.match(source, /等待识别/)
+  assert.match(source, /未命中，请检查识别资源/)
+  assert.match(source, /updateRoiField\('roiX', value\)/)
+  assert.match(source, /updateRoiField\('roiY', value\)/)
+  assert.match(source, /updateRoiField\('roiWidth', value\)/)
+  assert.match(source, /updateRoiField\('roiHeight', value\)/)
+  assert.match(source, /@pointerdown="startRoiSelection"/)
+  assert.match(source, /@pointermove="moveRoiSelection"/)
+  assert.match(source, /class="recognition-roi-box"/)
+  assert.match(source, /:disabled="!hasTestImage"/)
+  assert.match(source, /description="尚未选择测试图片" class="recognition-empty-image" \/>/)
+  assert.doesNotMatch(source, /<template #extra>[\s\S]*获取新截图/)
+  assert.match(source, /class="recognition-resource-preview"/)
+  assert.match(source, /recognitionResourcePreviewUrl/)
+  assert.match(source, /resourcePreviewCollapsed = !resourcePreviewCollapsed/)
+  assert.match(source, /right: 0; bottom: 24px; width: 142px; border-right: 0; border-radius: 6px 0 0 6px/)
+  assert.match(source, /class="recognition-resource-handle"/)
+  assert.match(source, /background: #ef4444/)
+  assert.doesNotMatch(source, /resourcePreviewCollapsed \? '\+' : '−'/)
+  assert.match(source, /modelOptions/)
+  assert.match(source, /maa\.nnd/)
+  assert.match(source, /项目中没有声明或发现可用的 NND 模型/)
+  assert.match(source, /label: `\$\{resourceKey\}:\$\{relative\}`/)
+  assert.match(source, /placeholder="未选择模板资源，例如 assets:template\.png"/)
+  assert.match(source, /treeMode: true/)
+  assert.match(source, /未选择测试图片/)
+})

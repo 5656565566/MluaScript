@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import base64
 
 from fastapi.testclient import TestClient
 
@@ -114,6 +115,31 @@ def test_project_routes_create_open_save_validate_build_and_download(monkeypatch
     )
     assert preview.status_code == 200
     assert preview.json()["data"]["hasTemplate"] is True
+
+
+def test_device_items_payload_returns_all_discovered_desktop_windows(monkeypatch) -> None:
+    class FakeDeviceFacade:
+        _desktop_raw = [
+            {"handle": index + 1, "window_name": f"Window {index + 1}", "platform": "windows"}
+            for index in range(36)
+        ]
+
+    class FakeFacade:
+        device_facade = FakeDeviceFacade()
+
+        @staticmethod
+        def get_device_overview():
+            empty_page = SimpleNamespace(items=[])
+            return SimpleNamespace(adb=empty_page, emulator=empty_page, browser=empty_page)
+
+    monkeypatch.setattr(web_app, "get_control_facade", lambda: FakeFacade())
+
+    items = web_app._build_device_items_payload()
+
+    assert len(items) == 36
+    assert items[0]["id"] == "desktop:0"
+    assert items[-1]["id"] == "desktop:35"
+    assert items[-1]["handle"] == 36
 
 
 def test_project_routes_require_authentication(monkeypatch, tmp_path: Path) -> None:
@@ -309,6 +335,23 @@ def test_project_routes_create_directory_file_and_stream_binary(monkeypatch, tmp
     assert binary_metadata["encoding"] is None
     assert "contentBase64" not in binary_metadata
     assert downloaded.content == b"\x00\x01model-data"
+    assert downloaded.headers["content-disposition"].startswith("attachment")
+
+    image_upload = client.put(
+        f"/api/projects/{project_key}/files/binary",
+        params={"path": "resources/assets/images/preview.png"},
+        content=b"png-data",
+        headers={"content-type": "image/png"},
+    )
+    image_download = client.get(
+        f"/api/projects/{project_key}/files/raw",
+        params={"path": "resources/assets/images/preview.png"},
+    )
+    assert image_upload.status_code == 200
+    assert image_download.headers["content-type"].startswith("image/png")
+    assert image_download.headers["content-disposition"].startswith("inline")
+    assert image_download.content == b"png-data"
+
     assert renamed.status_code == 200
     assert renamed.json()["data"]["path"] == "scripts/tasks/renamed.lua"
     assert moved.status_code == 200
@@ -330,3 +373,65 @@ def test_project_routes_create_directory_file_and_stream_binary(monkeypatch, tmp
     assert deleted.status_code == 200
     assert deleted.json()["data"]["path"] == "resources/assets/renamed.lua"
     assert new_path.json()["data"]["content"] == "return true\n"
+
+
+def test_project_image_recognition_route_runs_ocr_with_uploaded_image(monkeypatch, tmp_path: Path) -> None:
+    client = _client(monkeypatch, tmp_path)
+    project = client.post(
+        "/api/projects",
+        json={"name": "Vision", "packageId": "com.example.vision", "directory": "vision"},
+    ).json()["data"]
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    context = SimpleNamespace(tasker=object())
+    facade = SimpleNamespace(device_facade=SimpleNamespace(_maa_facade=SimpleNamespace(context=context)))
+    calls = []
+    monkeypatch.setattr(web_app, "get_control_facade", lambda: facade)
+    monkeypatch.setattr(web_app, "initialize_maa_runtime", lambda value: value)
+    monkeypatch.setattr(
+        web_app,
+        "find_ocr",
+        lambda _context, entry, **kwargs: calls.append((entry, kwargs)) or {"hit": True, "text": "确认"},
+    )
+
+    response = client.post(
+        f"/api/projects/{project['key']}/recognize-image",
+        json={
+            "kind": "ocr",
+            "imageBase64": base64.b64encode(png).decode("ascii"),
+            "expected": "确认|取消",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["result"]["hit"] is True
+    assert calls[0][1]["expected"] == ["确认", "取消"]
+
+
+def test_recognition_resource_alias_resolves_manifest_resource_key(monkeypatch, tmp_path: Path) -> None:
+    client = _client(monkeypatch, tmp_path)
+    project = client.post(
+        "/api/projects",
+        json={"name": "Aliases", "packageId": "com.example.aliases", "directory": "aliases"},
+    ).json()["data"]
+    client.post(
+        f"/api/projects/{project['key']}/directories",
+        json={"path": "resources/assets/image"},
+    )
+    uploaded = client.put(
+        f"/api/projects/{project['key']}/files/binary",
+        params={"path": "resources/assets/image/template.png"},
+        content=b"template",
+        headers={"content-type": "image/png"},
+    )
+
+    resolved = web_app._recognition_resource_path(
+        client.app.state.project_service,
+        project["key"],
+        "assets:image/template.png",
+        "模板图片",
+    )
+
+    assert uploaded.status_code == 200
+    assert Path(resolved).as_posix().endswith("resources/assets/image/template.png")

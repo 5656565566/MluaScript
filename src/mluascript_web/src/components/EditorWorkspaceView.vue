@@ -142,6 +142,13 @@ const filteredProjects = computed(() => {
 const currentProject = computed(() => state.currentProject.value)
 const selectedFile = computed(() => state.projectFile.value)
 const selectedFileIsText = computed(() => selectedFile.value?.encoding === 'utf-8')
+const selectedFileIsImage = computed(() => editorKindForFile(selectedFile.value) === 'image')
+const selectedFilePreviewUrl = computed(() => (
+  selectedFileIsImage.value && selectedFile.value?.path
+    ? actions.projectFileDownloadUrl(selectedFile.value.path)
+    : ''
+))
+const imageFilePattern = /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico)$/i
 const selectedTreeKeys = computed(() => state.projectSelectedPath.value ? [state.projectSelectedPath.value] : [])
 const openFiles = computed(() => state.projectOpenFiles.value)
 const selectedDeviceSession = computed(() => (
@@ -164,7 +171,9 @@ const blocklyDocumentPaths = computed(() => {
 function editorKindForFile(file) {
   const path = String(file?.path || '').replaceAll('\\', '/')
   if (!path) return 'empty'
-  if (file?.encoding !== 'utf-8') return 'binary'
+  if (file?.encoding !== 'utf-8') {
+    return /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico)$/i.test(path) ? 'image' : 'binary'
+  }
   if (
     blocklyDocumentPaths.value.has(path)
     || (state.currentProject.value?.project_type === 'blockly-file' && path === state.currentProject.value?.primary_path)
@@ -181,6 +190,7 @@ const selectedEditorKind = computed(() => editorKindForFile(selectedFile.value))
 const editorKindLabel = computed(() => ({
   blockly: 'Blockly',
   text: '文本',
+  image: '图片',
   binary: '二进制',
   empty: '',
 }[selectedEditorKind.value]))
@@ -285,6 +295,12 @@ const debugMenuOptions = computed(() => [
       || !['lua', 'xml'].includes(String(selectedFile.value?.path || '').split('.').pop()?.toLowerCase() || '')
       || !['lua-file', 'lua-package', 'blockly-file', 'blockly-package'].includes(currentProject.value?.project_type || ''),
   },
+  {
+    label: editorMenuLabel('识图调试…'),
+    key: 'debug-image-recognition',
+    icon: editorMenuIcon(ImageOutline),
+    disabled: !currentProject.value,
+  },
   { type: 'divider', key: 'debug-divider' },
   {
     label: editorMenuLabel('查看调试任务'),
@@ -386,6 +402,16 @@ const projectTreeContextOptions = computed(() => {
   }
   if (canCreateBlockly) {
     options.push({ label: '新建 Blockly 文件…', key: 'new-blockly-file', icon: editorMenuIcon(GridOutline) })
+  }
+  const contextPath = String(projectTreeContextNode.value?.key || '')
+  const contextIsImage = projectTreeContextNode.value?.kind === 'file' && imageFilePattern.test(contextPath)
+  if (contextIsImage) {
+    options.push(
+      { label: '在截图工具中打开', key: 'open-screenshot-tool', icon: editorMenuIcon(CameraOutline) },
+      { label: '发送到识图调试', key: 'open-image-recognition', icon: editorMenuIcon(ImageOutline) },
+      { label: '作为识图模板', key: 'use-image-template', icon: editorMenuIcon(GridOutline) },
+      { type: 'divider', key: 'image-tools-divider' },
+    )
   }
   options.push(
     { label: '新建其他文件…', key: 'new-file', icon: editorMenuIcon(DocumentOutline), disabled: isSingleFileProject.value },
@@ -871,6 +897,9 @@ function handleProjectTreeContextSelect(key) {
   else if (key === 'new-file') startFileOperation('file', directory)
   else if (key === 'new-directory') startFileOperation('directory', directory)
   else if (key === 'upload') chooseUpload(directory)
+  else if (key === 'open-screenshot-tool') void actions.openProjectImageInScreenshot(String(projectTreeContextNode.value?.key || ''))
+  else if (key === 'open-image-recognition') actions.openProjectImageRecognition(String(projectTreeContextNode.value?.key || ''))
+  else if (key === 'use-image-template') actions.openProjectImageRecognition(String(projectTreeContextNode.value?.key || ''), { asTemplate: true })
   else if (key === 'rename') startRename(projectTreeContextNode.value)
   else if (key === 'delete-file') startDeleteFile(projectTreeContextNode.value)
 }
@@ -946,7 +975,8 @@ function handleProjectMenuSelect(key) {
 
 async function startProjectDebug(entryPath = '') {
   try {
-    await actions.debugProject({ entryPath })
+    const task = await actions.debugProject({ entryPath })
+    if (task?.taskId) await openTaskById(task.taskId)
   } catch (error) {
     actions.setStatus(error?.message || '启动项目调试失败', 'error')
   }
@@ -968,6 +998,10 @@ async function startProjectTemplateDebug() {
 async function viewProjectDebugTask() {
   const taskId = currentDebugTask.value?.taskId
   if (!taskId) return
+  await openTaskById(taskId)
+}
+
+async function openTaskById(taskId) {
   state.selectedTaskId.value = taskId
   state.taskManagerActiveTab.value = 'task-status'
   state.activeView.value = 'task-manager'
@@ -993,6 +1027,7 @@ function handleDebugMenuSelect(key) {
   if (key === 'debug-entry') void startProjectDebug(currentProject.value?.primary_path || '')
   else if (key === 'debug-current') void startProjectDebug(selectedFile.value?.path || '')
   else if (key === 'debug-template') void startProjectTemplateDebug()
+  else if (key === 'debug-image-recognition') actions.openImageRecognitionDebugModal()
   else if (key === 'view-debug-task') void viewProjectDebugTask()
   else if (key === 'stop-debug-task') void stopProjectDebugTask()
 }
@@ -1371,6 +1406,19 @@ onBeforeUnmount(() => {
             @update:model-value="setFileContent"
             @save="saveFile"
           />
+          <div v-else-if="selectedFileIsImage" class="image-file-view">
+            <div class="image-preview-toolbar">
+              <n-text depth="3">{{ selectedFile.path }} · {{ formatSize(selectedFile.size) }}</n-text>
+              <n-space size="small">
+                <n-button size="small" @click="actions.openProjectImageInScreenshot(selectedFile.path)">截图工具</n-button>
+                <n-button size="small" @click="actions.openProjectImageRecognition(selectedFile.path)">识图调试</n-button>
+                <n-button size="small" @click="downloadSelectedFile">下载图片</n-button>
+              </n-space>
+            </div>
+            <div class="image-preview-canvas">
+              <img :src="selectedFilePreviewUrl" :alt="selectedFile.path" class="image-preview" />
+            </div>
+          </div>
           <div v-else class="binary-file-view">
             <n-empty description="二进制文件不在浏览器中读取或编辑">
               <template #extra>
@@ -1942,12 +1990,60 @@ onBeforeUnmount(() => {
   height: 100%;
 }
 
+.binary-file-view,
+.image-file-view {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
 .binary-file-view {
+  align-items: center;
+  justify-content: center;
+}
+
+.image-preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.image-preview-toolbar .n-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-preview-canvas {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px;
+  background-color: var(--color-surface-2);
+  background-image: linear-gradient(45deg, var(--color-border-light) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--color-border-light) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--color-border-light) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--color-border-light) 75%);
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+}
+
+.image-preview {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-shadow: 0 8px 24px var(--color-shadow);
 }
 
 .editor-statusbar {

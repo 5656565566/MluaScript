@@ -1,14 +1,27 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { state, getters, actions } from '../store'
-import { NModal, NCard, NSpace, NButton, NText, NTag, NInput, NTabs, NTabPane, NEmpty } from 'naive-ui'
+import { NModal, NCard, NSpace, NButton, NText, NTag, NInput, NTabs, NTabPane, NEmpty, NSlider } from 'naive-ui'
 
 const mode = ref('pick') // 'pick' or 'crop'
+const zoom = ref(1)
+const imageReady = ref(false)
+const panX = ref(0)
+const panY = ref(0)
+const isPanning = ref(false)
+const panStartX = ref(0)
+const panStartY = ref(0)
+const panOriginX = ref(0)
+const panOriginY = ref(0)
+const MIN_ZOOM = 0.25
+const MAX_ZOOM = 4
 
 // Pick Point State
 const screenshotImageRef = ref(null)
 const pickedPoint = ref(null)
 const copyFeedback = ref('')
+const pickedColor = ref(null)
+const uploadInputRef = ref(null)
 
 // Crop State
 const overlayRef = ref(null)
@@ -37,12 +50,18 @@ const normalizedPoint = computed(() => {
 })
 
 watch(() => getters.imageUrl.value, (val) => {
+  imageReady.value = false
   if (!val) {
     imageObj = null
     return
   }
   imageObj = new Image()
+  imageObj.onload = () => { imageReady.value = true }
   imageObj.src = val
+  zoom.value = 1
+  panX.value = 0
+  panY.value = 0
+  pickedColor.value = null
   // reset state
   pickedPoint.value = null
   isCropping.value = false
@@ -52,10 +71,67 @@ watch(() => getters.imageUrl.value, (val) => {
   currentY.value = 0
 }, { immediate: true })
 
+function setZoom(value) {
+  const numericValue = Number(value)
+  const nextZoom = Number.isFinite(numericValue) ? numericValue : 1
+  zoom.value = Math.round(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, nextZoom)) * 100) / 100
+}
+
+function formatZoom(value = zoom.value) {
+  return Number(value).toFixed(2)
+}
+
+function zoomIn() {
+  setZoom(zoom.value + 0.25)
+}
+
+function zoomOut() {
+  setZoom(zoom.value - 0.25)
+}
+
+function resetZoom() {
+  setZoom(1)
+}
+
+function handleWheel(event) {
+  if (!getters.imageUrl.value) return
+  event.preventDefault()
+  setZoom(zoom.value + (event.deltaY < 0 ? 0.1 : -0.1))
+}
+
+function handleContextMenu(event) {
+  event.preventDefault()
+}
+
+function handlePanStart(event) {
+  if (event.button !== 2 || !getters.imageUrl.value) return
+  event.preventDefault()
+  isPanning.value = true
+  panStartX.value = event.clientX
+  panStartY.value = event.clientY
+  panOriginX.value = panX.value
+  panOriginY.value = panY.value
+  window.addEventListener('mousemove', handlePanMove)
+  window.addEventListener('mouseup', handlePanEnd)
+}
+
+function handlePanMove(event) {
+  if (!isPanning.value) return
+  panX.value = panOriginX.value + event.clientX - panStartX.value
+  panY.value = panOriginY.value + event.clientY - panStartY.value
+}
+
+function handlePanEnd() {
+  if (!isPanning.value) return
+  isPanning.value = false
+  window.removeEventListener('mousemove', handlePanMove)
+  window.removeEventListener('mouseup', handlePanEnd)
+}
+
 function handleImageClick(event) {
-  if (mode.value !== 'pick') return
+  if (!['pick', 'color'].includes(mode.value)) return
   
-  const wrapper = screenshotImageRef.value
+  const wrapper = overlayRef.value
   const img = wrapper?.querySelector('img')
   if (!wrapper || !img) return
   
@@ -69,6 +145,20 @@ function handleImageClick(event) {
   
   const rawX = Math.max(0, Math.min((event.clientX - rect.left) * scaleX, naturalWidth))
   const rawY = Math.max(0, Math.min((event.clientY - rect.top) * scaleY, naturalHeight))
+
+  if (mode.value === 'color') {
+    const canvas = document.createElement('canvas')
+    canvas.width = 1
+    canvas.height = 1
+    const context = canvas.getContext('2d', { willReadFrequently: true })
+    context.drawImage(imageObj, Math.floor(rawX), Math.floor(rawY), 1, 1, 0, 0, 1, 1)
+    const [r, g, b] = context.getImageData(0, 0, 1, 1).data
+    pickedColor.value = {
+      hex: `#${[r, g, b].map(value => value.toString(16).padStart(2, '0')).join('').toUpperCase()}`,
+      rgb: `${r}, ${g}, ${b}`,
+    }
+    return
+  }
   
   pickedPoint.value = {
     x: Math.round(rawX),
@@ -80,6 +170,35 @@ function handleImageClick(event) {
     displayWidth: rect.width,
     displayHeight: rect.height,
   }
+}
+
+async function copyColor(kind = 'hex') {
+  if (!pickedColor.value) return
+  await navigator.clipboard.writeText(pickedColor.value[kind])
+  actions.setStatus(`已复制颜色 ${pickedColor.value[kind]}`, 'success')
+}
+
+function chooseUploadImage() {
+  uploadInputRef.value?.click()
+}
+
+function handleUploadImage(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    actions.setStatus('请选择图片文件', 'warning')
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = () => {
+    const dataUrl = String(reader.result || '')
+    state.screenshotBase64.value = dataUrl.split(',', 2)[1] || ''
+    if (state.screenshotMimeType) state.screenshotMimeType.value = file.type || 'image/png'
+    if (state.screenshotImagePath) state.screenshotImagePath.value = ''
+    state.screenshotPath.value = file.name
+  }
+  reader.readAsDataURL(file)
 }
 
 async function copyPointValue(kind) {
@@ -94,7 +213,7 @@ async function copyPointValue(kind) {
 }
 
 function handleMouseDown(event) {
-  if (mode.value !== 'crop' || !imageObj || !overlayRef.value) return
+  if (event.button !== 0 || mode.value !== 'crop' || !imageObj || !overlayRef.value) return
   isCropping.value = true
   const rect = overlayRef.value.getBoundingClientRect()
   const scaleX = imageObj.width / rect.width
@@ -156,6 +275,11 @@ async function saveCrop() {
   }
 }
 
+const imageTransformStyle = computed(() => ({
+  transform: `translate(${panX.value}px, ${panY.value}px) scale(${zoom.value})`,
+  visibility: imageReady.value ? 'visible' : 'hidden',
+}))
+
 function boxStyle() {
   if (!imageObj || mode.value !== 'crop') return { display: 'none' }
   const x = Math.min(startX.value, currentX.value)
@@ -174,8 +298,13 @@ function boxStyle() {
 }
 
 function close() {
+  handlePanEnd()
   state.showScreenshot.value = false
 }
+
+onBeforeUnmount(() => {
+  handlePanEnd()
+})
 </script>
 
 <template>
@@ -194,6 +323,26 @@ function close() {
       style="flex: 1; border-radius: 0; display: flex; flex-direction: column; min-height: 0;"
       content-style="display: flex; flex-direction: column; gap: 16px; flex: 1; min-height: 0;"
     >
+      <div class="screenshot-toolbar">
+        <n-space align="center" :wrap="true">
+          <input ref="uploadInputRef" type="file" accept="image/*" class="screenshot-upload-input" @change="handleUploadImage" />
+          <n-button size="small" @click="chooseUploadImage">上传图片</n-button>
+          <n-text depth="3">缩放</n-text>
+          <n-button size="small" :disabled="zoom <= MIN_ZOOM" @click="zoomOut">−</n-button>
+          <n-slider
+            :value="zoom"
+            :min="MIN_ZOOM"
+            :max="MAX_ZOOM"
+            :step="0.05"
+            :format-tooltip="formatZoom"
+            style="width: 180px;"
+            @update:value="setZoom"
+          />
+          <n-button size="small" :disabled="zoom >= MAX_ZOOM" @click="zoomIn">+</n-button>
+          <n-button size="small" secondary @click="resetZoom">{{ formatZoom() }}x</n-button>
+          <n-text depth="3" class="screenshot-hint">滚轮缩放，按住鼠标右键拖动图片</n-text>
+        </n-space>
+      </div>
       <n-tabs v-model:value="mode" type="segment" animated>
         <n-tab-pane name="pick" tab="坐标取点">
           <div style="display: flex; gap: 16px; align-items: center; min-height: 34px;">
@@ -216,24 +365,42 @@ function close() {
             <n-button type="primary" @click="saveCrop" :loading="state.loading.value">保存至 Resource</n-button>
           </div>
         </n-tab-pane>
+        <n-tab-pane name="color" tab="颜色拾取">
+          <div class="screenshot-mode-row">
+            <n-text depth="3" style="flex: 1;">点击图片获取像素颜色</n-text>
+            <n-space v-if="pickedColor" align="center">
+              <span class="color-swatch" :style="{ backgroundColor: pickedColor.hex }"></span>
+              <n-tag>{{ pickedColor.hex }}</n-tag>
+              <n-tag>{{ pickedColor.rgb }}</n-tag>
+              <n-button size="small" @click="copyColor('hex')">复制 HEX</n-button>
+              <n-button size="small" @click="copyColor('rgb')">复制 RGB</n-button>
+            </n-space>
+          </div>
+        </n-tab-pane>
       </n-tabs>
 
-      <div class="screenshot-workspace">
+      <div
+        class="screenshot-workspace"
+        :class="{ 'is-panning': isPanning }"
+        @wheel="handleWheel"
+        @contextmenu="handleContextMenu"
+        @mousedown="handlePanStart"
+      >
         <div v-if="getters.imageUrl.value" class="screenshot-stage">
           <div
             class="screenshot-image-wrapper"
             ref="screenshotImageRef"
             @click="handleImageClick"
-            :style="{ cursor: mode === 'pick' ? 'crosshair' : 'default' }"
+            :style="{ cursor: ['pick', 'color'].includes(mode) ? 'crosshair' : 'default' }"
           >
             <div
               ref="overlayRef"
               class="crop-overlay"
+              :style="{ ...imageTransformStyle, cursor: isPanning ? 'grabbing' : mode === 'crop' ? 'crosshair' : 'inherit' }"
               @mousedown.prevent="handleMouseDown"
               @mousemove="handleMouseMove"
               @mouseup="handleMouseUp"
               @mouseleave="handleMouseUp"
-              :style="{ cursor: mode === 'crop' ? 'crosshair' : 'inherit' }"
             >
               <img :src="getters.imageUrl.value" alt="screencap" class="screenshot-img" draggable="false" />
               <div class="crop-box" :style="boxStyle()"></div>
@@ -255,8 +422,45 @@ function close() {
 </template>
 
 <style scoped>
+.screenshot-toolbar {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 6px;
+  background: var(--n-color-embedded);
+}
+
+.screenshot-upload-input {
+  display: none;
+}
+
+.screenshot-mode-row {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  gap: 12px;
+}
+
+.color-swatch {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 4px;
+}
+
+.screenshot-hint {
+  font-size: 12px;
+}
+
+.screenshot-workspace.is-panning {
+  cursor: grabbing;
+  user-select: none;
+}
+
 .screenshot-workspace {
   background: var(--n-color-embedded);
+  cursor: default;
   border-radius: 6px;
   border: 1px solid var(--n-border-color);
   padding: 16px;

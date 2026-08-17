@@ -153,15 +153,18 @@ export function createDeviceActions({
       getActions().setStatus(data.message || '设备已断开', 'success')
     },
 
-    async doScreencap() {
+    async doScreencap({ showPreview = true } = {}) {
       if (!state.selectedSession.value) throw new Error('请先选择一个连接的设备')
       const data = await deviceApi.screencap()
       getActions().setStatus(data.message || '截图成功', 'success')
       if (data.imageBase64) {
         state.screenshotBase64.value = data.imageBase64
-        state.showScreenshot.value = true
+        if (state.screenshotMimeType) state.screenshotMimeType.value = 'image/png'
+        if (state.screenshotImagePath) state.screenshotImagePath.value = ''
+        if (showPreview) state.showScreenshot.value = true
         state.screenshotPath.value = '截图时间：' + new Date().toLocaleTimeString()
       }
+      return data
     },
 
     captureDevicePreviewFrame,

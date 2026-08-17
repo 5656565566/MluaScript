@@ -22,6 +22,7 @@ const props = defineProps({
   createPlaceholder: { type: String, default: '输入名称' },
   manageButtonText: { type: String, default: '管理' },
   emptyText: { type: String, default: '暂无可选项' },
+  treeMode: { type: Boolean, default: false },
   keepOpenOnSelect: { type: Boolean, default: false },
   form: { type: Object, default: null },
   onSelect: { type: Function, default: null },
@@ -112,6 +113,7 @@ function handleManageWithFallback() {
         :selected-values="selectedItems"
         :multiple="effectiveMultiple"
         :empty-text="effectiveEmptyText"
+        :tree-mode="isStoreDriven ? Boolean(storeSnapshot?.treeMode) : treeMode"
         :search-query="searchQuery"
         :allow-create="effectiveAllowCreate"
         :create-value="createValue"

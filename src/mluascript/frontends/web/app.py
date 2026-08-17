@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
+import io
 import hmac
 import json
+import mimetypes
 import secrets
 import time
 from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from PIL import Image
 
 from mluascript.control.facade import get_control_facade
 from mluascript.control.workspace import (
@@ -27,6 +32,8 @@ from mluascript.control.workspace import (
     get_template_store,
 )
 from mluascript.frontends.web.preferences import WebPreferences, WebPreferenceService
+from mluascript.maa.lifecycle.runtime import initialize_maa_runtime
+from mluascript.maa.recognition import find_color, find_feature, find_nnd, find_ocr, find_template
 from mluascript.shared.config import WebServerConfig, config
 from mluascript.shared.logging import get_logs, get_logs_by_channel, get_logs_by_session
 
@@ -173,8 +180,23 @@ class ProjectBuildPayload(BaseModel):
     generatedModules: dict[str, str] | None = None
 
 
+class ProjectImageRecognitionPayload(BaseModel):
+    kind: Literal["ocr", "template", "feature", "color", "nnd"] = "ocr"
+    imagePath: str = ""
+    imageBase64: str = ""
+    templatePath: str = ""
+    modelPath: str = ""
+    expected: str = ""
+    targets: str = ""
+    lower: list[list[int]] = Field(default_factory=list)
+    upper: list[list[int]] = Field(default_factory=list)
+    roi: list[int] | None = None
+    threshold: float | None = None
+
+
 class ProjectDebugPayload(BaseModel):
     mode: Literal["script", "template", "pipeline"] = "script"
+
     sessionLabel: str = ""
     entryPath: str = ""
     luaCode: str = ""
@@ -514,12 +536,32 @@ def _serialize_device_page_items(items: list[dict[str, Any]]) -> list[dict[str, 
 
 
 def _build_device_items_payload() -> list[dict[str, Any]]:
-    overview = get_control_facade().get_device_overview()
-    buckets = [overview.adb.items, overview.emulator.items, overview.browser.items, overview.desktop.items]
+    facade = get_control_facade()
+    overview = facade.get_device_overview()
+    buckets = [overview.adb.items, overview.emulator.items, overview.browser.items]
     items: list[dict[str, Any]] = []
     for bucket in buckets:
         for item in bucket:
             items.append(item.model_dump())
+    # The overview is paged for the legacy device page UI. The WebUI fetches all
+    # discoverable desktop windows in one response, so use the raw discovery list here.
+    for index, window in enumerate(facade.device_facade._desktop_raw):
+        handle = int(window.get("handle") or window.get("hwnd") or 0)
+        backend = str(window.get("platform") or "desktop")
+        window_name = str(window.get("window_name") or "未命名窗口")
+        class_name = str(window.get("class_name") or "未知类名")
+        items.append({
+            "id": f"desktop:{index}",
+            "kind": "desktop",
+            "title": window_name,
+            "subtitle": f"[{backend}:{handle}] {class_name}",
+            "handle": handle,
+            "hwnd": handle,
+            "window_name": window_name,
+            "class_name": class_name,
+            "enabled": handle != 0 or backend == "wlroots",
+            "tags": [],
+        })
     return items
 
 
@@ -1272,7 +1314,14 @@ def download_project_file(project_key: str, request: Request, path: str = Query(
         target, normalized = _project_service(request).get_file_path(project_key, path)
     except ProjectServiceError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return FileResponse(target, media_type="application/octet-stream", filename=Path(normalized).name)
+    media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    content_disposition_type = "inline" if media_type.startswith("image/") else "attachment"
+    return FileResponse(
+        target,
+        media_type=media_type,
+        filename=Path(normalized).name,
+        content_disposition_type=content_disposition_type,
+    )
 
 
 @projects_router.post("/{project_key}/validate")
@@ -1407,6 +1456,88 @@ def debug_project(project_key: str, payload: ProjectDebugPayload, request: Reque
         },
         message=f"调试任务已启动: {task_id}",
     )
+
+
+def _recognition_image_array(service: ProjectService, project_key: str, payload: ProjectImageRecognitionPayload) -> np.ndarray:
+    try:
+        if payload.imageBase64:
+            encoded = payload.imageBase64.split(",", 1)[-1]
+            raw = base64.b64decode(encoded, validate=True)
+        elif payload.imagePath:
+            target = Path(_recognition_resource_path(service, project_key, payload.imagePath, "测试图片"))
+            raw = target.read_bytes()
+        else:
+            raise ProjectServiceError("请选择识图测试图片")
+        with Image.open(io.BytesIO(raw)) as image:
+            rgb = np.asarray(image.convert("RGB"))
+        return rgb[:, :, ::-1].copy()
+    except (OSError, ValueError, binascii.Error) as exc:
+        raise ProjectServiceError(f"测试图片无效: {exc}") from exc
+
+
+def _recognition_resource_path(service: ProjectService, project_key: str, relative_path: str, label: str) -> str:
+    reference = str(relative_path or "").strip().replace("\\", "/")
+    if not reference:
+        raise ProjectServiceError(f"请选择{label}")
+    resolved_path = reference
+    if ":" in reference:
+        resource_key, resource_relative = reference.split(":", 1)
+        manifest = service.open_project(project_key).get("manifest") or {}
+        resource_root = str((manifest.get("resources") or {}).get(resource_key) or "").strip().replace("\\", "/")
+        if not resource_root:
+            raise ProjectServiceError(f"资源目录不存在: {resource_key}")
+        if not resource_relative.strip("/"):
+            raise ProjectServiceError(f"{label}资源路径不能为空")
+        resolved_path = f"{resource_root.rstrip('/')}/{resource_relative.lstrip('/')}"
+    target, _ = service.get_file_path(project_key, resolved_path)
+    return str(target)
+
+
+@projects_router.post("/{project_key}/recognize-image")
+def recognize_project_image(
+    project_key: str,
+    payload: ProjectImageRecognitionPayload,
+    request: Request,
+) -> dict[str, Any]:
+    service = _project_service(request)
+    try:
+        image = _recognition_image_array(service, project_key, payload)
+        facade = get_control_facade()
+        context = facade.device_facade._maa_facade.context
+        initialize_maa_runtime(context)
+        if context.tasker is None:
+            raise ProjectServiceError("Maa 识别运行时未初始化")
+
+        entry = f"WebImageDebug:{payload.kind}"
+        if payload.kind == "ocr":
+            expected = [item.strip() for item in payload.expected.split("|") if item.strip()] or None
+            result = find_ocr(context, entry, expected=expected, roi=payload.roi, image=image)
+        elif payload.kind == "template":
+            template = _recognition_resource_path(service, project_key, payload.templatePath, "模板图片")
+            result = find_template(
+                context,
+                entry,
+                template=template,
+                roi=payload.roi,
+                threshold=payload.threshold,
+                image=image,
+            )
+        elif payload.kind == "feature":
+            template = _recognition_resource_path(service, project_key, payload.templatePath, "模板图片")
+            result = find_feature(context, entry, template=template, roi=payload.roi, image=image)
+        elif payload.kind == "color":
+            result = find_color(context, entry, lower=payload.lower, upper=payload.upper, roi=payload.roi, image=image)
+        else:
+            model = _recognition_resource_path(service, project_key, payload.modelPath, "检测模型")
+            targets = [item.strip() for item in payload.targets.split("|") if item.strip()] or None
+            result = find_nnd(context, entry, model=model, targets=targets, roi=payload.roi, image=image)
+    except ProjectServiceError as exc:
+        raise _project_error(exc) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"识图调试失败: {exc}") from exc
+
+    normalized = result or {"hit": False, "entry": f"WebImageDebug:{payload.kind}"}
+    return _ok({"result": normalized, "message": "识图完成"}, message="识图完成")
 
 
 @projects_router.get("/{project_key}/builds/{build_id}/download")
