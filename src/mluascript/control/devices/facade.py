@@ -25,6 +25,7 @@ from mluascript.maa.connections import (
     find_adb_devices,
     find_desktop_windows,
 )
+from mluascript.maa.controllers.input import click as controller_click
 from mluascript.maa.controllers.screen import screencap
 from mluascript.maa.lifecycle.bootstrap import resolve_maa_paths
 from mluascript.maa.lifecycle.runtime import initialize_maa_runtime
@@ -202,6 +203,31 @@ class DeviceFacade:
 
     def screencap_current(self) -> DeviceActionResult:
         return self._capture_current_screenshot_result()
+
+    def click_current(self, x: int, y: int) -> DeviceActionResult:
+        session = self._maa_facade.get_current_session()
+        if session is None:
+            return DeviceActionResult(
+                ok=False,
+                message="当前无已连接设备，无法点击",
+                severity="warning",
+                overview=self.get_overview(),
+            )
+        try:
+            controller_click(self._maa_facade.context, x, y)
+            return DeviceActionResult(
+                ok=True,
+                message=f"已点击 ({x}, {y})",
+                overview=self.get_overview(),
+            )
+        except Exception as exc:
+            logger.error(f"Device operation failed: {exc}", exc_info=True)
+            return DeviceActionResult(
+                ok=False,
+                message=f"点击设备失败: {exc}",
+                severity="error",
+                overview=self.get_overview(),
+            )
 
     def screencap_current_and_save(self) -> DeviceActionResult:
         result = self._capture_current_screenshot_result()

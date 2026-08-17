@@ -167,6 +167,12 @@ export function createDeviceActions({
       return data
     },
 
+    async clickDevice(x, y) {
+      const data = await deviceApi.click(x, y)
+      getActions().setStatus(data.message || `已点击 (${x}, ${y})`, 'success')
+      return data
+    },
+
     captureDevicePreviewFrame,
     startDevicePreviewLoop,
     stopDevicePreviewLoop,

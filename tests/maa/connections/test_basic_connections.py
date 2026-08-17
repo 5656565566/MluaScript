@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
+from PIL import Image
 
 from mluascript.maa.connections.adb import connect_adb
 from mluascript.maa.connections.browser import connect_browser
 from mluascript.maa.connections.desktop import connect_desktop_window, current_desktop_backend
 from mluascript.maa.connections.discovery import find_adb_devices, find_desktop_windows
 from mluascript.maa.connections.models import AdbConnectionParams, BrowserConnectionParams, DesktopWindowConnectionParams
+from mluascript.maa.extensions.browser.controller import BrowserController
 from mluascript.maa.lifecycle.runtime import MaaContext
 from mluascript.maa.types import MaaContextState, MaaPaths
 
@@ -129,6 +133,57 @@ def test_connect_browser_passes_launch_configuration(mocker) -> None:
     assert kwargs["launch_args"] == ["--new-window"]
     assert kwargs["profile_dir"] == ".mluascript_web/browser/edge-1"
     assert kwargs["name"] == "Edge-1"
+
+
+def test_browser_controller_sends_virtual_keys_to_playwright(mocker) -> None:
+    controller = BrowserController.__new__(BrowserController)
+    controller._connected = True
+    controller.browser = None
+    controller.page = mocker.MagicMock()
+    controller.page.is_closed.return_value = False
+
+    assert controller.click_key(13) is True
+    assert controller.key_down(65) is True
+    assert controller.key_up(65) is True
+    assert controller.click_key(999) is False
+
+    controller.page.keyboard.press.assert_called_once_with("Enter")
+    controller.page.keyboard.down.assert_called_once_with("A")
+    controller.page.keyboard.up.assert_called_once_with("A")
+
+
+def test_browser_controller_screencap_returns_contiguous_bgr_data(mocker) -> None:
+    screenshot = io.BytesIO()
+    Image.new("RGB", (1, 1), (12, 34, 56)).save(screenshot, format="PNG")
+    controller = BrowserController.__new__(BrowserController)
+    controller._connected = True
+    controller.browser = None
+    controller.page = mocker.MagicMock()
+    controller.page.is_closed.return_value = False
+    controller.page.screenshot.return_value = screenshot.getvalue()
+
+    image = controller.screencap()
+
+    assert image.flags.c_contiguous
+    np.testing.assert_array_equal(image, np.array([[[56, 34, 12]]], dtype=np.uint8))
+
+
+def test_browser_controller_uses_a_dedicated_profile_for_cdp_launch(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("mluascript.shared.config.manager.get_runtime_dir", lambda: tmp_path)
+    controller = BrowserController.__new__(BrowserController)
+    controller.url = "http://127.0.0.1:9222"
+    controller.browser_type = "chrome"
+    controller.name = "Chrome 调试实例"
+    controller.profile_dir = "C:/Users/example/AppData/Local/Google/Chrome/User Data"
+
+    args = controller._default_launch_args()
+
+    profile_arg = next(arg for arg in args if arg.startswith("--user-data-dir="))
+    profile_path = Path(profile_arg.split("=", 1)[1])
+    assert "--remote-debugging-port=9222" in args
+    assert "--remote-debugging-address=127.0.0.1" in args
+    assert profile_path == tmp_path / ".mluascript" / "browser" / "chrome-9222"
+    assert profile_path.is_dir()
 
 
 def test_connect_desktop_window_uses_windows_backend(mocker) -> None:

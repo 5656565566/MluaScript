@@ -361,6 +361,9 @@ class ControlFacade:
     def screencap_current_device(self) -> DeviceActionResult:
         return self.device_facade.screencap_current()
 
+    def click_current_device(self, x: int, y: int) -> DeviceActionResult:
+        return self.device_facade.click_current(x, y)
+
     def screencap_current_device_and_save(self) -> DeviceActionResult:
         return self.device_facade.screencap_current_and_save()
 

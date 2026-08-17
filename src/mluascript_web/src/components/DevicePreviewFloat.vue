@@ -54,6 +54,33 @@ function stopDrag() {
   window.removeEventListener('mousemove', handleDrag)
   window.removeEventListener('mouseup', stopDrag)
 }
+
+function getImagePoint(event) {
+  const surface = event.currentTarget
+  const image = surface?.querySelector('img')
+  if (!surface || !image || !image.naturalWidth || !image.naturalHeight) return null
+
+  const rect = surface.getBoundingClientRect()
+  const scale = Math.min(rect.width / image.naturalWidth, rect.height / image.naturalHeight)
+  if (!scale) return null
+  const renderedWidth = image.naturalWidth * scale
+  const renderedHeight = image.naturalHeight * scale
+  const left = rect.left + (rect.width - renderedWidth) / 2
+  const top = rect.top + (rect.height - renderedHeight) / 2
+  const x = Math.round((event.clientX - left) / scale)
+  const y = Math.round((event.clientY - top) / scale)
+  if (x < 0 || y < 0 || x >= image.naturalWidth || y >= image.naturalHeight) return null
+  return { x, y }
+}
+
+function handlePreviewClick(event, win) {
+  const point = getImagePoint(event)
+  if (!point) return
+  void actions.handleAction(async () => {
+    await actions.clickDevice(point.x, point.y)
+    await actions.captureDevicePreviewFrame(win.id, win.label)
+  })
+}
 </script>
 
 <template>
@@ -77,14 +104,19 @@ function stopDrag() {
       </div>
 
       <div class="device-preview-body">
-        <n-image
+        <div
           v-if="win.imageBase64"
+          class="device-preview-image-surface"
+          @click="handlePreviewClick($event, win)"
+        >
+        <n-image
           :src="`data:image/png;base64,${win.imageBase64}`"
           alt="device-preview"
           object-fit="contain"
           class="device-preview-image"
           preview-disabled
         />
+        </div>
         <div v-else class="device-preview-empty">
           <n-text depth="3">暂无截图预览</n-text>
         </div>
@@ -173,6 +205,12 @@ function stopDrag() {
 .device-preview-image {
   width: 100%;
   height: 100%;
+}
+
+.device-preview-image-surface {
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
 }
 
 .device-preview-empty {

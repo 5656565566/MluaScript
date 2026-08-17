@@ -22,5 +22,8 @@ export const deviceApi = {
   async screencap() {
     return await apiPost('/api/device/screencap', {})
   },
+  async click(x, y) {
+    return await apiPost('/api/device/click', { x, y })
+  },
 }
 

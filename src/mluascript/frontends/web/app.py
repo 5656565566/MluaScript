@@ -101,6 +101,11 @@ class DeviceConnectPayload(BaseModel):
     deviceId: str = ""
 
 
+class DeviceClickPayload(BaseModel):
+    x: int = Field(ge=0)
+    y: int = Field(ge=0)
+
+
 class RunLuaPayload(BaseModel):
     sessionLabel: str | None = None
     luaCode: str = ""
@@ -805,6 +810,14 @@ def system_script_template(artifact_id: str, request: Request) -> dict[str, Any]
             "name": source.artifact.name,
         }
     )
+
+
+@device_router.post("/click")
+def click_device(payload: DeviceClickPayload) -> dict[str, Any]:
+    result = get_control_facade().click_current_device(payload.x, payload.y)
+    if not result.ok:
+        raise HTTPException(status_code=400, detail=result.message or "点击设备失败")
+    return _ok({"message": result.message}, message=result.message)
 
 
 @system_router.get("/scripts/template")

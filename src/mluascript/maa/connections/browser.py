@@ -26,8 +26,10 @@ def connect_browser(context: MaaContext, params: BrowserConnectionParams) -> Con
     job.wait()
 
     if not getattr(job, "succeeded", False):
-        logger.error(f"Browser controller post_connection failed for {params.url}")
-        raise RuntimeError(f"Browser controller connect failed: {params.url}")
+        reason = str(getattr(controller, "last_error", "") or "").strip()
+        logger.error(f"Browser controller post_connection failed for {params.url}: {reason or 'unknown error'}")
+        detail = f": {reason}" if reason else ""
+        raise RuntimeError(f"Browser controller connect failed: {params.url}{detail}")
 
     screencap_job = controller.post_screencap()
     screencap_job.wait()
