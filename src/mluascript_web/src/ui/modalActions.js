@@ -6,6 +6,7 @@ const SharedVariableManagerModal = defineAsyncComponent(() => import('../compone
 const TaskDetailModal = defineAsyncComponent(() => import('../components/TaskDetailModal.vue'))
 const TaskTraceModal = defineAsyncComponent(() => import('../components/TaskTraceModal.vue'))
 const ImageRecognitionDebugModal = defineAsyncComponent(() => import('../components/ImageRecognitionDebugModal.vue'))
+const VisionDialogHeader = defineAsyncComponent(() => import('../components/VisionDialogHeader.vue'))
 
 export function createModalActions({ state, openModal, getActions }) {
   return {
@@ -84,7 +85,13 @@ export function createModalActions({ state, openModal, getActions }) {
       })
     },
 
+    openScreenshotPreview() {
+      state.showScreenshot.value = true
+    },
+
     openImageRecognitionDebugModal({ imagePath = '', templatePath = '' } = {}) {
+      const actions = getActions()
+      state.showScreenshot.value = false
       if (imagePath || templatePath) {
         state.imageRecognitionDraft.value = {
           ...state.imageRecognitionDraft.value,
@@ -92,14 +99,25 @@ export function createModalActions({ state, openModal, getActions }) {
           imagePath: imagePath || state.imageRecognitionDraft.value.imagePath,
           templatePath: templatePath || state.imageRecognitionDraft.value.templatePath,
           imageBase64: imagePath ? '' : state.imageRecognitionDraft.value.imageBase64,
+          result: null,
+          error: '',
         }
+        actions.syncVisionSessionFromDraft?.()
+      } else {
+        actions.syncVisionDraftFromSession?.()
       }
       return openModal({
         type: 'image-recognition-debug',
         component: ImageRecognitionDebugModal,
         props: {},
         options: {
-          title: '识图调试',
+          title: '',
+          headerComponent: VisionDialogHeader,
+          headerProps: { label: '识图调试', onSelect: (key, modalId) => {
+            if (key !== 'screenshot') return
+            actions.closeModal?.(modalId)
+            actions.openScreenshotPreview?.()
+          } },
           size: 'full',
           panelClass: 'image-recognition-debug-panel',
           contentClass: 'image-recognition-debug-content',

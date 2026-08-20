@@ -4,6 +4,7 @@ export function createEditorState() {
   return {
     blocklyEditorRef: ref(null),
     blocklyEditor: shallowRef(null),
+    textCodeEditor: shallowRef(null),
     suppressBlocklyAutosave: ref(false),
     editorSessionHydrated: ref(false),
     lastSavedBlocklyXml: ref(''),

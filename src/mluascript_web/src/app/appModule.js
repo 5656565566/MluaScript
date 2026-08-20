@@ -215,10 +215,14 @@ export function createAppActions({
       return preferenceSaveQueue
     },
 
-    async saveCroppedImage(filename, imageBase64) {
+    async saveCroppedImage(filename, imageBase64, directory = 'resources/assets') {
       const actions = getActions()
       const cleanBase64 = String(imageBase64 || '').replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '')
       const cleanName = String(filename || '').trim().replace(/[\\/:*?"<>|]/g, '_') || 'template.png'
+      const cleanDirectory = String(directory || '').trim().replaceAll('\\', '/').replace(/^\/+|\/+$/g, '')
+      if (!cleanDirectory || cleanDirectory.split('/').some(segment => !segment || segment === '.' || segment === '..')) {
+        throw new Error('裁切图片保存目录无效')
+      }
       const projectKey = state.currentProject?.value?.key || ''
       if (!projectKey) {
         actions.setStatus('请先打开一个项目后再保存裁切图片', 'warning')
@@ -231,8 +235,9 @@ export function createAppActions({
       const bytes = new Uint8Array(raw.length)
       for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i)
       const blob = new Blob([bytes], { type: 'image/png' })
-      await actions.uploadProjectFile(`resources/assets/${cleanName}`, blob, true)
-      return { path: `resources/assets/${cleanName}` }
+      const targetPath = `${cleanDirectory}/${cleanName}`
+      await actions.uploadProjectFile(targetPath, blob, true)
+      return { path: targetPath }
     },
   }
 }

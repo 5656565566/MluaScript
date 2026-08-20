@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { NButton, NEmpty, NGrid, NGridItem, NInput, NInputNumber, NSelect, NSpace, NTag, NText } from 'naive-ui'
+import { NButton, NDropdown, NEmpty, NGrid, NGridItem, NInput, NInputNumber, NSelect, NSpace, NTag, NText } from 'naive-ui'
 import { state, getters, actions } from '../store'
 
 const props = defineProps({
@@ -44,34 +44,18 @@ const recognitionResourceOptions = computed(() => {
   }
   return options
 })
-const modelResources = computed(() => resourceFiles.value.filter(item => /\.(onnx|xml|bin|pth|engine)$/i.test(item.path)))
 const modelOptions = computed(() => {
-  const options = []
-  const seen = new Set()
-  for (const [modelKey, model] of Object.entries(state.currentManifest.value?.models || {})) {
-    if (String(model?.type || '').toLowerCase() !== 'maa.nnd') continue
-    const declaredPath = String(model?.path || '').replaceAll('\\', '/').replace(/\/$/, '')
-    if (!declaredPath) continue
-    const candidates = modelResources.value.filter(item => (
-      item.path === declaredPath || item.path.startsWith(`${declaredPath}/`)
-    ))
-    const resolved = candidates.length ? candidates : [{ path: declaredPath }]
-    for (const candidate of resolved) {
-      if (seen.has(candidate.path)) continue
-      seen.add(candidate.path)
-      options.push({
-        label: candidates.length > 1 ? `${modelKey}/${candidate.path.split('/').pop()}` : modelKey,
-        value: candidate.path,
-        description: candidate.path,
-      })
-    }
-  }
-  for (const item of modelResources.value) {
-    if (seen.has(item.path)) continue
-    seen.add(item.path)
-    options.push({ label: item.path.split('/').pop(), value: item.path, description: item.path })
-  }
-  return options
+  return Object.entries(state.currentManifest.value?.models || {})
+    .filter(([, model]) => String(model?.type || '').toLowerCase() === 'maa.nnd')
+    .map(([modelKey, model]) => {
+      const path = String(model?.path || '').replaceAll('\\', '/').replace(/\/$/, '')
+      return {
+        label: modelKey,
+        value: path,
+        description: path,
+      }
+    })
+    .filter(option => option.value)
 })
 const selectedResourceUrl = computed(() => {
   const path = draft.value.imagePath
@@ -86,19 +70,35 @@ const recognitionResourcePreviewUrl = computed(() => {
 const recognitionResourceName = computed(() => String(draft.value.templatePath || '') || '识图资源')
 const activeImageUrl = computed(() => imageUrl.value || selectedResourceUrl.value)
 const hasTestImage = computed(() => Boolean(activeImageUrl.value))
+const copyOptions = computed(() => [
+  { label: '复制识图 Lua', key: 'copy-vision-lua' },
+  { label: '复制识别并点击 Lua', key: 'copy-vision-click-lua', disabled: !draft.value.result },
+])
+const insertOptions = computed(() => [
+  { label: '插入识图 Lua', key: 'insert-vision-lua' },
+  { label: '插入识图 Blockly', key: 'insert-vision-blockly' },
+  { label: '插入识别并点击 Lua', key: 'insert-vision-click-lua', disabled: !draft.value.result },
+  { label: '插入识别并点击 Blockly', key: 'insert-vision-click-blockly', disabled: !draft.value.result },
+])
 const hasRoi = computed(() => Number(draft.value.roiWidth) > 0 && Number(draft.value.roiHeight) > 0)
 const roiBoxStyle = computed(() => {
   if (!hasRoi.value || !imageSize.value.width || !imageSize.value.height) return { display: 'none' }
+  const rawRoi = state.visionSession.value?.roi
+  const x = rawRoi?.rawX ?? Number(draft.value.roiX)
+  const y = rawRoi?.rawY ?? Number(draft.value.roiY)
+  const width = rawRoi?.rawWidth ?? Number(draft.value.roiWidth)
+  const height = rawRoi?.rawHeight ?? Number(draft.value.roiHeight)
   return {
-    left: `${(Number(draft.value.roiX) / imageSize.value.width) * 100}%`,
-    top: `${(Number(draft.value.roiY) / imageSize.value.height) * 100}%`,
-    width: `${(Number(draft.value.roiWidth) / imageSize.value.width) * 100}%`,
-    height: `${(Number(draft.value.roiHeight) / imageSize.value.height) * 100}%`,
+    left: `${(x / imageSize.value.width) * 100}%`,
+    top: `${(y / imageSize.value.height) * 100}%`,
+    width: `${(width / imageSize.value.width) * 100}%`,
+    height: `${(height / imageSize.value.height) * 100}%`,
   }
 })
 
 function update(patch) {
   draft.value = { ...draft.value, ...patch, error: '' }
+  actions.syncVisionSessionFromDraft?.()
 }
 
 async function useNewScreenshot() {
@@ -149,20 +149,30 @@ function useCurrentScreenshot() {
 
 function clearImage() {
   update({ imageBase64: '', imagePath: '' })
+  actions.setVisionSource?.({ type: '', path: '', base64: '', mimeType: 'image/png' })
 }
 
 function parseRoi() {
-  if (!hasRoi.value) return null
-  return [draft.value.roiX, draft.value.roiY, draft.value.roiWidth, draft.value.roiHeight]
-    .map(value => Math.max(0, Math.round(Number(value) || 0)))
+  const roi = state.visionSession.value?.roi
+  if (!roi || Number(roi.width) <= 0 || Number(roi.height) <= 0) return null
+  return [roi.x, roi.y, roi.width, roi.height]
 }
 
 function updateRoiField(key, value) {
   update({ [key]: value === null ? null : Math.max(0, Math.round(Number(value) || 0)), result: null })
+  actions.setVisionRoi?.({
+    rawX: key === 'roiX' ? value : draft.value.roiX,
+    rawY: key === 'roiY' ? value : draft.value.roiY,
+    rawWidth: key === 'roiWidth' ? value : draft.value.roiWidth,
+    rawHeight: key === 'roiHeight' ? value : draft.value.roiHeight,
+    imageWidth: imageSize.value.width,
+    imageHeight: imageSize.value.height,
+  })
 }
 
 function clearRoi() {
   update({ roiX: null, roiY: null, roiWidth: null, roiHeight: null, result: null })
+  actions.setVisionRoi?.(null)
 }
 
 function handleImageLoad(event) {
@@ -170,6 +180,11 @@ function handleImageLoad(event) {
     width: event.target.naturalWidth || 0,
     height: event.target.naturalHeight || 0,
   }
+  actions.setVisionSource?.({
+    width: imageSize.value.width,
+    height: imageSize.value.height,
+  })
+  update({ imageWidth: imageSize.value.width, imageHeight: imageSize.value.height })
 }
 
 function imagePoint(event) {
@@ -198,6 +213,7 @@ function startRoiSelection(event) {
     roiHeight: 0,
     result: null,
   })
+  actions.setVisionRoi?.({ rawX: point.x, rawY: point.y, rawWidth: 0, rawHeight: 0, imageWidth: imageSize.value.width, imageHeight: imageSize.value.height })
 }
 
 function moveRoiSelection(event) {
@@ -205,13 +221,14 @@ function moveRoiSelection(event) {
   const point = imagePoint(event)
   if (!point) return
   const start = selectionStart.value
-  update({
-    roiX: Math.round(Math.min(start.x, point.x)),
-    roiY: Math.round(Math.min(start.y, point.y)),
-    roiWidth: Math.round(Math.abs(point.x - start.x)),
-    roiHeight: Math.round(Math.abs(point.y - start.y)),
-    result: null,
-  })
+  const roi = {
+    x: Math.round(Math.min(start.x, point.x)),
+    y: Math.round(Math.min(start.y, point.y)),
+    width: Math.round(Math.abs(point.x - start.x)),
+    height: Math.round(Math.abs(point.y - start.y)),
+  }
+  update({ roiX: roi.x, roiY: roi.y, roiWidth: roi.width, roiHeight: roi.height, result: null })
+  actions.setVisionRoi?.({ rawX: roi.x, rawY: roi.y, rawWidth: roi.width, rawHeight: roi.height, imageWidth: imageSize.value.width, imageHeight: imageSize.value.height })
 }
 
 function finishRoiSelection(event) {
@@ -250,14 +267,48 @@ async function runRecognition() {
       roi: parseRoi(),
       threshold: draft.value.threshold,
     })
-    update({ result })
-  } catch (error) {
-    update({ error: error?.message || '识图执行失败' })
+     update({ result })
+     actions.setVisionRecognition?.({ result, error: '' })
+   } catch (error) {
+     update({ error: error?.message || '识图执行失败' })
+     actions.setVisionRecognition?.({ result: null, error: error?.message || '识图执行失败' })
   }
+}
+
+async function runVisionAction(action) {
+  try {
+    await action()
+  } catch (error) {
+    update({ error: error?.message || '当前编辑器不可用' })
+  }
+}
+
+function handleCopySelect(key) {
+  const actionsByKey = {
+    'copy-vision-lua': () => actions.copyVisionLua(),
+    'copy-vision-click-lua': () => actions.copyVisionLua({ clickResult: true }),
+  }
+  if (actionsByKey[key]) runVisionAction(actionsByKey[key])
+}
+
+function handleInsertSelect(key) {
+  const actionsByKey = {
+    'insert-vision-lua': () => actions.insertVisionIntoLua(),
+    'insert-vision-blockly': () => actions.insertVisionIntoBlockly(),
+    'insert-vision-click-lua': () => actions.insertVisionIntoLua({ clickResult: true }),
+    'insert-vision-click-blockly': () => actions.insertVisionIntoBlockly({ clickResult: true }),
+  }
+  if (actionsByKey[key]) runVisionAction(actionsByKey[key])
 }
 
 function close() {
   props.modalId && actions.closeModal?.(props.modalId)
+}
+
+function switchVisionDialog(key) {
+  if (key !== 'screenshot') return
+  close()
+  actions.openScreenshotPreview?.()
 }
 </script>
 
@@ -266,10 +317,18 @@ function close() {
     <div class="recognition-toolbar">
       <n-select :value="draft.kind" :options="imageKinds" style="width: 180px;" @update:value="value => update({ kind: value, result: null })" />
       <n-button @click="useNewScreenshot">新截图</n-button>
-      <n-button :disabled="!state.screenshotBase64.value" @click="useCurrentScreenshot">使用截图工具图片</n-button>
+       <n-button :disabled="!state.screenshotBase64.value" @click="useCurrentScreenshot">使用当前截图</n-button>
       <n-button @click="clearImage" :disabled="!imageUrl && !selectedResourceUrl">清除图片</n-button>
-      <n-button type="primary" :disabled="!hasTestImage" :loading="state.loading.value" @click="runRecognition">开始识图</n-button>
-    </div>
+       <n-button type="primary" :disabled="!hasTestImage" :loading="state.loading.value" @click="runRecognition">开始识图</n-button>
+       <div class="recognition-toolbar-actions">
+         <n-dropdown trigger="click" :options="copyOptions" @select="handleCopySelect">
+           <n-button>复制</n-button>
+         </n-dropdown>
+         <n-dropdown trigger="click" :options="insertOptions" @select="handleInsertSelect">
+           <n-button type="primary" secondary>插入</n-button>
+         </n-dropdown>
+       </div>
+     </div>
 
     <div class="recognition-layout">
       <div class="recognition-settings">
@@ -302,7 +361,7 @@ function close() {
             clearable
             @update:value="value => update({ modelPath: value })"
           />
-          <n-text v-if="!modelOptions.length" type="warning">项目中没有声明或发现可用的 NND 模型。</n-text>
+           <n-text v-if="!modelOptions.length" type="warning">models 中没有声明可用的模型。</n-text>
           <n-input :value="draft.targets" placeholder="目标标签，可用 | 分隔" @update:value="value => update({ targets: value })" />
         </template>
         <template v-else-if="draft.kind === 'color'">
@@ -314,32 +373,32 @@ function close() {
         </template>
         <div class="roi-editor">
           <div class="roi-heading">
-            <n-text strong>识别选区</n-text>
+              <n-text strong>识别选区</n-text>
             <n-button size="tiny" secondary :disabled="!hasRoi" @click="clearRoi">清除选区</n-button>
           </div>
           <n-grid :cols="2" :x-gap="8" :y-gap="8">
             <n-grid-item>
               <n-text depth="3">X</n-text>
-              <n-input-number :value="draft.roiX" :min="0" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiX', value)" />
+              <n-input-number :value="draft.roiX" :min="0" :max="1280" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiX', value)" />
             </n-grid-item>
             <n-grid-item>
               <n-text depth="3">Y</n-text>
-              <n-input-number :value="draft.roiY" :min="0" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiY', value)" />
+              <n-input-number :value="draft.roiY" :min="0" :max="720" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiY', value)" />
             </n-grid-item>
             <n-grid-item>
               <n-text depth="3">宽</n-text>
-              <n-input-number :value="draft.roiWidth" :min="0" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiWidth', value)" />
+              <n-input-number :value="draft.roiWidth" :min="0" :max="1280" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiWidth', value)" />
             </n-grid-item>
             <n-grid-item>
               <n-text depth="3">高</n-text>
-              <n-input-number :value="draft.roiHeight" :min="0" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiHeight', value)" />
+              <n-input-number :value="draft.roiHeight" :min="0" :max="720" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiHeight', value)" />
             </n-grid-item>
           </n-grid>
         </div>
-        <div class="recognition-result">
-          <div class="recognition-result-heading">
-            <n-text strong>识图结果</n-text>
-            <n-tag v-if="draft.error" type="error">执行失败</n-tag>
+      <div class="recognition-result">
+           <div class="recognition-result-heading">
+             <n-text strong>识图结果</n-text>
+             <n-tag v-if="draft.error" type="error">执行失败</n-tag>
             <n-tag v-else-if="draft.result" :type="draft.result.hit ? 'success' : 'warning'">
               {{ draft.result.hit ? '命中' : '未命中' }}
             </n-tag>
@@ -409,6 +468,7 @@ function close() {
 <style scoped>
 .recognition-debug-modal { display: flex; flex-direction: column; gap: 14px; height: 100%; min-height: 520px; }
 .recognition-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.recognition-toolbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .recognition-layout { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 16px; flex: 1; min-height: 0; }
 .recognition-settings { display: flex; flex-direction: column; gap: 10px; overflow: auto; padding-right: 4px; }
 .recognition-image-stage { position: relative; display: flex; align-items: center; justify-content: center; min-height: 360px; overflow: auto; padding: 16px; background: var(--color-surface-2); }

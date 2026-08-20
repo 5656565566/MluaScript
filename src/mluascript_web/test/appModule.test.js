@@ -155,4 +155,8 @@ test('saveCroppedImage uploads a PNG into the current project resources', async 
   assert.equal(uploaded[0], 'resources/assets/crop.png')
   assert.equal(uploaded[1].type, 'image/png')
   assert.equal(uploaded[2], true)
+
+  const nested = await actions.saveCroppedImage('button.png', 'iVBORw0KGgo=', 'resources/assets/ui/dialog')
+  assert.equal(nested.path, 'resources/assets/ui/dialog/button.png')
+  assert.equal(uploaded[0], 'resources/assets/ui/dialog/button.png')
 })

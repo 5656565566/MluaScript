@@ -9,6 +9,7 @@ import {
   workspaceToXml,
 } from '../../blockly'
 import { replaceBlocklyWorkspace } from '../../features/editor/blocklyWorkspace'
+import { insertVisionRecipeIntoBlockly } from '../../blockly/visionInsertion.js'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -46,7 +47,13 @@ function generatePreview() {
   }
 }
 
-defineExpose({ compile: generatePreview })
+function insertVisionRecipe(recipe) {
+  const block = insertVisionRecipeIntoBlockly(workspaceRef.value, recipe)
+  generatePreview()
+  return block
+}
+
+defineExpose({ compile: generatePreview, insertVisionRecipe })
 
 function flushWorkspaceChange() {
   generatePreview()

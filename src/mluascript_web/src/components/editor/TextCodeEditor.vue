@@ -1,6 +1,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { basicSetup } from 'codemirror'
+import { state } from '../../store'
 import { Compartment, EditorState, Prec } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { StreamLanguage } from '@codemirror/language'
@@ -107,6 +108,19 @@ function refreshTheme() {
   })
 }
 
+function insertText(text) {
+  const view = viewRef.value
+  if (!view) throw new Error('Lua 编辑器尚未就绪')
+  const changes = view.state.changeByRange((range) => ({
+    changes: { from: range.from, to: range.to, insert: String(text || '') },
+    range: { from: range.from + String(text || '').length, to: range.from + String(text || '').length },
+  }))
+  view.dispatch(changes)
+  view.focus()
+}
+
+defineExpose({ insertText })
+
 watch(() => props.modelValue, (value) => {
   const view = viewRef.value
   if (!view || value === view.state.doc.toString()) return
@@ -120,12 +134,14 @@ watch(() => props.modelValue, (value) => {
 
 onMounted(() => {
   createEditor()
+  state.textCodeEditor.value = { insertText }
   themeObserver = new MutationObserver(refreshTheme)
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 })
 
 onBeforeUnmount(() => {
   themeObserver?.disconnect()
+  if (state.textCodeEditor.value?.insertText === insertText) state.textCodeEditor.value = null
   viewRef.value?.destroy()
   viewRef.value = null
 })

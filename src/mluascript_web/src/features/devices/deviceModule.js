@@ -158,11 +158,18 @@ export function createDeviceActions({
       const data = await deviceApi.screencap()
       getActions().setStatus(data.message || '截图成功', 'success')
       if (data.imageBase64) {
+        const imageMimeType = 'image/png'
         state.screenshotBase64.value = data.imageBase64
-        if (state.screenshotMimeType) state.screenshotMimeType.value = 'image/png'
+        if (state.screenshotMimeType) state.screenshotMimeType.value = imageMimeType
         if (state.screenshotImagePath) state.screenshotImagePath.value = ''
-        if (showPreview) state.showScreenshot.value = true
         state.screenshotPath.value = '截图时间：' + new Date().toLocaleTimeString()
+        getActions().setVisionSource?.({
+          type: 'device',
+          path: '',
+          base64: data.imageBase64,
+          mimeType: imageMimeType,
+        })
+        if (showPreview) getActions().openScreenshotPreview?.()
       }
       return data
     },

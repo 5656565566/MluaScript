@@ -467,12 +467,15 @@ export function createProjectActions({ state, projectApi, compileBlocklyXml, get
       for (let offset = 0; offset < bytes.length; offset += 0x8000) {
         binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
       }
-      state.screenshotBase64.value = btoa(binary)
-      if (state.screenshotMimeType) state.screenshotMimeType.value = response.headers.get('content-type') || 'image/png'
-      if (state.screenshotImagePath) state.screenshotImagePath.value = path
-      state.screenshotPath.value = path
-      state.showScreenshot.value = true
-    },
+       const imageBase64 = btoa(binary)
+       const imageMimeType = response.headers.get('content-type') || 'image/png'
+       state.screenshotBase64.value = imageBase64
+       if (state.screenshotMimeType) state.screenshotMimeType.value = imageMimeType
+       if (state.screenshotImagePath) state.screenshotImagePath.value = path
+       state.screenshotPath.value = path
+       getActions().setVisionSource?.({ type: 'project-file', path, base64: imageBase64, mimeType: imageMimeType })
+        return getActions().openScreenshotPreview?.()
+     },
 
     openProjectImageRecognition(path, { asTemplate = false } = {}) {
       let templatePath = ''

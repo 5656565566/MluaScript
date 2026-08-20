@@ -19,6 +19,8 @@ import { createTemplateActions } from './features/templates/templateModule'
 import { createTemplateState } from './features/templates/templateState'
 import { createProjectActions } from './features/projects/projectModule'
 import { createProjectState } from './features/projects/projectState'
+import { createVisionActions } from './features/vision/visionModule'
+import { createVisionState } from './features/vision/visionState'
 import { openModal, closeModal } from './modalStore'
 import { pickerActions } from './store/pickerState'
 import { createGetters } from './store/getters'
@@ -30,6 +32,7 @@ export const state = {
   ...createRuntimeState(),
   ...createTemplateState(),
   ...createProjectState(),
+  ...createVisionState(),
   ...createUiState(),
 }
 
@@ -95,6 +98,11 @@ const projectActions = createProjectActions({
   getActions: () => actions,
 })
 
+const visionActions = createVisionActions({
+  state,
+  getActions: () => actions,
+})
+
 const modalActions = createModalActions({
   state,
   openModal,
@@ -130,6 +138,7 @@ export const actions = {
   ...runtimeActions,
   ...templateActions,
   ...projectActions,
+  ...visionActions,
   openBlocklyPicker(config = {}) {
     return pickerActions.open(config)
   },

@@ -338,16 +338,22 @@ const deviceMenuOptions = computed(() => [
     icon: editorMenuIcon(CameraOutline),
     disabled: !selectedDeviceSession.value?.canScreencap || state.loading.value,
   },
-  {
-    label: editorMenuLabel('截图预览'),
-    key: 'preview-screenshot',
-    icon: editorMenuIcon(ImageOutline),
-    disabled: !state.screenshotBase64.value,
-  },
 ])
 
 function deviceMenuProps() {
   return { class: 'editor-command-dropdown editor-device-dropdown' }
+}
+
+const toolsMenuOptions = computed(() => [
+  {
+    label: editorMenuLabel('截图预览'),
+    key: 'screenshot-preview',
+    icon: editorMenuIcon(ImageOutline),
+  },
+])
+
+function toolsMenuProps() {
+  return { class: 'editor-command-dropdown editor-tools-dropdown' }
 }
 
 const viewMenuOptions = computed(() => [
@@ -1036,7 +1042,10 @@ function handleDeviceMenuSelect(key) {
   if (key === 'connect-device') state.activeView.value = 'device'
   else if (key === 'select-device') state.activeView.value = 'device-manager'
   else if (key === 'capture-device') void actions.handleAction(actions.doScreencap).catch(() => null)
-  else if (key === 'preview-screenshot') state.showScreenshot.value = true
+}
+
+function handleToolsMenuSelect(key) {
+  if (key === 'screenshot-preview') void actions.openScreenshotPreview()
 }
 
 function handleViewMenuSelect(key) {
@@ -1199,12 +1208,15 @@ onBeforeUnmount(() => {
         <n-dropdown trigger="click" :options="projectMenuOptions" :menu-props="projectMenuProps" @select="handleProjectMenuSelect">
           <n-button text size="small">项目</n-button>
         </n-dropdown>
-        <n-dropdown trigger="click" :options="debugMenuOptions" :menu-props="debugMenuProps" @select="handleDebugMenuSelect">
-          <n-button text size="small">调试</n-button>
-        </n-dropdown>
-        <n-dropdown trigger="click" :options="deviceMenuOptions" :menu-props="deviceMenuProps" @select="handleDeviceMenuSelect">
-          <n-button text size="small">设备</n-button>
-        </n-dropdown>
+          <n-dropdown trigger="click" :options="debugMenuOptions" :menu-props="debugMenuProps" @select="handleDebugMenuSelect">
+            <n-button text size="small">调试</n-button>
+          </n-dropdown>
+          <n-dropdown trigger="click" :options="deviceMenuOptions" :menu-props="deviceMenuProps" @select="handleDeviceMenuSelect">
+            <n-button text size="small">设备</n-button>
+          </n-dropdown>
+          <n-dropdown trigger="click" :options="toolsMenuOptions" :menu-props="toolsMenuProps" @select="handleToolsMenuSelect">
+            <n-button text size="small">工具</n-button>
+          </n-dropdown>
         <n-dropdown trigger="click" :options="viewMenuOptions" :menu-props="viewMenuProps" @select="handleViewMenuSelect">
           <n-button text size="small">视图</n-button>
         </n-dropdown>

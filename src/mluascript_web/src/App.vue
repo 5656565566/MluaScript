@@ -122,7 +122,7 @@ watch(() => state.activeView.value, (activeView, previousView) => {
         <span class="mobile-title">MluaScript</span>
       </div>
       <div class="editor-shell">
-        <ActiveWorkspaceView />
+    <ActiveWorkspaceView />
       </div>
     </n-layout>
     <ScreenshotFloat />

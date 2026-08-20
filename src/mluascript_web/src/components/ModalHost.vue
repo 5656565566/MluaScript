@@ -22,6 +22,8 @@ function handleClose(payload) {
         :key="modal.id"
         :modal-id="modal.id"
         :title="modal.options.title"
+        :header-component="modal.options.headerComponent"
+        :header-props="{ ...modal.options.headerProps, modalId: modal.id }"
         :size="modal.options.size"
         :z-index="modal.zIndex"
         :close-on-esc="modal.options.closeOnEsc"

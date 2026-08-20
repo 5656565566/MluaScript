@@ -11,6 +11,14 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  headerComponent: {
+    type: [Object, Function],
+    default: null,
+  },
+  headerProps: {
+    type: Object,
+    default: () => ({}),
+  },
   size: {
     type: String,
     default: 'md',
@@ -51,7 +59,7 @@ const panelClasses = computed(() => [
   'app-modal-panel',
   `app-modal-size-${props.size}`,
   props.panelClass,
-  { 'is-topmost': props.isTopmost },
+  { 'is-topmost': props.isTopmost, 'app-modal-fullscreen': props.size === 'full' },
 ])
 
 const contentClasses = computed(() => ['app-modal-content', props.contentClass])
@@ -89,16 +97,18 @@ onBeforeUnmount(() => {
     :z-index="zIndex"
     @update:show="(val) => { if (!val) requestClose('backdrop') }"
     :style="{
-      width: size === 'sm' ? '520px' : size === 'md' ? '720px' : size === 'lg' ? '960px' : size === 'xl' ? '1200px' : size === 'full' ? 'calc(100vw - 32px)' : '720px',
-      maxWidth: 'calc(100vw - 48px)',
-      maxHeight: 'calc(100vh - 48px)',
+      width: size === 'full' ? '100vw' : size === 'sm' ? '520px' : size === 'md' ? '720px' : size === 'lg' ? '960px' : size === 'xl' ? '1200px' : '720px',
+      height: size === 'full' ? '100vh' : undefined,
+      maxWidth: size === 'full' ? '100vw' : 'calc(100vw - 48px)',
+      maxHeight: size === 'full' ? '100vh' : 'calc(100vh - 48px)',
+      margin: size === 'full' ? '0' : undefined,
       display: 'flex',
       flexDirection: 'column'
     }"
-    :class="[panelClass]"
+    :class="panelClasses"
   >
     <n-card
-      :title="title"
+      :title="headerComponent ? undefined : title"
       :closable="showClose"
       @close="requestClose('button')"
       size="small"
@@ -109,6 +119,9 @@ onBeforeUnmount(() => {
       content-style="flex: 1; min-height: 0; overflow: auto; padding: 16px;"
       header-style="padding: 16px;"
     >
+      <template #header v-if="headerComponent">
+        <component :is="headerComponent" v-bind="headerProps" />
+      </template>
       <div :class="contentClasses" style="height: 100%;">
         <slot />
       </div>
@@ -119,3 +132,14 @@ onBeforeUnmount(() => {
     </n-card>
   </n-modal>
 </template>
+
+<style>
+.app-modal-fullscreen {
+  width: 100vw !important;
+  max-width: 100vw !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+}
+</style>
