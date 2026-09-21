@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from lupa.lua54 import LuaRuntime
+from maa.controller import Controller
 from PIL import Image
 
 from mluascript.maa.lua_exports import build_maa_exports
@@ -63,6 +64,9 @@ class FakeController:
     def post_click(self, x: int, y: int) -> FakeWaitable:
         return self._record("post_click", x, y)
 
+    def post_connection(self) -> FakeWaitable:
+        return self._record("post_connection")
+
     def post_click_key(self, key: int) -> FakeWaitable:
         return self._record("post_click_key", key)
 
@@ -106,7 +110,7 @@ def build_context(controller: FakeController | None = None, connected: bool = Tr
     return MaaContext(
         paths=MaaPaths(library_dir=Path("."), resource_dir=Path(".")),
         state=MaaContextState(connected=connected, connection_label="ADB:test" if connected else None),
-        controller=controller,
+        controller=cast(Controller | None, controller),
     )
 
 

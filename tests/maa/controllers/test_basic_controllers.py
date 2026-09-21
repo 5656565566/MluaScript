@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event, Thread
 from typing import Any, cast
 
 import pytest
+from maa.controller import Controller
 
 from mluascript.maa.controllers.base import controller_is_connected
+from mluascript.maa.controllers.gesture import touch_down
 from mluascript.maa.controllers.input import click, input_text, key_down
 from mluascript.maa.controllers.screen import screencap
 from mluascript.maa.errors import MaaConnectionError
@@ -55,6 +58,9 @@ class FakeController:
     def post_click(self, x: int, y: int) -> FakeWaitable:
         return self._record("post_click", x, y)
 
+    def post_connection(self) -> FakeWaitable:
+        return self._record("post_connection")
+
     def post_click_key(self, key: int) -> FakeWaitable:
         return self._record("post_click_key", key)
 
@@ -100,6 +106,99 @@ class FailedClickController(FakeController):
         return self.last_job
 
 
+class DisconnectingClickJob(FakeWaitable):
+    def __init__(self, controller: FakeController) -> None:
+        super().__init__(False)
+        self._controller = controller
+
+    def wait(self) -> "DisconnectingClickJob":
+        self.wait_called = True
+        self._controller.connected = False
+        return self
+
+
+class ReconnectJob(FakeWaitable):
+    def __init__(self, controller: FakeController, succeeded: bool = True) -> None:
+        super().__init__(succeeded)
+        self._controller = controller
+
+    def wait(self) -> "ReconnectJob":
+        self.wait_called = True
+        if self.succeeded:
+            self._controller.connected = True
+        return self
+
+
+class RecoveringClickController(FakeController):
+    def __init__(
+        self,
+        *,
+        reconnect_succeeds: bool = True,
+        screencap_succeeds: bool = True,
+        first_click_disconnects: bool = True,
+        replay_succeeds: bool = True,
+    ) -> None:
+        super().__init__()
+        self._click_count = 0
+        self._reconnect_succeeds = reconnect_succeeds
+        self._screencap_succeeds = screencap_succeeds
+        self._first_click_disconnects = first_click_disconnects
+        self._replay_succeeds = replay_succeeds
+
+    def post_click(self, x: int, y: int) -> FakeWaitable:
+        self.calls.append(("post_click", (x, y)))
+        self._click_count += 1
+        if self._click_count == 1 and self._first_click_disconnects:
+            self.last_job = DisconnectingClickJob(self)
+        else:
+            self.last_job = FakeWaitable(self._replay_succeeds)
+        return self.last_job
+
+    def post_connection(self) -> FakeWaitable:
+        self.calls.append(("post_connection", ()))
+        self.last_job = ReconnectJob(self, self._reconnect_succeeds)
+        return self.last_job
+
+    def post_screencap(self) -> FakeResultJob:
+        self.calls.append(("post_screencap", ()))
+        image = FakeImage(shape=(720, 1280, 3))
+        self.last_job = FakeResultJob(self._screencap_succeeds, image)
+        return self.last_job
+
+
+class DisconnectingTouchController(FakeController):
+    def post_touch_down(self, x: int, y: int, contact: int) -> FakeWaitable:
+        self.calls.append(("post_touch_down", (x, y, contact)))
+        self.last_job = DisconnectingClickJob(self)
+        return self.last_job
+
+
+class BlockingClickController(FakeController):
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_wait_started = Event()
+        self.release_first_wait = Event()
+        self._click_count = 0
+
+    def post_click(self, x: int, y: int) -> FakeWaitable:
+        self.calls.append(("post_click", (x, y)))
+        self._click_count += 1
+        if self._click_count == 1:
+            controller = self
+
+            class BlockingJob(FakeWaitable):
+                def wait(self) -> "BlockingJob":
+                    self.wait_called = True
+                    controller.first_wait_started.set()
+                    controller.release_first_wait.wait(1.0)
+                    return self
+
+            self.last_job = BlockingJob()
+        else:
+            self.last_job = FakeWaitable()
+        return self.last_job
+
+
 class MethodConnectedController:
     def __init__(self, connected: bool) -> None:
         self._connected = connected
@@ -112,7 +211,7 @@ def build_context(controller: FakeController | None = None) -> MaaContext:
     return MaaContext(
         paths=MaaPaths(library_dir=Path("."), resource_dir=Path(".")),
         state=MaaContextState(),
-        controller=controller,
+        controller=cast(Controller | None, controller),
     )
 
 
@@ -138,6 +237,127 @@ def test_click_raises_when_job_fails() -> None:
     assert controller.calls == [("post_click", (10, 20))]
     assert controller.last_job is not None
     assert controller.last_job.wait_called is True
+
+
+def test_click_reconnects_and_replays_once_after_disconnect() -> None:
+    controller = RecoveringClickController()
+    context = build_context(controller)
+    context.mark_connected("ADB:test")
+
+    assert click(context, 10, 20) is True
+
+    assert controller.calls == [
+        ("post_click", (10, 20)),
+        ("post_connection", ()),
+        ("post_screencap", ()),
+        ("post_click", (10, 20)),
+    ]
+    assert context.state.connected is True
+    assert context.state.connection_label == "ADB:test"
+
+
+def test_click_does_not_replay_when_reconnect_fails() -> None:
+    controller = RecoveringClickController(reconnect_succeeds=False)
+    context = build_context(controller)
+    context.mark_connected("ADB:test")
+
+    with pytest.raises(MaaConnectionError, match="Maa controller reconnect failed"):
+        click(context, 10, 20)
+
+    assert controller.calls == [
+        ("post_click", (10, 20)),
+        ("post_connection", ()),
+    ]
+    assert context.state.connected is False
+
+
+def test_click_does_not_replay_when_reconnect_screencap_fails() -> None:
+    controller = RecoveringClickController(screencap_succeeds=False)
+    context = build_context(controller)
+
+    with pytest.raises(MaaConnectionError, match="Maa screencap after reconnect failed"):
+        click(context, 10, 20)
+
+    assert controller.calls == [
+        ("post_click", (10, 20)),
+        ("post_connection", ()),
+        ("post_screencap", ()),
+    ]
+    assert context.state.connected is False
+
+
+def test_click_replay_failure_is_not_retried_again() -> None:
+    controller = RecoveringClickController(replay_succeeds=False)
+    context = build_context(controller)
+
+    with pytest.raises(MaaConnectionError, match="Maa click failed after reconnect"):
+        click(context, 10, 20)
+
+    assert controller.calls == [
+        ("post_click", (10, 20)),
+        ("post_connection", ()),
+        ("post_screencap", ()),
+        ("post_click", (10, 20)),
+    ]
+
+
+def test_click_reconnects_before_submit_when_already_disconnected() -> None:
+    controller = RecoveringClickController(first_click_disconnects=False)
+    controller.connected = False
+    context = build_context(controller)
+    context.mark_connected("ADB:test")
+
+    assert click(context, 10, 20) is True
+
+    assert controller.calls == [
+        ("post_connection", ()),
+        ("post_screencap", ()),
+        ("post_click", (10, 20)),
+    ]
+
+
+def test_touch_sequence_step_is_not_replayed_after_disconnect() -> None:
+    controller = DisconnectingTouchController()
+    context = build_context(controller)
+
+    with pytest.raises(MaaConnectionError, match="Maa touch down failed"):
+        touch_down(context, 10, 20)
+
+    assert controller.calls == [("post_touch_down", (10, 20, 0))]
+
+
+def test_controller_operations_are_serialized_while_waiting() -> None:
+    controller = BlockingClickController()
+    first_context = build_context(controller)
+    second_context = build_context(controller)
+    errors: list[Exception] = []
+    second_started = Event()
+
+    def run_click(context: MaaContext, x: int) -> None:
+        try:
+            if x == 30:
+                second_started.set()
+            click(context, x, 20)
+        except Exception as exc:
+            errors.append(exc)
+
+    first = Thread(target=run_click, args=(first_context, 10))
+    second = Thread(target=run_click, args=(second_context, 30))
+    first.start()
+    assert controller.first_wait_started.wait(1.0) is True
+    second.start()
+    assert second_started.wait(1.0) is True
+
+    assert controller.calls == [("post_click", (10, 20))]
+    controller.release_first_wait.set()
+    first.join(1.0)
+    second.join(1.0)
+
+    assert errors == []
+    assert controller.calls == [
+        ("post_click", (10, 20)),
+        ("post_click", (30, 20)),
+    ]
 
 
 def test_controller_connection_check_accepts_custom_controller_method() -> None:
