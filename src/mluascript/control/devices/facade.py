@@ -26,6 +26,7 @@ from mluascript.maa.connections import (
     find_desktop_windows,
 )
 from mluascript.maa.controllers.input import click as controller_click
+from mluascript.maa.controllers.base import controller_is_connected
 from mluascript.maa.controllers.screen import screencap
 from mluascript.maa.lifecycle.bootstrap import resolve_maa_paths
 from mluascript.maa.lifecycle.runtime import initialize_maa_runtime
@@ -439,7 +440,14 @@ class DeviceFacade:
                 session_label = raw_session_label
 
         display_label = label or session_label
-        connected = bool(session and display_label)
+        controller = session.controller if session is not None else None
+        try:
+            controller_connected = bool(controller is not None and controller_is_connected(controller))
+        except Exception:
+            controller_connected = False
+        connected = bool(session and display_label and controller_connected)
+        if session is not None and not controller_connected:
+            self._maa_facade.context.mark_connected(None)
         return DeviceConnectionState(
             initialized=True,
             connected=connected,

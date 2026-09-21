@@ -135,8 +135,15 @@ def test_connect_browser_passes_launch_configuration(mocker) -> None:
     assert kwargs["name"] == "Edge-1"
 
 
-def test_browser_controller_sends_virtual_keys_to_playwright(mocker) -> None:
+def _build_browser_controller_without_native_handle() -> BrowserController:
     controller = BrowserController.__new__(BrowserController)
+    controller._handle = None
+    controller._own = False
+    return controller
+
+
+def test_browser_controller_sends_virtual_keys_to_playwright(mocker) -> None:
+    controller = _build_browser_controller_without_native_handle()
     controller._connected = True
     controller.browser = None
     controller.page = mocker.MagicMock()
@@ -155,7 +162,7 @@ def test_browser_controller_sends_virtual_keys_to_playwright(mocker) -> None:
 def test_browser_controller_screencap_returns_contiguous_bgr_data(mocker) -> None:
     screenshot = io.BytesIO()
     Image.new("RGB", (1, 1), (12, 34, 56)).save(screenshot, format="PNG")
-    controller = BrowserController.__new__(BrowserController)
+    controller = _build_browser_controller_without_native_handle()
     controller._connected = True
     controller.browser = None
     controller.page = mocker.MagicMock()
@@ -170,7 +177,7 @@ def test_browser_controller_screencap_returns_contiguous_bgr_data(mocker) -> Non
 
 def test_browser_controller_uses_a_dedicated_profile_for_cdp_launch(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("mluascript.shared.config.manager.get_runtime_dir", lambda: tmp_path)
-    controller = BrowserController.__new__(BrowserController)
+    controller = _build_browser_controller_without_native_handle()
     controller.url = "http://127.0.0.1:9222"
     controller.browser_type = "chrome"
     controller.name = "Chrome 调试实例"

@@ -8,6 +8,10 @@ from ..lifecycle.runtime import MaaContext
 
 @runtime_checkable
 class Waitable(Protocol):
+    @property
+    def succeeded(self) -> bool:
+        ...
+
     def wait(self) -> object:
         ...
 
@@ -100,12 +104,24 @@ class MaaController(Protocol):
         ...
 
 
-def wait_for(job: Waitable) -> None:
+def wait_for(job: Waitable, *, operation: str = "controller operation") -> None:
     job.wait()
+    if not job.succeeded:
+        job_id = getattr(job, "job_id", None)
+        detail = f" (job_id={job_id})" if job_id is not None else ""
+        raise MaaConnectionError(f"Maa {operation} failed{detail}")
 
 
 def wait_for_result(job: ResultJob[TResult_co]) -> ResultJob[TResult_co]:
     return job.wait()
+
+
+def controller_is_connected(controller: object) -> bool:
+    """兼容 Maa 普通 Controller 属性与 CustomController 方法两种连接接口。"""
+    connected = getattr(controller, "connected")
+    if callable(connected):
+        connected = connected()
+    return bool(connected)
 
 
 def ensure_controller(context: MaaContext) -> MaaController:
@@ -113,4 +129,12 @@ def ensure_controller(context: MaaContext) -> MaaController:
     controller = context.controller
     if controller is None:
         raise MaaConnectionError("Device or control object not connected")
+    try:
+        connected = controller_is_connected(controller)
+    except Exception as exc:
+        context.mark_connected(None)
+        raise MaaConnectionError(f"Failed to query controller connection state: {exc}") from exc
+    if not connected:
+        context.mark_connected(None)
+        raise MaaConnectionError("Device or control object disconnected")
     return controller

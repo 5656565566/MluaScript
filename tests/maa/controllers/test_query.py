@@ -11,6 +11,7 @@ from mluascript.maa.types import MaaContextState, MaaPaths
 
 class FakeController:
     def __init__(self, resolution: tuple[int, ...], uuid: str = "fake-uuid") -> None:
+        self.connected = True
         self.resolution = resolution
         self.uuid = uuid
 

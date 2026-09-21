@@ -60,6 +60,8 @@ class FakeTasker:
 
 
 class FakeController:
+    connected = True
+
     def post_screencap(self) -> FakeTaskJob:
         return FakeTaskJob(np.zeros((100, 100, 3), dtype=np.uint8))
 

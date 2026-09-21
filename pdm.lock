@@ -352,7 +352,7 @@ files = [
 
 [[package]]
 name = "maafw"
-version = "5.12.1"
+version = "5.13.1"
 requires_python = ">=3.9"
 summary = "An automation black-box testing framework based on image recognition"
 groups = ["default"]
@@ -362,12 +362,12 @@ dependencies = [
     "strenum",
 ]
 files = [
-    {file = "maafw-5.12.1-py3-none-macosx_13_0_arm64.whl", hash = "sha256:8caffa0389389eb6fffe4d31c33c14a863a52875d096e70414de8936dd91c3cc"},
-    {file = "maafw-5.12.1-py3-none-macosx_13_0_x86_64.whl", hash = "sha256:68b8dcd70028428549264f9f4350027a26b47ddb31e8998e40df80cdf78028d7"},
-    {file = "maafw-5.12.1-py3-none-manylinux2014_aarch64.whl", hash = "sha256:42b56f4c0fa195424d78e53df75b6a8aee8d9cba4241f5c47bce7496eea5c8a8"},
-    {file = "maafw-5.12.1-py3-none-manylinux2014_x86_64.whl", hash = "sha256:f52870433e3eb7a6355992edb2d7c09f01b6b87232db9e58ba15aae3be3d02f0"},
-    {file = "maafw-5.12.1-py3-none-win_amd64.whl", hash = "sha256:918697fdca796f0cb5753ac2c08155d4ecfe64f4e380b57b0479bb506f62a118"},
-    {file = "maafw-5.12.1-py3-none-win_arm64.whl", hash = "sha256:c2a8ddf7a24e063aa54b19d1d2eaf52702a8cde2b30d71447a42f6c234bec2a3"},
+    {file = "maafw-5.13.1-py3-none-macosx_13_0_arm64.whl", hash = "sha256:6f28ef13f24d2094f704324f906b52b64b36d7439efd8cfb751b6667c598721d"},
+    {file = "maafw-5.13.1-py3-none-macosx_13_0_x86_64.whl", hash = "sha256:82cd6f1b6a3dbddff5f17494afe95f2ec82fa04ba762ae0e23f38a05cfd2200b"},
+    {file = "maafw-5.13.1-py3-none-manylinux2014_aarch64.whl", hash = "sha256:551349560b8ec8286c9cb3cda20d16aeb833c3e85632c3d23021fd51a99d65f8"},
+    {file = "maafw-5.13.1-py3-none-manylinux2014_x86_64.whl", hash = "sha256:6afe9479d120c473429d1ad3a9d1be21e3f5202788099beef19654c12c5f1ad5"},
+    {file = "maafw-5.13.1-py3-none-win_amd64.whl", hash = "sha256:47aefffa376de0c3a23c96715a893cf5b91091463bc499801fe6678eba9068b6"},
+    {file = "maafw-5.13.1-py3-none-win_arm64.whl", hash = "sha256:b5920dcb77fdaf748d4975a128a97aef636c68a08af67b8a52f575d43df78516"},
 ]
 
 [[package]]

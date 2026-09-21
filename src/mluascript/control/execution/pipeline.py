@@ -138,6 +138,7 @@ class PipelineExecutionUseCase(BaseExecutionUseCase[MaaPipelineRunContext]):
             finally:
                 cleanup_artifact_runtime_dir(context.locator.cleanup_dir)
 
+        self.thread_manager.cleanup()
         host_task = self.thread_manager.spawn(runner, name=f"pipeline-run-{task.task_id[:8]}")
         context.host_task = host_task
         self.state_manager.update_task_info(

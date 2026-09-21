@@ -8,6 +8,7 @@ from typing import Any
 from lupa.lua54 import LuaRuntime
 
 from .controllers.app import start_app, stop_app
+from .controllers.base import controller_is_connected
 from .controllers.gesture import scroll, swipe, touch_down, touch_move, touch_up
 from .controllers.input import click, input_text, key_down, key_up, press_key
 from .controllers.query import get_connection_label, get_resolution, get_uuid
@@ -19,7 +20,6 @@ from .recognition.feature import find_feature
 from .recognition.ocr import find_ocr, find_ocr_all
 from .recognition.template import find_template
 from .recognition.nnd import find_nnd
-from .types import MaaContextState
 from ..runtime.image_bridge import RuntimeImageHandle, build_runtime_image_handle
 from ..runtime.utils.table_lua import python_2_lua
 
@@ -291,10 +291,17 @@ class LuaMaaExports:
         return python_2_lua(self.lua_runtime, _build_recognition_payload("nnd", entry, result, all_results=True))
 
     def is_connected(self) -> bool:
-        state: MaaContextState = self.context.state
-        return bool(state.connected and self.context.controller is not None)
+        controller = self.context.controller
+        if controller is None:
+            return False
+        try:
+            connected = controller_is_connected(controller)
+        except Exception:
+            connected = False
+        if not connected:
+            self.context.mark_connected(None)
+        return connected
 
 
 def build_maa_exports(lua_runtime: LuaRuntime, context: MaaContext) -> LuaMaaExports:
     return LuaMaaExports(lua_runtime=lua_runtime, context=context)
-

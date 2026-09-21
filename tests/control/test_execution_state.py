@@ -65,6 +65,7 @@ class FakeTasker:
 class FakeWaitable:
     def __init__(self, *, error: Exception | None = None) -> None:
         self.error = error
+        self.succeeded = True
         self.wait_called = False
 
     def wait(self) -> "FakeWaitable":
@@ -308,6 +309,17 @@ def test_script_background_success_updates_status_and_cleans_context() -> None:
     assert context.status is RunStatus.FINISHED
 
 
+def test_script_start_recycles_finished_execution_thread_handles() -> None:
+    state_manager = StateManager()
+    thread_manager = ImmediateRuntimeThreadManager()
+    use_case = make_script_use_case(state_manager, thread_manager=thread_manager)
+
+    for index in range(3):
+        use_case.start_script(f"scripts/{index}.lua", "return 1", f"ADB:{index}")
+
+    assert len(thread_manager.list()) == 1
+
+
 def test_script_stop_fetches_context_calls_facade_and_unbinds() -> None:
     state_manager = StateManager()
     facade = FakeIntegrationFacade(script_runtime_factory=lambda: FakeRuntime(wait_for_cancel=True))
@@ -343,6 +355,34 @@ def test_finish_task_updates_status_and_recycles_context() -> None:
     assert finished is not None
     assert finished.status == "success"
     assert finished.result == {"done": True}
+
+
+def test_state_manager_keeps_only_ten_most_recent_completed_tasks() -> None:
+    state_manager = StateManager()
+    task_ids: list[str] = []
+
+    for index in range(12):
+        task = state_manager.create_task("script", f"ADB:{index}")
+        task_ids.append(task.task_id)
+        state_manager.update_task_status(task.task_id, "success")
+
+    assert [task.task_id for task in state_manager.list_tasks()] == task_ids[-10:]
+    assert state_manager.get_task(task_ids[0]) is None
+    assert state_manager.get_task(task_ids[1]) is None
+
+
+def test_state_manager_history_limit_does_not_remove_running_tasks() -> None:
+    state_manager = StateManager()
+    running = state_manager.create_task("script", "ADB:running")
+    state_manager.update_task_status(running.task_id, "running")
+
+    for index in range(12):
+        task = state_manager.create_task("script", f"ADB:completed-{index}")
+        state_manager.update_task_status(task.task_id, "success")
+
+    tasks = state_manager.list_tasks()
+    assert running in tasks
+    assert len([task for task in tasks if task.status == "success"]) == 10
 
 
 def test_pipeline_start_registers_context_and_project_locator_metadata() -> None:

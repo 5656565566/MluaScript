@@ -4,14 +4,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
+from mluascript.maa.controllers.base import controller_is_connected
 from mluascript.maa.controllers.input import click, input_text, key_down
 from mluascript.maa.controllers.screen import screencap
+from mluascript.maa.errors import MaaConnectionError
 from mluascript.maa.lifecycle.runtime import MaaContext
 from mluascript.maa.types import MaaContextState, MaaPaths
 
 
 class FakeWaitable:
-    def __init__(self) -> None:
+    def __init__(self, succeeded: bool = True) -> None:
+        self.succeeded = succeeded
         self.wait_called = False
 
     def wait(self) -> "FakeWaitable":
@@ -36,6 +41,7 @@ class FakeImage:
 
 class FakeController:
     def __init__(self) -> None:
+        self.connected = True
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
         self.last_job: FakeWaitable | FakeResultJob | None = None
         self.resolution = (1280, 720)
@@ -87,6 +93,21 @@ class FakeController:
         return self._record("post_stop_app", intent)
 
 
+class FailedClickController(FakeController):
+    def post_click(self, x: int, y: int) -> FakeWaitable:
+        self.calls.append(("post_click", (x, y)))
+        self.last_job = FakeWaitable(False)
+        return self.last_job
+
+
+class MethodConnectedController:
+    def __init__(self, connected: bool) -> None:
+        self._connected = connected
+
+    def connected(self) -> bool:
+        return self._connected
+
+
 def build_context(controller: FakeController | None = None) -> MaaContext:
     return MaaContext(
         paths=MaaPaths(library_dir=Path("."), resource_dir=Path(".")),
@@ -105,6 +126,23 @@ def test_click_waits_for_job() -> None:
     assert controller.calls == [("post_click", (10, 20))]
     assert controller.last_job is not None
     assert controller.last_job.wait_called is True
+
+
+def test_click_raises_when_job_fails() -> None:
+    controller = FailedClickController()
+    context = build_context(controller)
+
+    with pytest.raises(MaaConnectionError, match="Maa click failed"):
+        click(context, 10, 20)
+
+    assert controller.calls == [("post_click", (10, 20))]
+    assert controller.last_job is not None
+    assert controller.last_job.wait_called is True
+
+
+def test_controller_connection_check_accepts_custom_controller_method() -> None:
+    assert controller_is_connected(MethodConnectedController(True)) is True
+    assert controller_is_connected(MethodConnectedController(False)) is False
 
 
 def test_key_down_waits_for_job() -> None:

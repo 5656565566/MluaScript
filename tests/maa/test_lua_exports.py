@@ -16,7 +16,8 @@ from mluascript.runtime.utils.table_lua import lua_2_python
 
 
 class FakeWaitable:
-    def __init__(self) -> None:
+    def __init__(self, succeeded: bool = True) -> None:
+        self.succeeded = succeeded
         self.wait_called = False
 
     def wait(self) -> "FakeWaitable":
@@ -48,6 +49,7 @@ class FakeImage:
 
 class FakeController:
     def __init__(self) -> None:
+        self.connected = True
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
         self.last_job: FakeWaitable | FakeResultJob | None = None
         self.resolution = (1280, 720)
@@ -196,6 +198,18 @@ def test_build_maa_exports_reports_not_connected_when_context_is_unbound() -> No
     exports = build_maa_exports(lua, build_context(controller=None, connected=False))
 
     assert exports.is_connected() is False
+
+
+def test_build_maa_exports_reports_live_controller_disconnect() -> None:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    controller = FakeController()
+    controller.connected = False
+    context = build_context(controller, connected=True)
+    exports = build_maa_exports(lua, context)
+
+    assert exports.is_connected() is False
+    assert context.state.connected is False
+    assert context.state.connection_label is None
 
 
 

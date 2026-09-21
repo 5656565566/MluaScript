@@ -8,6 +8,8 @@ from mluascript.shared.logging import logger
 from .models import SystemState, TaskInfo, TaskKind, TaskStatus
 
 RunContext = ScriptRunContext | MaaPipelineRunContext
+TASK_HISTORY_LIMIT = 10
+_TERMINAL_TASK_STATUSES: frozenset[TaskStatus] = frozenset({"success", "failed", "stopped"})
 
 
 class StateManager:
@@ -17,6 +19,7 @@ class StateManager:
         self._state = SystemState()
         self._tasks: Dict[str, TaskInfo] = {}
         self._run_contexts: Dict[str, RunContext] = {}
+        self._completed_task_ids: list[str] = []
 
     def get_state(self) -> SystemState:
         return self._state
@@ -54,6 +57,8 @@ class StateManager:
         if task is None:
             return False
         self._run_contexts.pop(task_id, None)
+        if task_id in self._completed_task_ids:
+            self._completed_task_ids.remove(task_id)
         self._state.active_tasks = [item for item in self._state.active_tasks if item.task_id != task_id]
         logger.info(f"Task removed: {task_id}")
         return True
@@ -69,7 +74,29 @@ class StateManager:
         if result is not None:
             task.result = result
 
+        self._track_task_history(task_id, status)
+
         logger.info(f"Task {task_id} status updated to: {status}")
+
+    def _track_task_history(self, task_id: str, status: TaskStatus) -> None:
+        if task_id in self._completed_task_ids:
+            self._completed_task_ids.remove(task_id)
+        if status not in _TERMINAL_TASK_STATUSES:
+            return
+
+        self._completed_task_ids.append(task_id)
+        overflow = len(self._completed_task_ids) - TASK_HISTORY_LIMIT
+        if overflow <= 0:
+            return
+
+        expired_ids = set(self._completed_task_ids[:overflow])
+        del self._completed_task_ids[:overflow]
+        for expired_id in expired_ids:
+            self._tasks.pop(expired_id, None)
+            self._run_contexts.pop(expired_id, None)
+        self._state.active_tasks = [
+            item for item in self._state.active_tasks if item.task_id not in expired_ids
+        ]
 
     def update_task_info(
         self,
