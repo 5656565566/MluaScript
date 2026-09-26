@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { NButton, NDropdown, NEmpty, NGrid, NGridItem, NInput, NInputNumber, NSelect, NSpace, NTag, NText } from 'naive-ui'
+import { NButton, NDropdown, NEmpty, NGrid, NGridItem, NInput, NInputNumber, NSelect, NSlider, NSpace, NTag, NText } from 'naive-ui'
 import { state, getters, actions } from '../store'
 
 const props = defineProps({
@@ -62,6 +62,7 @@ const selectedResourceUrl = computed(() => {
   const selected = recognitionResourceOptions.value.find(item => item.value === path)
   return projectKey.value && path ? actions.projectFileDownloadUrl(selected?.projectPath || path) : ''
 })
+const thresholdLabel = computed(() => Number(draft.value.threshold ?? 0.8).toFixed(2))
 const recognitionResourcePreviewUrl = computed(() => {
   if (!['template', 'feature'].includes(draft.value.kind) || !draft.value.templatePath || !projectKey.value) return ''
   const selected = recognitionResourceOptions.value.find(item => item.value === draft.value.templatePath)
@@ -371,7 +372,10 @@ function switchVisionDialog(key) {
             <n-input :value="draft.templatePath" readonly placeholder="未选择模板资源，例如 assets:template.png" />
             <n-button @click="openTemplateResourcePicker">选择</n-button>
           </div>
-          <n-input-number v-if="draft.kind === 'template'" :value="draft.threshold" :min="0" :max="1" :step="0.01" style="width: 100%;" @update:value="value => update({ threshold: value, result: null })" />
+          <template v-if="draft.kind === 'template'">
+            <n-text strong>阈值 {{ thresholdLabel }}</n-text>
+            <n-slider :value="draft.threshold" :min="0" :max="1" :step="0.01" @update:value="value => update({ threshold: value, result: null })" />
+          </template>
         </template>
         <template v-else-if="draft.kind === 'nnd'">
           <n-text strong>模型资源</n-text>

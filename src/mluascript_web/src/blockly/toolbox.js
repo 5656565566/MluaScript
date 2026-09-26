@@ -133,7 +133,9 @@ export function buildDynamicCategories() {
         contents: [],
       })
     }
-    map.get(spec.category).contents.push({ kind: 'block', type: spec.type })
+    const blockItem = { kind: 'block', type: spec.type }
+    if (spec.toolboxInputs) blockItem.inputs = spec.toolboxInputs
+    map.get(spec.category).contents.push(blockItem)
   }
   return [...map.values()]
 }

@@ -1,4 +1,5 @@
 import * as Blockly from 'blockly'
+import '@blockly/field-slider'
 import { luaOrder, MAA_RESULT_TYPE, MAA_ITEMS_TYPE, MAA_ITEM_TYPE, MAA_BOX_TYPE, MAA_ROI_TYPE, PICKER_ICON_TYPE } from '../constants'
 import { MaaPickerIcon } from '../fields'
 import { getProjectResourcePickerItems } from '../utils'
@@ -73,7 +74,7 @@ export const visionBlocks = [
     },
   },
   {
-    type: 'maa_default_threshold',
+    type: 'maa_common_threshold',
     category: '快捷识别',
     colour: '#ef4444',
     definition: {
@@ -89,11 +90,33 @@ export const visionBlocks = [
         ],
       }],
       output: 'Number',
-      tooltip: '模板匹配常用阈值预设。',
+      tooltip: '从常用挡位中选择模板匹配阈值。',
       helpUrl: '',
     },
     generator(block) {
       return [block.getFieldValue('VALUE') || '0', luaOrder]
+    },
+  },
+  {
+    type: 'maa_default_threshold',
+    category: '快捷识别',
+    colour: '#ef4444',
+    definition: {
+      message0: '阈值 %1',
+      args0: [{
+        type: 'field_slider',
+        name: 'VALUE',
+        value: 0.8,
+        min: 0,
+        max: 1,
+        precision: 0.01,
+      }],
+      output: 'Number',
+      tooltip: '拖动选择模板匹配阈值，范围为 0 到 1。',
+      helpUrl: '',
+    },
+    generator(block) {
+      return [block.getFieldValue('VALUE') || '0.8', luaOrder]
     },
   },
   {
@@ -224,6 +247,14 @@ export const visionBlocks = [
     type: 'maa_find_template',
     category: '快捷识别',
     colour: '#ef4444',
+    toolboxInputs: {
+      THRESHOLD: {
+        shadow: {
+          type: 'maa_default_threshold',
+          fields: { VALUE: 0.8 },
+        },
+      },
+    },
     definition: {
       message0: '模板匹配 模板 %1 区域 %2 阈值 %3 图片(可选) %4',
       args0: [

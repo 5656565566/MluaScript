@@ -49,8 +49,8 @@
 .blocklyEditableField.blocklyEditing > .blocklyDropdownRect,
 .blocklyEditableText.editing > rect,
 .blocklyEditableText.editing > .blocklyDropdownRect {
-  fill: var(--blockly-editing-background) !important;
-  stroke: var(--blockly-editing-border) !important;
+  fill: var(--blockly-field-background) !important;
+  stroke: var(--blockly-field-border) !important;
 }
 
 .blocklyEditableField.blocklyEditing .blocklyFieldText,
@@ -62,19 +62,19 @@
 }
 
 /* Blockly 的字段编辑器、下拉菜单和右键菜单挂载在组件作用域之外。 */
-.blocklyWidgetDiv .blocklyHtmlInput:focus,
-.blocklyDropDownDiv .blocklyHtmlInput:focus,
-.blocklyTextInputBubble textarea.blocklyTextarea:focus {
-  background-color: var(--blockly-editing-background) !important;
-  color: var(--blockly-editing-text) !important;
-  -webkit-text-fill-color: var(--blockly-editing-text) !important;
-  caret-color: var(--blockly-editing-text) !important;
+.blocklyWidgetDiv .blocklyHtmlInput,
+.blocklyDropDownDiv .blocklyHtmlInput,
+.blocklyTextInputBubble textarea.blocklyTextarea {
+  background-color: transparent !important;
+  color: var(--blockly-field-text) !important;
+  -webkit-text-fill-color: var(--blockly-field-text) !important;
+  caret-color: var(--blockly-field-text) !important;
   outline: none !important;
 }
 
 .blocklyWidgetDiv .blocklyMenu,
-.blocklyDropDownDiv,
-.blocklyDropDownDiv .blocklyDropDownContent,
+.blocklyDropDownDiv:not(:has(.fieldSliderContainer)),
+.blocklyDropDownDiv:not(:has(.fieldSliderContainer)) .blocklyDropDownContent,
 .blocklyDropDownDiv .blocklyMenu,
 .blocklyDropDownDiv .goog-menu {
   background: var(--color-surface-2) !important;

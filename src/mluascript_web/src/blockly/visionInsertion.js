@@ -18,6 +18,15 @@ function numberBlock(workspace, value) {
   return block
 }
 
+function thresholdBlock(workspace, value) {
+  const numericValue = Number(value)
+  const threshold = Number.isFinite(numericValue) ? Math.min(1, Math.max(0, numericValue)) : 0.8
+  const block = finishBlock(workspace.newBlock('maa_default_threshold'))
+  block.setFieldValue(String(threshold), 'VALUE')
+  block.setShadow(true)
+  return block
+}
+
 function connectValue(parent, inputName, child) {
   const connection = parent.getInput(inputName)?.connection
   if (!connection || !child?.outputConnection) return
@@ -65,7 +74,7 @@ function createRecognitionBlock(workspace, recognition, roi) {
   }
 
   if (kind === 'template') {
-    connectValue(block, 'THRESHOLD', numberBlock(workspace, recognition.threshold ?? 0.8))
+    connectValue(block, 'THRESHOLD', thresholdBlock(workspace, recognition.threshold ?? 0.8))
   }
   return block
 }
