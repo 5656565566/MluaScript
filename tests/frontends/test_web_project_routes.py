@@ -406,7 +406,40 @@ def test_project_image_recognition_route_runs_ocr_with_uploaded_image(monkeypatc
 
     assert response.status_code == 200
     assert response.json()["data"]["result"]["hit"] is True
+    assert response.json()["data"]["message"] == "识图命中"
     assert calls[0][1]["expected"] == ["确认", "取消"]
+
+    monkeypatch.setattr(web_app, "find_ocr", lambda *_args, **_kwargs: {"hit": False})
+    missed = client.post(
+        f"/api/projects/{project['key']}/recognize-image",
+        json={"kind": "ocr", "imageBase64": base64.b64encode(png).decode("ascii")},
+    )
+    assert missed.status_code == 200
+    assert missed.json()["data"]["message"] == "识图未命中"
+
+
+def test_project_image_recognition_reports_engine_failure_instead_of_miss(monkeypatch, tmp_path: Path) -> None:
+    client = _client(monkeypatch, tmp_path)
+    project = client.post(
+        "/api/projects",
+        json={"name": "Vision", "packageId": "com.example.vision", "directory": "vision"},
+    ).json()["data"]
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    context = SimpleNamespace(tasker=object())
+    facade = SimpleNamespace(device_facade=SimpleNamespace(_maa_facade=SimpleNamespace(context=context)))
+    monkeypatch.setattr(web_app, "get_control_facade", lambda: facade)
+    monkeypatch.setattr(web_app, "initialize_maa_runtime", lambda value: value)
+    monkeypatch.setattr(web_app, "find_ocr", lambda *_args, **_kwargs: None)
+
+    response = client.post(
+        f"/api/projects/{project['key']}/recognize-image",
+        json={"kind": "ocr", "imageBase64": base64.b64encode(png).decode("ascii")},
+    )
+
+    assert response.status_code == 500
+    assert "未返回结果" in response.json()["detail"]
 
 
 def test_recognition_resource_alias_resolves_manifest_resource_key(monkeypatch, tmp_path: Path) -> None:

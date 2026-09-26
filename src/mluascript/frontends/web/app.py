@@ -1549,8 +1549,10 @@ def recognize_project_image(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"识图调试失败: {exc}") from exc
 
-    normalized = result or {"hit": False, "entry": f"WebImageDebug:{payload.kind}"}
-    return _ok({"result": normalized, "message": "识图完成"}, message="识图完成")
+    if result is None:
+        raise HTTPException(status_code=500, detail="Maa 识别未返回结果，请检查后端日志")
+    message = "识图命中" if result["hit"] else "识图未命中"
+    return _ok({"result": result, "message": message}, message=message)
 
 
 @projects_router.get("/{project_key}/builds/{build_id}/download")

@@ -10,7 +10,9 @@ test('image recognition debug keeps results visible and supports numeric and poi
 
   assert.match(source, /<div class="recognition-result">/)
   assert.match(source, /等待识别/)
-  assert.match(source, /未命中，请检查识别资源/)
+  assert.match(source, /const missMessage = computed/)
+  assert.match(source, /{{ missMessage }}/)
+  assert.doesNotMatch(source, /未命中，请检查识别资源、阈值、颜色范围/)
   assert.match(source, /updateRoiField\('roiX', value\)/)
   assert.match(source, /updateRoiField\('roiY', value\)/)
   assert.match(source, /updateRoiField\('roiWidth', value\)/)

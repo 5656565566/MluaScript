@@ -20,6 +20,7 @@ from mluascript.maa.recognition import (
     parse_recognition_detail,
     run_recognition_direct,
 )
+from mluascript.maa.recognition.service import resolve_resource_reference
 from mluascript.maa.types import MaaContextState, MaaPaths
 
 
@@ -144,6 +145,19 @@ def test_find_template_wraps_service_result() -> None:
     assert result is not None
     assert result["hit"] is True
     assert result["entry"] == "entry"
+
+
+def test_absolute_template_path_is_not_treated_as_resource_alias(tmp_path: Path) -> None:
+    template = tmp_path / "debug.png"
+    template.write_bytes(b"template")
+    context = build_context(build_detail())
+
+    find_template(context, "entry", template=str(template))
+
+    tasker = cast(FakeTasker, context.tasker)
+    param = tasker.post_recognition_calls[0][1]
+    assert Path(param.template[0]) == template
+    assert Path(resolve_resource_reference(context, str(template))) == template
 
 
 def test_find_ocr_and_find_ocr_all_wrap_service_result() -> None:

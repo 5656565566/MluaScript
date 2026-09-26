@@ -81,6 +81,28 @@ const insertOptions = computed(() => [
   { label: '插入识别并点击 Blockly', key: 'insert-vision-click-blockly', disabled: !draft.value.result },
 ])
 const hasRoi = computed(() => Number(draft.value.roiWidth) > 0 && Number(draft.value.roiHeight) > 0)
+const missMessage = computed(() => {
+  const value = draft.value
+  const area = hasRoi.value
+    ? `选区 X=${value.roiX}、Y=${value.roiY}、宽=${value.roiWidth}、高=${value.roiHeight}`
+    : '整张测试图片'
+  if (value.kind === 'template') {
+    const threshold = Number(value.threshold ?? 0.7).toFixed(2)
+    return `模板「${value.templatePath}」在${area}未找到相似度达到 ${threshold} 的位置。请确认选区完整包含目标；仍未命中时，核对模板内容和目标尺寸。`
+  }
+  if (value.kind === 'feature') {
+    return `模板「${value.templatePath}」在${area}未找到符合条件的特征匹配。请确认目标在选区内，模板图像有清晰纹理。`
+  }
+  if (value.kind === 'ocr') {
+    return value.expected
+      ? `在${area}未识别到期望文本「${value.expected}」。请确认文字完整位于选区内，或清空期望文本检查识别结果。`
+      : `在${area}未识别到文字。请确认文字清晰且位于选区内，或清除选区检查全图。`
+  }
+  if (value.kind === 'color') {
+    return `在${area}未找到符合颜色范围 ${value.lower}～${value.upper} 的目标。请核对颜色值，或清除选区检查全图。`
+  }
+  return `模型「${value.modelPath}」在${area}未检测到${value.targets ? `目标「${value.targets}」` : '目标'}。请核对模型、目标标签及选区。`
+})
 const roiBoxStyle = computed(() => {
   if (!hasRoi.value || !imageSize.value.width || !imageSize.value.height) return { display: 'none' }
   const rawRoi = state.visionSession.value?.roi
@@ -97,7 +119,7 @@ const roiBoxStyle = computed(() => {
 })
 
 function update(patch) {
-  draft.value = { ...draft.value, ...patch, error: '' }
+  draft.value = { ...draft.value, error: '', ...patch }
   actions.syncVisionSessionFromDraft?.()
 }
 
@@ -148,7 +170,7 @@ function useCurrentScreenshot() {
 }
 
 function clearImage() {
-  update({ imageBase64: '', imagePath: '' })
+  update({ imageBase64: '', imagePath: '', result: null })
   actions.setVisionSource?.({ type: '', path: '', base64: '', mimeType: 'image/png' })
 }
 
@@ -270,7 +292,7 @@ async function runRecognition() {
      update({ result })
      actions.setVisionRecognition?.({ result, error: '' })
    } catch (error) {
-     update({ error: error?.message || '识图执行失败' })
+     update({ result: null, error: error?.message || '识图执行失败' })
      actions.setVisionRecognition?.({ result: null, error: error?.message || '识图执行失败' })
   }
 }
@@ -341,7 +363,7 @@ function switchVisionDialog(key) {
 
         <template v-if="draft.kind === 'ocr'">
           <n-text strong>期望文本</n-text>
-          <n-input :value="draft.expected" placeholder="可选，例如：确认" @update:value="value => update({ expected: value })" />
+          <n-input :value="draft.expected" placeholder="可选，例如：确认" @update:value="value => update({ expected: value, result: null })" />
         </template>
         <template v-else-if="draft.kind === 'template' || draft.kind === 'feature'">
           <n-text strong>模板资源</n-text>
@@ -349,7 +371,7 @@ function switchVisionDialog(key) {
             <n-input :value="draft.templatePath" readonly placeholder="未选择模板资源，例如 assets:template.png" />
             <n-button @click="openTemplateResourcePicker">选择</n-button>
           </div>
-          <n-input-number v-if="draft.kind === 'template'" :value="draft.threshold" :min="0" :max="1" :step="0.01" style="width: 100%;" @update:value="value => update({ threshold: value })" />
+          <n-input-number v-if="draft.kind === 'template'" :value="draft.threshold" :min="0" :max="1" :step="0.01" style="width: 100%;" @update:value="value => update({ threshold: value, result: null })" />
         </template>
         <template v-else-if="draft.kind === 'nnd'">
           <n-text strong>模型资源</n-text>
@@ -359,16 +381,16 @@ function switchVisionDialog(key) {
             placeholder="选择项目声明的 NND 模型"
             filterable
             clearable
-            @update:value="value => update({ modelPath: value })"
+            @update:value="value => update({ modelPath: value, result: null })"
           />
            <n-text v-if="!modelOptions.length" type="warning">models 中没有声明可用的模型。</n-text>
-          <n-input :value="draft.targets" placeholder="目标标签，可用 | 分隔" @update:value="value => update({ targets: value })" />
+          <n-input :value="draft.targets" placeholder="目标标签，可用 | 分隔" @update:value="value => update({ targets: value, result: null })" />
         </template>
         <template v-else-if="draft.kind === 'color'">
           <n-text strong>颜色范围</n-text>
           <n-space>
-            <n-input :value="draft.lower" placeholder="#000000" @update:value="value => update({ lower: value })" />
-            <n-input :value="draft.upper" placeholder="#ffffff" @update:value="value => update({ upper: value })" />
+            <n-input :value="draft.lower" placeholder="#000000" @update:value="value => update({ lower: value, result: null })" />
+            <n-input :value="draft.upper" placeholder="#ffffff" @update:value="value => update({ upper: value, result: null })" />
           </n-space>
         </template>
         <div class="roi-editor">
@@ -406,7 +428,7 @@ function switchVisionDialog(key) {
           </div>
           <n-text v-if="draft.error" type="error">{{ draft.error }}</n-text>
           <n-text v-else-if="draft.result && !draft.result.hit" type="warning">
-            未命中，请检查识别资源、阈值、颜色范围或重新框选 ROI。
+            {{ missMessage }}
           </n-text>
           <n-text v-if="draft.result" depth="3">{{ JSON.stringify(draft.result) }}</n-text>
           <n-text v-else-if="!draft.error" depth="3">选择测试图片并执行识别后，结果将显示在这里。</n-text>

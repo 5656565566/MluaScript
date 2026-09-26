@@ -549,7 +549,7 @@ export function createProjectActions({ state, projectApi, compileBlocklyXml, get
       const activeProjectKey = projectKey()
       if (!activeProjectKey) throw new Error('请先打开项目')
       const data = await projectApi.recognizeImage(activeProjectKey, payload)
-      getActions().setStatus(data.message || '识图完成', 'success')
+      getActions().setStatus(data.message || (data.result?.hit ? '识图命中' : '识图未命中'), data.result?.hit ? 'success' : 'warning')
       return data.result
     },
 

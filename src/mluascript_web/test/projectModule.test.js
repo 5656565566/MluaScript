@@ -42,6 +42,24 @@ function createState() {
   }
 }
 
+test('image recognition distinguishes a miss from a successful match in status', async () => {
+  const state = createState()
+  const responses = [
+    { result: { hit: false }, message: '识图未命中' },
+    { result: { hit: true }, message: '识图命中' },
+  ]
+  const statuses = []
+  const actions = createProjectActions({
+    state,
+    projectApi: { recognizeImage: async () => responses.shift() },
+    getActions: () => ({ setStatus: (message, type) => statuses.push([message, type]) }),
+  })
+
+  assert.deepEqual(await actions.runImageRecognition({ kind: 'template' }), { hit: false })
+  assert.deepEqual(await actions.runImageRecognition({ kind: 'template' }), { hit: true })
+  assert.deepEqual(statuses, [['识图未命中', 'warning'], ['识图命中', 'success']])
+})
+
 test('Blockly project debugging compiles every module into the virtual scripts tree', async () => {
   const state = createState()
   state.currentProject.value = { key: 'project-key', project_type: 'blockly-package', primary_path: 'blockly/main.xml' }

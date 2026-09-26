@@ -18,6 +18,8 @@ def resolve_resource_reference(context: MaaContext, value: str) -> str:
     """将 resources 的 key 别名解析为运行时可读取的路径。"""
 
     reference = str(value or "").strip().replace("\\", "/")
+    if Path(reference).is_absolute():
+        return reference
     if ":" not in reference:
         return reference
     resource_key, relative = reference.split(":", 1)
