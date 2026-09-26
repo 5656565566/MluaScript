@@ -7,3 +7,9 @@ export function setProjectModuleRegistry(modules) {
 export function getProjectModuleRegistry() {
   return projectModules
 }
+
+export function getSelectableProjectModules(currentSource = '') {
+  const source = String(currentSource || '').replaceAll('\\', '/')
+  return projectModules.filter(module =>
+    module.source !== source && Array.isArray(module.exports) && module.exports.length > 0)
+}

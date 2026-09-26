@@ -45,7 +45,7 @@ class ControlFacade:
         return self.workspace_mgr.read_script(rel_path)
 
     def list_build_artifacts(self) -> list[RunnableArtifact]:
-        """列出 TUI 与 Web 共用格式的 builds 构建产物。"""
+        """列出 TUI 与 Web 共用格式的 builds 构建产物"""
 
         return [item for item in self.artifact_service.list_artifacts() if item.source == "build"]
 
@@ -53,7 +53,7 @@ class ControlFacade:
         return self.artifact_service.read_readme(artifact_id)
 
     def run_artifact(self, artifact_id: str, target: str) -> str:
-        """准备并运行构建产物，失败时回收尚未托管给任务的运行目录。"""
+        """准备并运行构建产物，失败时回收尚未托管给任务的运行目录"""
 
         prepared: PreparedArtifactRun = self.artifact_service.prepare_run(artifact_id)
         try:

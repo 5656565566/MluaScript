@@ -1,4 +1,4 @@
-"""TUI 列表分页工具。"""
+"""TUI 列表分页工具"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ def paginate_items(
     page_index: int,
     page_size: int,
 ) -> tuple[list[ItemT], int, int]:
-    """返回当前页、收敛后的页码和总页数。"""
+    """返回当前页、收敛后的页码和总页数"""
 
     if not items:
         return [], 0, 0

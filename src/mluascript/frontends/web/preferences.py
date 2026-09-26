@@ -1,4 +1,4 @@
-"""Web 界面偏好模型与持久化服务。"""
+"""Web 界面偏好模型与持久化服务"""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class AppearancePreferences(_PreferenceModel):
     @model_validator(mode="before")
     @classmethod
     def migrate_legacy_accent_color(cls, value: object) -> object:
-        """旧版单色强调配置迁移为自定义种子色，避免覆盖用户选择。"""
+        """旧版单色强调配置迁移为自定义种子色 避免覆盖用户选择"""
 
         if not isinstance(value, dict) or "accentColor" not in value or "colorTheme" in value:
             return value
@@ -81,7 +81,7 @@ class _PreferenceDocument(_PreferenceModel):
 
 
 class WebPreferenceService:
-    """按登录用户名保存界面偏好，并使用原子替换避免半写文件。"""
+    """按登录用户名保存界面偏好 并使用原子替换避免半写文件"""
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path).resolve()

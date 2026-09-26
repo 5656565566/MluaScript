@@ -117,8 +117,8 @@ class LuaEngine:
             if callable(value):
                 continue
 
-            # 保持原有私有值隔离规则；函数不受此前缀限制，因为 Blockly
-            # 会将中文函数名编码为以 _E 开头的合法 Lua 标识符。
+            # 保持原有私有值隔离规则 函数不受此前缀限制
+            # 因为 Blockly 会将中文函数名编码为以 _E 开头的合法 Lua 标识符
             if key.startswith("_"):
                 continue
             try:
@@ -144,8 +144,8 @@ class LuaEngine:
             if not callable(value):
                 continue
 
-            # Python callable 和 Lua C 函数无法由 string.dump 序列化，
-            # 这里只继承纯 Lua 函数，其他宿主能力会由命名空间重新注册。
+            # Python callable 和 Lua C 函数无法由 string.dump 序列化
+            # 这里只继承纯 Lua 函数 其他宿主能力会由命名空间重新注册
             try:
                 bytecode = safe_dump(value)
             except Exception:
@@ -224,7 +224,7 @@ class LuaEngine:
         )
 
     def _read_project_module(self, module_key: object) -> tuple[str | None, str]:
-        """读取受限模块空间中的 Lua 源码，不允许回退到宿主搜索路径。"""
+        """读取受限模块空间中的 Lua 源码 不允许回退到宿主搜索路径"""
 
         raw_key = str(module_key or "").strip().replace("\\", "/")
         if not raw_key or raw_key.startswith("/") or ":" in raw_key:
@@ -251,7 +251,7 @@ class LuaEngine:
         return None, f"\n\tno project module 'scripts/{raw_key}.lua' or 'scripts/{raw_key}/init.lua'"
 
     def _read_project_file(self, virtual_path: object) -> tuple[str | None, str]:
-        """为受限 loadfile/dofile 解析 scripts/ 虚拟路径。"""
+        """为受限 loadfile/dofile 解析 scripts/ 虚拟路径"""
 
         raw_path = str(virtual_path or "").strip().replace("\\", "/")
         if not raw_path.startswith("scripts/") or not raw_path.casefold().endswith(".lua"):
@@ -260,7 +260,7 @@ class LuaEngine:
         return self._read_project_module(module_key)
 
     def _configure_locked_project_modules(self, lua: LuaRuntime, base_dir: Path) -> None:
-        """安装只暴露 preload 与项目虚拟模块的 Lua package 环境。"""
+        """安装只暴露 preload 与项目虚拟模块的 Lua package 环境"""
 
         self._lua_require_base_dir = base_dir
         globals_table = lua.globals()
@@ -334,8 +334,8 @@ class LuaEngine:
         self._configure_lua_package_path(lua)
         build_lua_runtime_inject(lua)
         self._install_stop_hook(lua)
-        # 记录运行时自带函数，后续快照仅复制脚本新增或覆盖的函数。
-        # 这些内置函数可能持有局部 upvalue，必须由注入脚本原样重建。
+        # 记录运行时自带函数 后续快照仅复制脚本新增或覆盖的函数
+        # 这些内置函数可能持有局部 upvalue 必须由注入脚本原样重建
         self._builtin_lua_function_bytecodes = self._dump_lua_global_functions(lua)
         self.lupa = lua
         self._register_all_namespaces(lua)

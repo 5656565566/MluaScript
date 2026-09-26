@@ -1,4 +1,4 @@
-"""静态提取可打包项目中可供 Blockly 快捷调用的模块导出。"""
+"""静态提取可打包项目中可供 Blockly 快捷调用的模块导出"""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import cast
 
 from .module_paths import blockly_source_to_module_key, script_path_to_module_key
 
@@ -51,7 +52,7 @@ def _blockly_exports(source: str) -> list[dict[str, object]]:
 
 
 def _lua_function_signatures(source: str) -> dict[str, dict[str, object]]:
-    """保守分析常见 Lua 函数声明；复杂控制流的返回状态标记为未知。"""
+    """保守分析常见 Lua 函数声明 复杂控制流的返回状态标记为未知"""
 
     patterns = (
         re.compile(r"(?:local\s+)?function\s+([A-Za-z_][\w]*)\s*\(([^)]*)\)(.*?)\bend\b", re.DOTALL),
@@ -84,7 +85,7 @@ def _lua_return_shape(body: str) -> tuple[bool | None, str]:
 
 
 def _lua_module_table_exports(source: str) -> list[dict[str, object]]:
-    """分析 ``local M = {}; function M.fn(); return M`` 风格模块。"""
+    """分析 ``local M = {}; function M.fn(); return M`` 风格模块"""
 
     returned_tables = list(re.finditer(r"\breturn\s+([A-Za-z_][\w]*)\s*(?:--[^\n]*)?(?:$|\n)", source, re.MULTILINE))
     if not returned_tables:
@@ -138,7 +139,7 @@ def _lua_exports(source: str) -> list[dict[str, object]]:
     export_pairs = list(re.finditer(r"([A-Za-z_][\w]*)\s*=\s*([A-Za-z_][\w]*)", body))
     assigned_spans = [match.span() for match in export_pairs]
     candidates = [(match.group(1), match.group(2)) for match in export_pairs]
-    # 同时支持 `return { greet }` 这种键名与函数名相同的标准表写法。
+    # 同时支持 `return { greet }` 这种键名与函数名相同的标准表写法
     for match in re.finditer(r"(?:^|,)\s*([A-Za-z_][\w]*)\s*(?=,|$)", body):
         if not any(start <= match.start(1) < end for start, end in assigned_spans):
             candidates.append((match.group(1), match.group(1)))
@@ -151,7 +152,7 @@ def _lua_exports(source: str) -> list[dict[str, object]]:
 
 
 def build_project_module_index(project_root: Path, project_type: str) -> list[dict[str, object]]:
-    """返回以相对路径为标识的静态模块导出索引。"""
+    """返回以相对路径为标识的静态模块导出索引"""
 
     modules: list[dict[str, object]] = []
     if project_type == "blockly-package":
@@ -173,11 +174,14 @@ def build_project_module_index(project_root: Path, project_type: str) -> list[di
 
 
 def validate_blockly_module_references(project_root: Path) -> list[tuple[str, str]]:
-    """返回 ``(source_path, message)`` 形式的失效模块引用。"""
+    """返回 ``(source_path, message)`` 形式的失效模块引用"""
 
     modules = build_project_module_index(project_root, "blockly-package")
     exports_by_module = {
-        str(module["key"]): {str(item["name"]): item for item in module.get("exports", [])}
+        str(module["key"]): {
+            str(item["name"]): item
+            for item in cast(list[dict[str, object]], module.get("exports", []))
+        }
         for module in modules
     }
     diagnostics: list[tuple[str, str]] = []
@@ -195,6 +199,7 @@ def validate_blockly_module_references(project_root: Path) -> list[tuple[str, st
                 "lua_require_module_expr",
                 "lua_project_module_call_stmt",
                 "lua_project_module_call_expr",
+                "thread_spawn_selected_function",
             }:
                 continue
             fields = {
@@ -208,7 +213,7 @@ def validate_blockly_module_references(project_root: Path) -> list[tuple[str, st
             if module_key not in exports_by_module:
                 diagnostics.append((relative, f"引用的项目模块不存在: {module_key}"))
                 continue
-            if block_type.startswith("lua_project_module_call_"):
+            if block_type.startswith("lua_project_module_call_") or block_type == "thread_spawn_selected_function":
                 function_name = fields.get("FUNCTION_VALUE", "")
                 if function_name and function_name not in exports_by_module[module_key]:
                     diagnostics.append((relative, f"模块 {module_key} 不再导出函数: {function_name}"))

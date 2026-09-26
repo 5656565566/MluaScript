@@ -1,4 +1,4 @@
-"""可打包项目的虚拟 Lua 模块路径规则。"""
+"""可打包项目的虚拟 Lua 模块路径规则"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ SCRIPT_ROOT = "scripts"
 
 
 def blockly_source_to_script_path(source_path: str) -> str:
-    """把 ``blockly/**/*.xml`` 映射为包内 ``scripts/**/*.lua``。"""
+    """把 ``blockly/**/*.xml`` 映射为包内 ``scripts/**/*.lua``"""
 
     normalized = normalize_package_path(source_path)
     path = PurePosixPath(normalized)
@@ -25,7 +25,7 @@ def blockly_source_to_script_path(source_path: str) -> str:
 
 
 def script_path_to_module_key(script_path: str) -> str:
-    """把 ``scripts/**/*.lua`` 转换为稳定的项目模块键。"""
+    """把 ``scripts/**/*.lua`` 转换为稳定的项目模块键"""
 
     normalized = normalize_package_path(script_path)
     path = PurePosixPath(normalized)
@@ -40,6 +40,6 @@ def script_path_to_module_key(script_path: str) -> str:
 
 
 def blockly_source_to_module_key(source_path: str) -> str:
-    """返回 Blockly 源文件对应的项目模块键。"""
+    """返回 Blockly 源文件对应的项目模块键"""
 
     return script_path_to_module_key(blockly_source_to_script_path(source_path))

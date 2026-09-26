@@ -108,7 +108,7 @@ class WorkspaceManager:
         )
 
     def _module_search_locked(self, config_file: Path) -> bool:
-        """仅可打包 Lua/Blockly 项目启用固定的 scripts 模块空间。"""
+        """仅可打包 Lua/Blockly 项目启用固定的 scripts 模块空间"""
 
         if config_file.name != "mluascript.yaml" or not config_file.is_file():
             return False
@@ -145,7 +145,7 @@ class WorkspaceManager:
         if normalized_path:
             script_file = self._resolve_workspace_path(normalized_path)
         else:
-            # 内存代码没有保存路径时，虚拟文件名只用于确定运行目录和任务元数据。
+            # 内存代码没有保存路径时 虚拟文件名只用于确定运行目录和任务元数据
             script_file = (self.root_dir / "untitled.lua").resolve()
 
         is_lua_file = script_file.suffix.lower() == ".lua"
@@ -257,7 +257,7 @@ class WorkspaceManager:
             candidate = Path(path_text)
             resolved = candidate.resolve() if candidate.is_absolute() else (self.root_dir / candidate).resolve()
             # 自定义 WorkspaceManager 通常用于隔离项目或测试；此时不应把全局配置中的
-            # 宿主脚本目录意外带入当前工作区。默认全局 manager 仍保留原有配置行为。
+            # 宿主脚本目录意外带入当前工作区 默认全局 manager 仍保留原有配置行为
             if self.root_dir != Path.cwd().resolve() and not self._is_under_workspace(resolved):
                 continue
             if resolved not in roots:
@@ -266,7 +266,7 @@ class WorkspaceManager:
         return roots
 
     def _find_manifest_root(self, start: Path) -> Path:
-        """向上查找标准项目 manifest，兼容无 manifest 的旧目录脚本。"""
+        """向上查找标准项目 manifest 兼容无 manifest 的旧目录脚本"""
         current = start.resolve()
         workspace_root = self.root_dir.resolve()
         while True:

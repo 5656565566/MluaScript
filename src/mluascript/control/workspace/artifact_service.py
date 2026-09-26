@@ -1,4 +1,4 @@
-"""Web 构建产物的发现、校验与运行准备。"""
+"""Web 构建产物的发现、校验与运行准备"""
 
 from __future__ import annotations
 
@@ -29,12 +29,12 @@ MAX_README_BYTES = 512 * 1024
 
 
 class ArtifactServiceError(ValueError):
-    """构建产物不可发现、不可校验或不可运行。"""
+    """构建产物不可发现、不可校验或不可运行"""
 
 
 @dataclass(slots=True)
 class ArtifactTemplateSource:
-    """单个构建入口的模板源码；一个入口只允许解析一个模板块。"""
+    """单个构建入口的模板源码；一个入口只允许解析一个模板块"""
 
     artifact: "RunnableArtifact"
     script_path: str
@@ -42,7 +42,7 @@ class ArtifactTemplateSource:
 
 
 def cleanup_artifact_runtime_dir(raw_path: str | Path | None) -> bool:
-    """仅删除由产物服务创建的任务运行目录。"""
+    """仅删除由产物服务创建的任务运行目录"""
 
     if not raw_path:
         return False
@@ -61,7 +61,7 @@ def cleanup_artifact_runtime_dir(raw_path: str | Path | None) -> bool:
 
 
 class RunnableArtifact(BaseModel):
-    """任务管理可展示和启动的不可变运行入口。"""
+    """任务管理可展示和启动的不可变运行入口"""
 
     id: str
     kind: Literal["package", "maa", "lua"]
@@ -81,7 +81,7 @@ class RunnableArtifact(BaseModel):
 
 
 class ArtifactReadme(BaseModel):
-    """已通过包摘要校验的 README 文档。"""
+    """已通过包摘要校验的 README 文档"""
 
     artifact_id: str
     name: str
@@ -116,7 +116,7 @@ class PreparedArtifactRun:
 
 
 class ArtifactService:
-    """以 builds 为默认部署目录，同时保留显式 scripts_path。"""
+    """以 builds 为默认部署目录 同时保留显式 scripts_path"""
 
     def __init__(
         self,
@@ -147,7 +147,7 @@ class ArtifactService:
         raise ArtifactServiceError("运行产物不存在或已被更新，请刷新任务列表")
 
     def get_template_source(self, artifact_id: str) -> ArtifactTemplateSource:
-        """读取并校验当前构建入口 Lua，供模板预览和模板运行复用。"""
+        """读取并校验当前构建入口 Lua 供模板预览和模板运行复用"""
 
         artifact = self.get_artifact(artifact_id)
         if artifact.kind == "maa":
@@ -171,7 +171,7 @@ class ArtifactService:
         return ArtifactTemplateSource(artifact=artifact, script_path=path.name, code=code)
 
     def template_config_dir(self, artifact_id: str) -> Path:
-        """返回按构建产物隔离的模板配置目录，不修改包内容。"""
+        """返回按构建产物隔离的模板配置目录 不修改包内容"""
 
         self.get_artifact(artifact_id)
         return (self.builds_root.parent / "settings" / "templates" / "artifacts" / artifact_id).resolve()
@@ -188,7 +188,7 @@ class ArtifactService:
         return self._prepare_package(artifact)
 
     def read_readme(self, artifact_id: str) -> ArtifactReadme:
-        """读取包根目录 README.md；单文件构建产物不提供内嵌文档。"""
+        """读取包根目录 README.md 单文件构建产物不提供内嵌文档"""
 
         artifact = self.get_artifact(artifact_id)
         if artifact.kind == "lua":
@@ -275,7 +275,7 @@ class ArtifactService:
         ]
 
     def _single_file_project_type(self, path: Path) -> str:
-        """从构建目录的项目 key 恢复单文件项目的源类型。"""
+        """从构建目录的项目 key 恢复单文件项目的源类型"""
 
         if self.project_service is None:
             return ""
@@ -293,7 +293,7 @@ class ArtifactService:
         return project.project_type if project.project_type in {"lua-file", "blockly-file"} else ""
 
     def _configured_scripts(self) -> list[RunnableArtifact]:
-        # 隔离测试或嵌入式工作区不继承宿主进程的外部脚本目录。
+        # 隔离测试或嵌入式工作区不继承宿主进程的外部脚本目录
         if self.workspace_manager.root_dir != Path.cwd().resolve():
             return []
         try:
@@ -417,7 +417,7 @@ class ArtifactService:
             raise ArtifactServiceError(f"读取构建包失败: {exc}") from exc
 
     def _read_verified_package_text(self, package_path: Path, relative: str, *, max_bytes: int) -> str:
-        """校验归档文件表与目标摘要后读取一个 UTF-8 文本文件。"""
+        """校验归档文件表与目标摘要后读取一个 UTF-8 文本文件"""
 
         try:
             with zipfile.ZipFile(package_path) as archive:

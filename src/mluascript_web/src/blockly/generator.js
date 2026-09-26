@@ -158,13 +158,15 @@ function buildModuleExportCode(workspace, generator) {
   const uniqueResolvedNames = []
   const seen = new Set()
   for (const item of resolvedNames) {
-    if (!seen.has(item.generatedName)) {
-      seen.add(item.generatedName)
-      uniqueResolvedNames.push(item.generatedName)
+    if (!seen.has(item.rawName)) {
+      seen.add(item.rawName)
+      uniqueResolvedNames.push(item)
     }
   }
 
-  const exportBody = uniqueResolvedNames.map((name) => `  ${name} = ${name}`).join(',\n')
+  const exportBody = uniqueResolvedNames
+    .map(item => `  [${JSON.stringify(item.rawName)}] = ${item.generatedName}`)
+    .join(',\n')
   return `\nreturn {\n${exportBody}\n}\n`
 }
 

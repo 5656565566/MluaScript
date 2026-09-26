@@ -1,6 +1,16 @@
 import * as Blockly from 'blockly'
-import { luaOrder } from '../constants'
+import { luaOrder, PICKER_ICON_TYPE } from '../constants'
 import { attachBlockSemanticWarning, getBlockSemanticDiagnostic } from '../blockSemanticDiagnostics'
+import { MaaPickerIcon } from '../fields'
+import {
+  createThreadTaskPickerConfig,
+  generateThreadTask,
+  generateThreadTaskId,
+  installThreadTaskSerialization,
+  restoreThreadTaskSelection,
+} from '../threadTaskSelection.js'
+import { state } from '../../store.js'
+import { pickerActions } from '../../store/pickerState.js'
 
 function getSharedVarName(block) {
   return String(block.getFieldValue('VAR_NAME') || '').trim()
@@ -12,6 +22,21 @@ function getSharedVarKey(block) {
 
 function getTaskHandle(block, generator) {
   return generator.valueToCode(block, 'HANDLE', luaOrder) || 'nil'
+}
+
+function initializeThreadTaskPicker(block) {
+  block.appendDummyInput().appendField(new Blockly.FieldTextInput(''), 'TARGET_KIND').setVisible(false)
+  block.appendDummyInput().appendField(new Blockly.FieldTextInput(''), 'MODULE_VALUE').setVisible(false)
+  block.appendDummyInput().appendField(new Blockly.FieldTextInput(''), 'FUNCTION_VALUE').setVisible(false)
+  block.appendDummyInput().appendField(new Blockly.FieldTextInput('[]'), 'PARAM_VALUES').setVisible(false)
+  block.appendDummyInput().appendField(new Blockly.FieldTextInput('function'), 'CALL_STYLE').setVisible(false)
+  installThreadTaskSerialization(block)
+  if (!block.getIcon(PICKER_ICON_TYPE)) {
+    block.addIcon(new MaaPickerIcon(block, () =>
+      createThreadTaskPickerConfig(block, state.projectSelectedPath?.value, pickerActions.update)))
+  }
+  restoreThreadTaskSelection(block)
+  attachBlockSemanticWarning(block, () => restoreThreadTaskSelection(block))
 }
 
 export const luaThreadBlocks = [
@@ -34,7 +59,7 @@ export const luaThreadBlocks = [
   },
   {
     type: 'thread_spawn_function',
-    category: '任务',
+    category: null,
     colour: '#10b981',
     definition: {
       message0: '作为任务运行 %1',
@@ -71,6 +96,33 @@ export const luaThreadBlocks = [
       const argsString = args.length > 0 ? `, nil, ${args.join(', ')}` : ''
       return [`thread.spawn(${JSON.stringify(funcName)}${argsString})`, luaOrder]
     },
+  },
+  {
+    type: 'thread_spawn_selected_function',
+    category: '任务',
+    colour: '#10b981',
+    definition: {
+      message0: '作为任务运行 %1',
+      args0: [{ type: 'field_label', name: 'TARGET_LABEL', text: '未选择函数' }],
+      output: 'ThreadTask',
+      tooltip: '选择当前文件或项目模块中的一个函数，填写参数后作为后台任务运行。',
+      helpUrl: '',
+    },
+    init(block) { initializeThreadTaskPicker(block) },
+    generator: generateThreadTask,
+  },
+  {
+    type: 'thread_task_id',
+    category: '任务',
+    colour: '#10b981',
+    definition: {
+      message0: '获取任务 ID %1',
+      args0: [{ type: 'input_value', name: 'HANDLE', check: 'ThreadTask' }],
+      output: 'String',
+      tooltip: '读取后台任务句柄的 ID。',
+      helpUrl: '',
+    },
+    generator: generateThreadTaskId,
   },
   {
     type: 'thread_join',

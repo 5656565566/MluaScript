@@ -1,7 +1,7 @@
-"""项目包 v1 的数据模型。
+"""项目包 v1 的数据模型
 
-项目目录和 `.mlspkg` 使用同一份 manifest 描述。模型保持在 workspace
-包内，避免 Web 层重新定义一套容易漂移的项目契约。
+项目目录和 `.mlspkg` 使用同一份 manifest 描述 模型保持在 workspace
+包内，避免 Web 层重新定义一套容易漂移的项目契约
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ProjectPackageMetadata(BaseModel):
-    """项目身份信息。"""
+    """项目身份信息"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -24,7 +24,7 @@ class ProjectPackageMetadata(BaseModel):
 
 
 class ProjectRuntimeSpec(BaseModel):
-    """项目运行时约束。"""
+    """项目运行时约束"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -33,7 +33,7 @@ class ProjectRuntimeSpec(BaseModel):
 
 
 class ProjectEntrypoint(BaseModel):
-    """一个可执行入口以及它关联的编辑器/模型文件。"""
+    """一个可执行入口以及它关联的编辑器/模型文件"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -46,7 +46,7 @@ class ProjectEntrypoint(BaseModel):
 
 
 class ProjectModelSpec(BaseModel):
-    """包内模型声明。v1 不允许外部下载。"""
+    """包内模型声明 v1 不允许外部下载"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -56,7 +56,7 @@ class ProjectModelSpec(BaseModel):
 
 
 class ProjectManifest(BaseModel):
-    """`mluascript.yaml` 的 v1 结构。"""
+    """`mluascript.yaml` 的 v1 结构"""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -72,7 +72,7 @@ class ProjectManifest(BaseModel):
 
 
 class ProjectDiagnostic(BaseModel):
-    """manifest 或项目文件的结构化诊断。"""
+    """manifest 或项目文件的结构化诊断"""
 
     severity: str = "error"
     code: str
@@ -81,7 +81,7 @@ class ProjectDiagnostic(BaseModel):
 
 
 class ProjectSummary(BaseModel):
-    """前端项目列表和打开项目使用的摘要。"""
+    """前端项目列表和打开项目使用的摘要"""
 
     key: str
     name: str
@@ -101,7 +101,7 @@ class ProjectSummary(BaseModel):
 
 
 class ProjectTreeItem(BaseModel):
-    """项目树中的一个文件或目录。"""
+    """项目树中的一个文件或目录"""
 
     path: str
     name: str
@@ -111,7 +111,7 @@ class ProjectTreeItem(BaseModel):
 
 
 class ProjectFileContent(BaseModel):
-    """项目文件读取结果。"""
+    """项目文件读取结果"""
 
     path: str
     name: str
@@ -122,7 +122,7 @@ class ProjectFileContent(BaseModel):
 
 
 class ProjectBuildResult(BaseModel):
-    """一次打包构建的结果。"""
+    """一次打包构建的结果"""
 
     build_id: str
     project_key: str
@@ -135,7 +135,7 @@ class ProjectBuildResult(BaseModel):
 
 
 class ProjectDebugTarget(BaseModel):
-    """不落盘调试所需的受控入口和内存源码覆盖。"""
+    """不落盘调试所需的受控入口和内存源码覆盖"""
 
     project_key: str
     project_type: str
@@ -146,7 +146,7 @@ class ProjectDebugTarget(BaseModel):
 
 
 class ProjectPipelineDebugTarget(BaseModel):
-    """Maa 项目源码描述文件解析出的 Pipeline 调试入口。"""
+    """Maa 项目源码描述文件解析出的 Pipeline 调试入口"""
 
     project_key: str
     descriptor_path: str

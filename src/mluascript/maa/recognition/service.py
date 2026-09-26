@@ -15,7 +15,7 @@ from .parser import parse_box, parse_best_result
 
 
 def resolve_resource_reference(context: MaaContext, value: str) -> str:
-    """将 resources 的 key 别名解析为运行时可读取的路径。"""
+    """将 resources 的 key 别名解析为运行时可读取的路径"""
 
     reference = str(value or "").strip().replace("\\", "/")
     if Path(reference).is_absolute():

@@ -64,7 +64,7 @@ class LogPage(Container):
             self.set_active(True)
 
     def set_active(self, active: bool) -> None:
-        """隐藏日志页只保留内存缓冲，不再触发 RichLog 实时重绘。"""
+        """隐藏日志页只保留内存缓冲 不再触发 RichLog 实时重绘"""
 
         if active:
             self._sync_history()

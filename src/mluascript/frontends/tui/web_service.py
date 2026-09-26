@@ -1,4 +1,4 @@
-"""由 Textual 应用托管的 Web 服务生命周期。"""
+"""由 Textual 应用托管的 Web 服务生命周期"""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ class _LoggerSnapshot:
 
 
 class _UvicornErrorCaptureHandler(logging.Handler):
-    """静默捕获 Uvicorn 错误，避免关闭 Web 日志后丢失启动失败原因。"""
+    """静默捕获 Uvicorn 错误 避免关闭 Web 日志后丢失启动失败原因"""
 
     def __init__(self, on_error: Callable[[logging.LogRecord], None]) -> None:
         super().__init__(level=logging.ERROR)
@@ -55,7 +55,7 @@ class _UvicornErrorCaptureHandler(logging.Handler):
 
 
 class _UvicornLogBridge:
-    """在 Web 生命周期内把 Uvicorn 标准日志定向到项目日志。"""
+    """在 Web 生命周期内把 Uvicorn 标准日志定向到项目日志"""
 
     def __init__(self, on_error: Callable[[logging.LogRecord], None]) -> None:
         self._on_error = on_error
@@ -101,7 +101,7 @@ class _UvicornLogBridge:
 
 
 class WebServiceController:
-    """TUI 唯一持有的嵌入式 Web 服务控制器。"""
+    """TUI 唯一持有的嵌入式 Web 服务控制器"""
 
     def __init__(
         self,
@@ -154,7 +154,7 @@ class WebServiceController:
         return str(config_registry.get(GlobalConfig).log_level).upper() == "DEBUG"
 
     def subscribe(self, listener: WebServiceStatusListener) -> Callable[[], None]:
-        """订阅生命周期状态变化，并立即同步当前状态。"""
+        """订阅生命周期状态变化 并立即同步当前状态"""
 
         self._status_listeners.add(listener)
         listener(self._status)
@@ -168,12 +168,12 @@ class WebServiceController:
             try:
                 listener(status)
             except Exception as exc:
-                # 状态观察者不能中断 Web 生命周期操作。
+                # 状态观察者不能中断 Web 生命周期操作
                 if self._should_enable_web_logs():
                     logger.bind(source="web", channel="web.server").warning(f"Web 状态观察者异常: {exc}")
 
     def _capture_uvicorn_error(self, record: logging.LogRecord) -> None:
-        # Uvicorn 常在具体异常后再输出通用 startup failed，保留第一条根因信息。
+        # Uvicorn 常在具体异常后再输出通用 startup failed 保留第一条根因信息
         if record.levelno >= logging.ERROR and not self._last_error:
             self._last_error = record.getMessage()
 
@@ -198,10 +198,10 @@ class WebServiceController:
                 logger.bind(source="web", channel="web.server").exception(f"MluaScript Web 服务异常退出: {exc}")
         finally:
             try:
-                # Uvicorn 在线程 Worker 内运行，所有 Textual 状态更新必须回到应用线程。
+                # Uvicorn 在线程 Worker 内运行 所有 Textual 状态更新必须回到应用线程
                 self._app.call_from_thread(self._finish_server, server, cancelled)
             except Exception:
-                # 应用异常退出时可能已无法调度回主线程，日志桥仍必须恢复。
+                # 应用异常退出时可能已无法调度回主线程 日志桥仍必须恢复
                 if self._server is server:
                     self._server = None
                     self._log_bridge.restore()
@@ -215,7 +215,7 @@ class WebServiceController:
         self._log_bridge.restore()
 
     def _serve_in_thread(self, server: WebServerProtocol) -> None:
-        """在 Textual 管理的线程 Worker 内运行独立的 Uvicorn 事件循环。"""
+        """在 Textual 管理的线程 Worker 内运行独立的 Uvicorn 事件循环"""
 
         worker = get_current_worker()
 
@@ -315,7 +315,7 @@ class WebServiceController:
         return not worker.is_running
 
     async def stop(self, *, timeout: float = 5.0, cancel_on_timeout: bool = True) -> bool:
-        # 先发停止信号，避免等待正在执行启动检查的串行操作结束后才取消服务。
+        # 先发停止信号 避免等待正在执行启动检查的串行操作结束后才取消服务
         self._stop_requested = True
         if self._server is not None:
             self._server.should_exit = True

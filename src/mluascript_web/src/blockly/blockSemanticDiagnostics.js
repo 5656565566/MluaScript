@@ -22,6 +22,49 @@ function getThreadSpawnDiagnostic(block) {
   return ''
 }
 
+function getSelectedThreadTaskDiagnostic(block, workspace) {
+  const kind = block.getFieldValue?.('TARGET_KIND') || ''
+  const functionName = block.getFieldValue?.('FUNCTION_VALUE') || ''
+  if (!kind || !functionName) return '请选择后台任务函数'
+  if (kind === 'module') return getProjectModuleCallDiagnostic(block, false)
+  if (kind !== 'local') return '后台任务函数类型无效'
+  const definition = workspace?.getTopBlocks?.(false)?.find(item =>
+    (item?.type === 'procedures_defnoreturn' || item?.type === 'procedures_defreturn')
+    && item.getFieldValue?.('NAME') === functionName)
+  if (!definition) return `当前文件函数不存在：${functionName}`
+  const params = definition.getProcedureDef?.()?.[1] || []
+  let savedParams = []
+  try { savedParams = JSON.parse(block.getFieldValue?.('PARAM_VALUES') || '[]') } catch {}
+  return JSON.stringify(savedParams) === JSON.stringify(params)
+    ? ''
+    : `函数参数已变化，请重新选择：${functionName}`
+}
+
+function getProjectModuleCallDiagnostic(block, requireReturn) {
+  const moduleKey = block.getFieldValue?.('MODULE_VALUE') || ''
+  const functionName = block.getFieldValue?.('FUNCTION_VALUE') || ''
+  if (!moduleKey || !functionName) return '请选择项目模块导出函数'
+  const module = getProjectModuleRegistry().find(item => item.key === moduleKey)
+  if (!module) return `项目模块不存在：${moduleKey}`
+  const exported = (module.exports || []).find(item => item.name === functionName)
+  if (!exported) return `模块 ${moduleKey} 不再导出函数：${functionName}`
+  let savedParams = []
+  try { savedParams = JSON.parse(block.getFieldValue?.('PARAM_VALUES') || '[]') } catch {}
+  const currentParams = Array.isArray(exported.params) ? exported.params : []
+  if (JSON.stringify(savedParams) !== JSON.stringify(currentParams)) {
+    return `函数参数已变化，请重新选择：${moduleKey}.${functionName}`
+  }
+  const savedCallStyle = block.getFieldValue?.('CALL_STYLE') || 'function'
+  const currentCallStyle = exported.callStyle === 'method' ? 'method' : 'function'
+  if (savedCallStyle !== currentCallStyle) {
+    return `函数调用方式已变化，请重新选择：${moduleKey}.${functionName}`
+  }
+  if (requireReturn && exported.hasReturn === false) {
+    return `函数没有返回值：${moduleKey}.${functionName}`
+  }
+  return ''
+}
+
 function getModuleExportDiagnostic(block, workspace) {
   const exportBlocks = workspace?.getTopBlocks?.(false)
     ?.filter(item => item?.type === 'lua_module_export_function') || []
@@ -63,32 +106,12 @@ function getTemplateDiagnostic(block, workspace) {
 export function getBlockSemanticDiagnostic(block, workspace = block?.workspace) {
   if (!block || block.isDisposed?.()) return ''
   if (block.type === 'thread_spawn_function') return getThreadSpawnDiagnostic(block)
+  if (block.type === 'thread_spawn_selected_function') return getSelectedThreadTaskDiagnostic(block, workspace)
   if (block.type === 'lua_require_module_stmt' || block.type === 'lua_require_module_expr') {
     return block.getFieldValue?.('MODULE_VALUE') ? '' : '请选择要导入的模块'
   }
   if (block.type === 'lua_project_module_call_stmt' || block.type === 'lua_project_module_call_expr') {
-    const moduleKey = block.getFieldValue?.('MODULE_VALUE') || ''
-    const functionName = block.getFieldValue?.('FUNCTION_VALUE') || ''
-    if (!moduleKey || !functionName) return '请选择项目模块导出函数'
-    const module = getProjectModuleRegistry().find(item => item.key === moduleKey)
-    if (!module) return `项目模块不存在：${moduleKey}`
-    const exported = (module.exports || []).find(item => item.name === functionName)
-    if (!exported) return `模块 ${moduleKey} 不再导出函数：${functionName}`
-    let savedParams = []
-    try { savedParams = JSON.parse(block.getFieldValue?.('PARAM_VALUES') || '[]') } catch {}
-    const currentParams = Array.isArray(exported.params) ? exported.params : []
-    if (JSON.stringify(savedParams) !== JSON.stringify(currentParams)) {
-      return `函数参数已变化，请重新选择：${moduleKey}.${functionName}`
-    }
-    const savedCallStyle = block.getFieldValue?.('CALL_STYLE') || 'function'
-    const currentCallStyle = exported.callStyle === 'method' ? 'method' : 'function'
-    if (savedCallStyle !== currentCallStyle) {
-      return `函数调用方式已变化，请重新选择：${moduleKey}.${functionName}`
-    }
-    if (block.type === 'lua_project_module_call_expr' && exported.hasReturn === false) {
-      return `函数没有返回值：${moduleKey}.${functionName}`
-    }
-    return ''
+    return getProjectModuleCallDiagnostic(block, block.type === 'lua_project_module_call_expr')
   }
   if (block.type === 'lua_dofile_stmt') {
     return block.getFieldValue?.('FILE_VALUE') ? '' : '请选择要执行的 Lua 文件'

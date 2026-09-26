@@ -66,7 +66,7 @@ def create_maa_context() -> MaaContext:
         except Exception as exc:
             logger.error(f"Failed to init Toolkit option: {exc}")
 
-        # Toolkit 配置阶段关闭临时日志，先归拢旧文件，再只在目标目录启动 MAA 日志。
+        # Toolkit 配置阶段关闭临时日志 先归拢旧文件 再只在目标目录启动 MAA 日志
         _stabilize_maa_log_file(maa_log_file, runtime_dir)
 
         try:
@@ -194,7 +194,7 @@ def _prepare_maa_option_config(runtime_dir: Path) -> None:
         except Exception:
             option_data = {}
 
-    # MAA 日志目录由 Tasker.set_log_dir 统一设置，避免 Toolkit 先在 debug 或工作目录落盘。
+    # MAA 日志目录由 Tasker.set_log_dir 统一设置 避免 Toolkit 先在 debug 或工作目录落盘
     option_data["logging"] = False
     option_data["stdout_level"] = 0
     option_path.write_text(json.dumps(option_data, ensure_ascii=False, indent=4), encoding="utf-8")
@@ -206,7 +206,7 @@ def _stabilize_maa_log_file(target_file: Path, runtime_dir: Path | None = None) 
     native_log_file = target_dir / _MAA_LOG_FILENAME
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    # 只归拢 MAA 自身的固定文件名，避免处理程序根目录中的其他日志。
+    # 只归拢 MAA 自身的固定文件名 避免处理程序根目录中的其他日志
     for source_dir in (target_runtime_dir, target_runtime_dir / "debug"):
         source_log_file = source_dir / _MAA_LOG_FILENAME
         if source_log_file != native_log_file:

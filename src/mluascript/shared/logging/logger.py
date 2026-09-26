@@ -236,7 +236,7 @@ def runtime_output_filter(record: "Record") -> bool:
 
 
 def tui_filter(record: "Record") -> bool:
-    """TUI 实时控件不消费高频 Web 访问日志；缓冲区和文件仍完整保留。"""
+    """TUI 实时控件不消费高频 Web 访问日志 缓冲区和文件仍完整保留"""
 
     return default_filter(record) and str(record["extra"].get("channel", "")) != "web.access"
 

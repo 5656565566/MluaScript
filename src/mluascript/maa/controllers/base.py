@@ -104,7 +104,7 @@ class MaaController(Protocol):
     def post_stop_app(self, intent: str) -> Waitable:
         ...
 
-    def post_shell(self, command: str) -> ResultJob[str | bytes]:
+    def post_shell(self, cmd: str, timeout: int = 20000) -> ResultJob[str | bytes]:
         ...
 
     def post_inactive(self) -> Waitable:
@@ -124,7 +124,7 @@ def wait_for_result(job: ResultJob[TResult_co]) -> ResultJob[TResult_co]:
 
 
 def controller_is_connected(controller: object) -> bool:
-    """兼容 Maa 普通 Controller 属性与 CustomController 方法两种连接接口。"""
+    """兼容 Maa 普通 Controller 属性与 CustomController 方法两种连接接口"""
     connected = getattr(controller, "connected")
     if callable(connected):
         connected = connected()

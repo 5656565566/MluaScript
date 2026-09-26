@@ -35,13 +35,13 @@ class TemplateStore:
 
     @staticmethod
     def get_template_meta_from_source(text: str, *, script_path: str = "") -> TemplateMeta | None:
-        """从内存脚本快照解析模板，供 Blockly 生成 Lua 和构建包入口复用。"""
+        """从内存脚本快照解析模板 供 Blockly 生成 Lua 和构建包入口复用"""
 
         source = parse_template_meta(str(text or ""), script_path=script_path)
         return source.meta if source else None
 
     def get_readme(self, script_path: str) -> dict[str, str] | None:
-        """读取模板脚本所属项目根目录的 README，不接受项目外路径。"""
+        """读取模板脚本所属项目根目录的 README 不接受项目外路径"""
 
         script_file = self.workspace_manager._resolve_workspace_path(script_path)
         project = self.workspace_manager.resolve_project_by_root(script_file.parent)
@@ -103,7 +103,7 @@ class TemplateStore:
         return LuaWorkflowEmitter().emit(runtime_flow)
 
     def build_task_runtime_script(self, meta: TemplateMeta, saved: TemplateSavedConfig, *, task_key: str) -> str:
-        """把单任务模板转换为只有一个步骤的运行流，复用统一参数归一化和执行器。"""
+        """把单任务模板转换为只有一个步骤的运行流 复用统一参数归一化和执行器"""
 
         task = next((item for item in meta.tasks if item.k == task_key), None)
         if task is None:

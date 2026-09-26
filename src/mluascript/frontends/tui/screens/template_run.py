@@ -73,7 +73,7 @@ def _build_task_field_rows(
 
     for root_index in roots:
         visit(root_index, 0, True)
-    # 无效循环关系不应让 TUI 崩溃，按声明顺序将其作为独立根节点展示。
+    # 无效循环关系不应让 TUI 崩溃 按声明顺序将其作为独立根节点展示
     for index in range(len(nodes)):
         if index not in visited:
             visit(index, 0, True)
@@ -612,7 +612,7 @@ class TemplateRunScreen(Container):
         if self._rendered_step_list_key == render_key:
             return
 
-        # 列表发生实际变化时才重建，避免一秒一次反复挂载 Textual 控件。
+        # 列表发生实际变化时才重建 避免一秒一次反复挂载 Textual 控件
         for child in list(container.children):
             child.remove()
         self._step_buttons.clear()

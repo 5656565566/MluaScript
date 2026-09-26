@@ -1,4 +1,4 @@
-"""`mluascript.package/v1` 项目包校验和确定性打包。"""
+"""`mluascript.package/v1` 项目包校验和确定性打包"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from .project_models import ProjectDiagnostic, ProjectManifest
 
 
 class ProjectManifestError(ValueError):
-    """manifest 无法解析或不符合 v1 规范。"""
+    """manifest 无法解析或不符合 v1 规范"""
 
     def __init__(self, message: str, *, path: str | None = None, code: str = "manifest.invalid") -> None:
         super().__init__(message)
@@ -24,7 +24,7 @@ class ProjectManifestError(ValueError):
 
 
 class ProjectPackageError(ValueError):
-    """项目无法构建为有效 `.mlspkg`。"""
+    """项目无法构建为有效 `.mlspkg`"""
 
     def __init__(self, diagnostics: list[ProjectDiagnostic]) -> None:
         self.diagnostics = diagnostics
@@ -33,7 +33,7 @@ class ProjectPackageError(ValueError):
 
 
 def normalize_package_path(raw_path: str) -> str:
-    """校验并规范化包内相对路径，拒绝绝对路径和路径穿越。"""
+    """校验并规范化包内相对路径 拒绝绝对路径和路径穿越"""
 
     text = str(raw_path or "").strip().replace("\\", "/")
     if not text or "\x00" in text:
@@ -69,7 +69,7 @@ def _path_is_safe(project_root: Path, relative_path: str, *, allow_missing: bool
 
 
 def load_project_manifest(project_root: Path) -> ProjectManifest:
-    """读取标准 manifest，并将 YAML/Pydantic 错误转换为领域异常。"""
+    """读取标准 manifest 并将 YAML/Pydantic 错误转换为领域异常"""
 
     manifest_path = project_root / "mluascript.yaml"
     if not manifest_path.is_file():
@@ -134,7 +134,7 @@ def _check_reference(
 
 
 def validate_project(project_root: Path) -> tuple[ProjectManifest | None, list[ProjectDiagnostic], list[tuple[str, Path]]]:
-    """返回 manifest、结构化诊断和可打包文件列表。"""
+    """返回 manifest、结构化诊断和可打包文件列表"""
 
     diagnostics: list[ProjectDiagnostic] = []
     try:
@@ -199,7 +199,7 @@ def validate_project(project_root: Path) -> tuple[ProjectManifest | None, list[P
         diagnostics.append(ProjectDiagnostic(code="file.invalid", message=str(exc)))
         files = []
 
-    # 同一项目中大小写不同的文件在 Windows/zip 下无法稳定区分。
+    # 同一项目中大小写不同的文件在 Windows/zip 下无法稳定区分
     seen_casefold: dict[str, str] = {}
     for relative, _ in files:
         key = relative.casefold()
@@ -208,8 +208,8 @@ def validate_project(project_root: Path) -> tuple[ProjectManifest | None, list[P
             diagnostics.append(ProjectDiagnostic(code="file.collision", message=f"文件名大小写冲突: {previous} / {relative}", path=relative))
         seen_casefold[key] = relative
 
-    # Blockly 可打包项目采用一对一镜像：blockly/a.xml -> scripts/a.lua。
-    # 这里同时检查精确路径和大小写折叠路径，保证 Windows 与归档运行结果一致。
+    # Blockly 可打包项目采用一对一镜像：blockly/a.xml -> scripts/a.lua
+    # 这里同时检查精确路径和大小写折叠路径 保证 Windows 与归档运行结果一致
     from .module_paths import blockly_source_to_module_key, blockly_source_to_script_path, script_path_to_module_key
 
     blockly_sources = [relative for relative, _ in files if relative.casefold().endswith(".xml") and relative.casefold().startswith("blockly/")]
@@ -327,7 +327,7 @@ def _zip_entry(name: str) -> zipfile.ZipInfo:
 
 
 def _hash_file(path: Path) -> str:
-    """按块计算文件摘要，避免模型或资源文件整体进入内存。"""
+    """按块计算文件摘要 避免模型或资源文件整体进入内存"""
 
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -341,7 +341,7 @@ def _hash_bytes(content: bytes) -> str:
 
 
 def _write_file_entry(archive: zipfile.ZipFile, relative: str, source: Path) -> str:
-    """把文件流式写入 ZIP，并返回实际写入内容的摘要。"""
+    """把文件流式写入 ZIP 并返回实际写入内容的摘要"""
 
     digest = hashlib.sha256()
     with source.open("rb") as input_stream, archive.open(_zip_entry(relative), "w", force_zip64=True) as output_stream:
@@ -364,7 +364,7 @@ def build_project_package(
     generated_lua: str | None = None,
     generated_lua_by_source: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
-    """校验项目并生成时间戳稳定的 `.mlspkg` 文件。"""
+    """校验项目并生成时间戳稳定的 `.mlspkg` 文件"""
 
     project_root = project_root.resolve()
     artifact_root = artifact_root.resolve()
@@ -389,7 +389,7 @@ def build_project_package(
                 ) from exc
             source_map[normalized_source] = str(raw_lua or "")
 
-        # 兼容旧客户端的单入口请求；多 XML 项目必须使用完整映射。
+        # 兼容旧客户端的单入口请求 多 XML 项目必须使用完整映射
         if not source_map and len(blockly_sources) == 1 and str(generated_lua or "").strip():
             source_map[blockly_sources[0]] = str(generated_lua)
 

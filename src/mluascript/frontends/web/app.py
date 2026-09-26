@@ -213,7 +213,7 @@ class ProjectDebugPayload(BaseModel):
 
 
 class ProjectTemplatePreviewPayload(BaseModel):
-    """模板预览使用前端当前源码快照，支持 Blockly 尚未落盘的生成 Lua。"""
+    """模板预览使用前端当前源码快照 支持 Blockly 尚未落盘的生成 Lua"""
 
     entryPath: str = ""
     luaCode: str = ""
@@ -780,7 +780,7 @@ def system_script_readme(artifact_id: str, request: Request) -> dict[str, Any]:
 
 @system_router.get("/scripts/{artifact_id}/template")
 def system_script_template(artifact_id: str, request: Request) -> dict[str, Any]:
-    """读取构建包当前入口的唯一模板配置，不修改归档内容。"""
+    """读取构建包当前入口的唯一模板配置 不修改归档内容"""
 
     service = _artifact_service(request)
     try:
@@ -1087,7 +1087,7 @@ def _project_error(exc: ProjectServiceError) -> HTTPException:
 
 
 def _project_template_store(service: ProjectService, project_key: str, project_root: str) -> TemplateStore:
-    """为项目模板使用项目内源码和 Web 私有配置目录。"""
+    """为项目模板使用项目内源码和 Web 私有配置目录"""
 
     return TemplateStore(
         WorkspaceManager(Path(project_root)),
@@ -1162,7 +1162,7 @@ def list_project_modules(project_key: str, request: Request) -> dict[str, Any]:
 
 @projects_router.get("/{project_key}/template")
 def get_project_template(project_key: str, request: Request, path: str = Query(...)) -> dict[str, Any]:
-    """按受控项目路径读取模板元数据，避免前端拼接宿主机绝对路径。"""
+    """按受控项目路径读取模板元数据 避免前端拼接宿主机绝对路径"""
 
     try:
         target = _project_service(request).prepare_debug_target(project_key, entry_path=path)
@@ -1200,7 +1200,7 @@ def preview_project_template(
     payload: ProjectTemplatePreviewPayload,
     request: Request,
 ) -> dict[str, Any]:
-    """解析当前项目入口的内存 Lua 快照，不要求生成文件真实存在。"""
+    """解析当前项目入口的内存 Lua 快照 不要求生成文件真实存在"""
 
     service = _project_service(request)
     try:
@@ -1310,7 +1310,7 @@ async def upload_project_file(
 ) -> dict[str, Any]:
     service = _project_service(request)
     try:
-        # 原始请求体按块写入临时文件，避免模型和资源文件经过 Base64 或整块驻留内存。
+        # 原始请求体按块写入临时文件 避免模型和资源文件经过 Base64 或整块驻留内存
         with service.open_binary_writer(project_key, path, overwrite=overwrite) as (stream, normalized):
             async for chunk in request.stream():
                 if chunk:
@@ -1369,7 +1369,7 @@ def build_project(project_key: str, payload: ProjectBuildPayload, request: Reque
 
 @projects_router.post("/{project_key}/debug")
 def debug_project(project_key: str, payload: ProjectDebugPayload, request: Request) -> dict[str, Any]:
-    """直接执行项目源码快照；不创建包，也不把 Blockly 生成文件写回项目。"""
+    """直接执行项目源码快照 不创建包 也不把 Blockly 生成文件写回项目"""
 
     facade = get_control_facade()
     overview = facade.get_device_overview()
@@ -1565,11 +1565,11 @@ def download_project_build(project_key: str, build_id: str, request: Request) ->
 
 
 def _editor_script_run_path(raw_path: str | None) -> str:
-    """把编辑器内的相对路径转换为工作区脚本路径。"""
+    """把编辑器内的相对路径转换为工作区脚本路径"""
     if raw_path and str(raw_path).strip():
         target, _ = _normalize_editor_file_path(str(raw_path), kind="lua")
     else:
-        # 仅作为内存代码的运行目录定位，不会在磁盘创建该文件。
+        # 仅作为内存代码的运行目录定位 不会在磁盘创建该文件
         target = (_editor_lua_root() / "untitled.lua").resolve()
     return target.relative_to(Path.cwd().resolve()).as_posix()
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any
+from typing import Any, cast
 
 from .template_models import (
     TemplateCondition,
@@ -302,16 +302,17 @@ def is_condition_active(condition: TemplateCondition | dict[str, Any] | None, va
     if cond.in_:
         return current in cond.in_
     try:
+        numeric_current = cast(int | float, current)
         if cond.gt is not None:
-            return current > cond.gt
+            return numeric_current > cond.gt
         if cond.gte is not None:
-            return current >= cond.gte
+            return numeric_current >= cond.gte
         if cond.lt is not None:
-            return current < cond.lt
+            return numeric_current < cond.lt
         if cond.lte is not None:
-            return current <= cond.lte
+            return numeric_current <= cond.lte
     except TypeError:
-        # 类型不匹配的比较条件不应中断模板规范化或运行。
+        # 类型不匹配的比较条件不应中断模板规范化或运行
         return False
     if cond.ne is not None:
         return current != cond.ne

@@ -28,7 +28,7 @@ def _paginate_tasks(
     page_index: int,
     page_size: int = TASK_PAGE_SIZE,
 ) -> tuple[list[TaskListItemView], int, int]:
-    """按新任务优先分页，并将越界页码收敛到有效范围。"""
+    """按新任务优先分页 并将越界页码收敛到有效范围"""
 
     ordered = list(reversed(tasks))
     return paginate_items(ordered, page_index, page_size)
@@ -256,14 +256,14 @@ class RunScreen(ScrollableContainer):
             with TabPane("包说明", id="run-tab-readme"):
                 with ScrollableContainer(classes="tab-scroll-area"):
                     yield Static("当前未选择构建包", id="artifact-readme-summary", classes="panel-desc")
-                    yield Markdown("请选择带 README 的构建包。", id="artifact-readme-view")
+                    yield Markdown("请选择带 README 的构建包", id="artifact-readme-view")
 
     def on_mount(self) -> None:
         self._refresh_timer = self.set_interval(0.5, self._refresh_all)
         self.set_active(getattr(self.app, "active_tab", None) == self.id)
 
     def set_active(self, active: bool) -> None:
-        """仅在任务页可见时轮询和渲染，避免隐藏页面持续占用事件循环。"""
+        """仅在任务页可见时轮询和渲染 避免隐藏页面持续占用事件循环"""
 
         if self._refresh_timer is None:
             return
@@ -610,7 +610,7 @@ class RunScreen(ScrollableContainer):
         if button_name in self._readme_button_name_map:
             self._activate_tab("run-tab-readme")
             self.query_one("#artifact-readme-summary", Static).update("正在读取包说明...")
-            self.query_one("#artifact-readme-view", Markdown).update("正在读取包说明，请稍候。")
+            self.query_one("#artifact-readme-view", Markdown).update("正在读取包说明，请稍候...")
             self._open_artifact_readme(self._readme_button_name_map[button_name])
             return
         if button_name == "task-page-previous":

@@ -9,6 +9,7 @@ import { applyBlocklyZhCnLocale } from './locale'
 import { getBlocklyUiPalette } from '../app/theme'
 import { collectBlocklyDiagnostics, workspaceToLua } from './generator'
 import { migrateLegacyProjectModuleCallXml, restoreProjectModuleCallState } from './projectModuleCall.js'
+import { restoreThreadTaskSelection } from './threadTaskSelection.js'
 import { restoreSerializedPickerLabel } from './pickerBlockState.js'
 import {
   deleteWorkspaceVariableById,
@@ -362,6 +363,8 @@ export function createBlocklyWorkspace(element, initialXml = '') {
   for (const block of workspace.getAllBlocks(false)) {
     if (block.type === 'lua_project_module_call_stmt' || block.type === 'lua_project_module_call_expr') {
       restoreProjectModuleCallState(block)
+    } else if (block.type === 'thread_spawn_selected_function') {
+      restoreThreadTaskSelection(block)
     } else {
       restoreSerializedPickerLabel(block)
     }

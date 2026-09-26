@@ -66,7 +66,7 @@ class TuiApp(App[None]):
     def on_mount(self) -> None:
         self.active_tab = "home"
         configure_logging(stdout=False)
-        # Web 服务由 Textual Worker 托管，等待应用挂载完成后再按配置启动。
+        # Web 服务由 Textual Worker 托管 等待应用挂载完成后再按配置启动
         self.call_later(self._schedule_configured_web_server_start)
 
     def _schedule_configured_web_server_start(self) -> None:
@@ -82,7 +82,7 @@ class TuiApp(App[None]):
             url = await self.web_service.start(host, port)
             logger.info(f"已按配置自动启动 MluaScript Web: {url}")
         except Exception as exc:
-            # Web 启动失败不应阻止已显示的 TUI，用户仍可在 Web 页面修正地址后重试。
+            # Web 启动失败不应阻止已显示的 TUI 用户仍可在 Web 页面修正地址后重试
             logger.error(f"按配置启动 MluaScript Web 失败: {exc}")
 
     def compose(self) -> ComposeResult:

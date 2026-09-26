@@ -326,8 +326,12 @@ def test_run_build_artifact_delegates_with_artifact_summary(monkeypatch, tmp_pat
     assert response.json()["data"]["taskId"] == "artifact-run-1"
     assert facade.artifact_run_calls[0]["code"] == "return 42"
     assert facade.artifact_run_calls[0]["target"] == "LOCAL"
-    assert facade.artifact_run_calls[0]["title"].endswith(".mluascript_web/builds/demo/1111111111111111/demo.lua")
-    assert facade.artifact_run_calls[0]["summary"]["artifact_id"] == artifact_id
+    title = facade.artifact_run_calls[0]["title"]
+    summary = facade.artifact_run_calls[0]["summary"]
+    assert isinstance(title, str)
+    assert isinstance(summary, dict)
+    assert title.endswith(".mluascript_web/builds/demo/1111111111111111/demo.lua")
+    assert summary["artifact_id"] == artifact_id
 
 
 def test_artifact_readme_route_returns_verified_markdown(monkeypatch, tmp_path: Path) -> None:
@@ -366,7 +370,9 @@ def test_artifact_template_can_be_configured_and_run(monkeypatch, tmp_path: Path
         },
     )
     assert started.status_code == 200
-    assert "value = 7" in facade.artifact_run_calls[0]["code"]
+    code = facade.artifact_run_calls[0]["code"]
+    assert isinstance(code, str)
+    assert "value = 7" in code
 
 
 def test_task_detail_views_pass_task_kind_to_stop_action() -> None:

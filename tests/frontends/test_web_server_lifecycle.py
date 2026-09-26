@@ -6,6 +6,7 @@ import io
 import logging
 import socket
 import urllib.request
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from textual.app import App
@@ -17,6 +18,9 @@ from mluascript.frontends.tui.web_service import WebServiceController
 from mluascript.shared.config.models import GlobalConfig
 from mluascript.shared.logging import clear_log_buffers, configure_logging, get_logs_by_channel, logger
 from mluascript.shared.logging.logger import tui_filter
+
+if TYPE_CHECKING:
+    from loguru import Record
 
 
 class _FakeServer:
@@ -43,12 +47,14 @@ class _FakeServer:
         self.should_exit = True
 
 
-def test_tui_log_filter_excludes_only_web_access_channel() -> None:
-    info_level = logger.level("INFO")
+def _log_record(channel: str) -> "Record":
+    return cast("Record", {"level": logger.level("INFO"), "extra": {"channel": channel}})
 
-    assert tui_filter({"level": info_level, "extra": {"channel": "web.access"}}) is False
-    assert tui_filter({"level": info_level, "extra": {"channel": "web.server"}}) is True
-    assert tui_filter({"level": info_level, "extra": {"channel": "runtime.log"}}) is True
+
+def test_tui_log_filter_excludes_only_web_access_channel() -> None:
+    assert tui_filter(_log_record("web.access")) is False
+    assert tui_filter(_log_record("web.server")) is True
+    assert tui_filter(_log_record("runtime.log")) is True
 
 
 def test_web_logs_follow_global_debug_level(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -169,7 +175,7 @@ def test_textual_worker_cancellation_runs_web_shutdown_fallback() -> None:
             with pytest.raises(WorkerCancelled):
                 await worker.wait()
 
-            # 线程 Worker 的取消标记由监督协程接收，再请求 Uvicorn 正常关闭。
+            # 线程 Worker 的取消标记由监督协程接收 再请求 Uvicorn 正常关闭
             for _ in range(100):
                 if server.shutdown_called and controller.status == "stopped":
                     break

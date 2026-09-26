@@ -1,4 +1,4 @@
-"""项目目录的创建、发现、文件访问和打包入口。"""
+"""项目目录的创建、发现、文件访问和打包入口"""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import yaml
 
 from .package_builder import (
     ProjectManifestError,
+    ProjectPackageError,
     build_project_package,
     load_project_manifest,
     normalize_package_path,
@@ -63,18 +64,18 @@ _PROJECT_TEMPLATES = _PACKAGE_PROJECT_TYPES | _SINGLE_PROJECT_TYPES
 
 
 class ProjectServiceError(ValueError):
-    """项目服务的可展示错误。"""
+    """项目服务的可展示错误"""
 
 
 class ProjectNotFoundError(ProjectServiceError):
-    """项目 key 不存在或不在受控项目根目录下。"""
+    """项目 key 不存在或不在受控项目根目录下"""
 
 
 class ProjectService:
-    """管理允许 Web 前端访问的项目根目录。
+    """管理允许 Web 前端访问的项目根目录
 
-    前端只持有不可推导真实路径的 project key。所有路径解析都重新落在
-    配置的根目录内，避免把任意宿主机路径暴露为 API 参数。
+    前端只持有不可推导真实路径的 project key 所有路径解析都重新落在
+    配置的根目录内 避免把任意宿主机路径暴露为 API 参数
     """
 
     def __init__(self, project_roots: Sequence[str | Path], artifact_root: str | Path | None = None) -> None:
@@ -128,7 +129,7 @@ class ProjectService:
                     yield resolved
 
     def _single_project_source(self, project_root: Path) -> Path | None:
-        """识别“同名目录/同名源文件”的单文件项目。"""
+        """识别“同名目录/同名源文件”的单文件项目"""
 
         if (project_root / "mluascript.yaml").exists():
             return None
@@ -218,7 +219,7 @@ class ProjectService:
         )
 
     def list_projects(self) -> list[ProjectSummary]:
-        """发现配置根目录下的项目。"""
+        """发现配置根目录下的项目"""
 
         projects: dict[str, ProjectSummary] = {}
         for project_root in self._iter_project_roots():
@@ -255,7 +256,7 @@ class ProjectService:
         directory: str = "",
         template: str = "lua-package",
     ) -> ProjectSummary:
-        """以临时目录写完模板后原子移动，避免出现半初始化项目。"""
+        """以临时目录写完模板后原子移动 避免出现半初始化项目"""
 
         project_name = str(name or "").strip()
         package_identifier = str(package_id or "").strip()
@@ -327,7 +328,7 @@ class ProjectService:
         author: str = "",
         description: str = "",
     ) -> ProjectSummary:
-        """原子更新 manifest 中的项目身份信息，不移动项目目录。"""
+        """原子更新 manifest 中的项目身份信息 不移动项目目录"""
 
         project_name = str(name or "").strip()
         package_identifier = str(package_id or "").strip()
@@ -356,7 +357,7 @@ class ProjectService:
         return self._summary(project_root)
 
     def _write_manifest(self, project_root: Path, manifest: ProjectManifest | dict[str, Any]) -> None:
-        """校验并原子写入项目清单，避免各项目信息操作重复持久化细节。"""
+        """校验并原子写入项目清单 避免各项目信息操作重复持久化细节"""
 
         normalized = ProjectManifest.model_validate(manifest).model_dump(by_alias=True, exclude_none=True)
         target = project_root / "mluascript.yaml"
@@ -370,7 +371,7 @@ class ProjectService:
             raise
 
     def _remap_manifest_file(self, manifest: ProjectManifest, source_path: str, destination_path: str) -> bool:
-        """同步清单中对单个文件的引用；目录结构仍由清单约束保护。"""
+        """同步清单中对单个文件的引用 目录结构仍由清单约束保护"""
 
         changed = False
         for entrypoint in manifest.entrypoints.values():
@@ -451,7 +452,7 @@ class ProjectService:
         if template == "lua-package":
             directories.extend(["scripts/tasks", "scripts/lib"])
         if template == "blockly-package":
-            # Blockly 源目录和生成后的虚拟 scripts 目录保持相同的模块层级。
+            # Blockly 源目录和生成后的虚拟 scripts 目录保持相同的模块层级
             directories.extend(["blockly/lib", "scripts/lib"])
         if template == "maa":
             directories.extend(["tasks", "resources/maa", "templates"])
@@ -468,14 +469,14 @@ class ProjectService:
                 '<xml xmlns="https://developers.google.com/blockly/xml"></xml>\n'.encode("utf-8")
             )
         if template == "maa":
-            # Maa 项目用源码描述文件声明调试入口；默认 main 便于新项目直接修改和运行。
+            # Maa 项目用源码描述文件声明调试入口 默认 main 便于新项目直接修改和运行
             (target / "tasks" / "main.json").write_bytes(
                 json.dumps({"entry": "main", "override": {}}, ensure_ascii=False, indent=2).encode("utf-8") + b"\n"
             )
-        (target / "README.md").write_bytes(f"# {manifest['package']['name']}\n\nMluaScript v1 项目。\n".encode("utf-8"))
+        (target / "README.md").write_bytes(f"# {manifest['package']['name']}\n\nMluaScript v1 项目\n".encode("utf-8"))
 
     def _manifest_owned_paths(self, project_root: Path) -> set[str]:
-        """返回不能由通用文件树改名的 manifest 和声明路径。"""
+        """返回不能由通用文件树改名的 manifest 和声明路径"""
 
         try:
             manifest = load_project_manifest(project_root)
@@ -552,7 +553,7 @@ class ProjectService:
         )
 
     def create_directory(self, project_key: str, relative_path: str) -> ProjectTreeItem:
-        """在项目内创建单个目录，父目录必须已经存在。"""
+        """在项目内创建单个目录 父目录必须已经存在"""
 
         project_root = self._require_package_project(project_key)
         target, normalized = self._resolve_project_path(project_key, relative_path, allow_missing=True)
@@ -565,7 +566,7 @@ class ProjectService:
         return self.get_tree_item(project_key, normalized)
 
     def create_file(self, project_key: str, relative_path: str, content: str = "") -> ProjectFileContent:
-        """创建新的 UTF-8 文本文件，不覆盖项目中的现有内容。"""
+        """创建新的 UTF-8 文本文件 不覆盖项目中的现有内容"""
 
         project_root = self._require_package_project(project_key)
         target, normalized = self._resolve_project_path(project_key, relative_path, allow_missing=True)
@@ -582,7 +583,7 @@ class ProjectService:
         return self.read_file(project_key, normalized)
 
     def delete_file(self, project_key: str, relative_path: str) -> str:
-        """删除项目内的自定义文件；入口和 manifest 管理文件必须先调整项目结构。"""
+        """删除项目内的自定义文件 入口和 manifest 管理文件必须先调整项目结构"""
 
         project_root = self._require_package_project(project_key)
         target, normalized = self._resolve_project_path(project_key, relative_path)
@@ -597,7 +598,7 @@ class ProjectService:
         return normalized
 
     def rename_path(self, project_key: str, relative_path: str, new_name: str) -> ProjectTreeItem:
-        """重命名项目文件或自定义目录，并同步受 manifest 管理的文件引用。"""
+        """重命名项目文件或自定义目录 并同步受 manifest 管理的文件引用"""
 
         name = str(new_name or "").strip()
         invalid_character = any(character in '<>:"/\\|?*' or ord(character) < 32 for character in name)
@@ -647,7 +648,7 @@ class ProjectService:
         return self.move_path(project_key, normalized, destination)
 
     def move_path(self, project_key: str, source_path: str, destination_path: str) -> ProjectTreeItem:
-        """在项目内移动自定义文件或目录，不覆盖目标内容。"""
+        """在项目内移动自定义文件或目录 不覆盖目标内容"""
 
         self._require_package_project(project_key)
         source, normalized = self._resolve_project_path(project_key, source_path)
@@ -699,7 +700,7 @@ class ProjectService:
         *,
         overwrite: bool = False,
     ) -> Iterator[tuple[BinaryIO, str]]:
-        """以临时文件接收二进制内容，完整写入后再原子替换目标。"""
+        """以临时文件接收二进制内容 完整写入后再原子替换目标"""
 
         project_root = self._require_package_project(project_key)
         target, normalized = self._resolve_project_path(project_key, relative_path, allow_missing=True)
@@ -720,7 +721,7 @@ class ProjectService:
             raise
 
     def get_file_path(self, project_key: str, relative_path: str) -> tuple[Path, str]:
-        """返回受控项目中的文件路径，供流式下载使用。"""
+        """返回受控项目中的文件路径 供流式下载使用"""
 
         target, normalized = self._resolve_project_path(project_key, relative_path)
         if not target.is_file():
@@ -789,7 +790,7 @@ class ProjectService:
         return project_root
 
     def _validate_package_path_policy(self, project_root: Path, relative_path: str, *, is_directory: bool = False) -> None:
-        """在写入前执行项目类型和 Blockly 生成路径约束。"""
+        """在写入前执行项目类型和 Blockly 生成路径约束"""
 
         normalized = normalize_package_path(relative_path)
         path = PurePosixPath(normalized)
@@ -821,7 +822,7 @@ class ProjectService:
                 raise ProjectServiceError(f"Lua 文件与 Blockly 生成目标冲突: {source_relative.as_posix()} -> {normalized}")
 
     def _validate_moved_tree_policy(self, project_root: Path, source: Path, destination_path: str) -> None:
-        """移动目录时按目标相对路径校验其中每个文件。"""
+        """移动目录时按目标相对路径校验其中每个文件"""
 
         self._validate_package_path_policy(project_root, destination_path, is_directory=source.is_dir())
         if not source.is_dir():
@@ -853,7 +854,7 @@ class ProjectService:
         *,
         is_directory: bool,
     ) -> None:
-        """移动模块后同步 Blockly XML 内持久化的模块键和虚拟文件路径。"""
+        """移动模块后同步 Blockly XML 内持久化的模块键和虚拟文件路径"""
 
         if self._project_type(project_root) != "blockly-package":
             return
@@ -910,7 +911,7 @@ class ProjectService:
         return diagnostics
 
     def get_module_index(self, project_key: str) -> list[dict[str, object]]:
-        """返回当前项目可静态识别的模块与导出函数。"""
+        """返回当前项目可静态识别的模块与导出函数"""
 
         project_root = self._resolve_project(project_key)
         project_type = self._project_type(project_root)
@@ -925,7 +926,7 @@ class ProjectService:
         entry_path: str = "",
         source_overrides: Mapping[str, str] | None = None,
     ) -> ProjectDebugTarget:
-        """校验调试入口，并把前端源码快照限制在当前项目的 Lua 模块空间内。"""
+        """校验调试入口 并把前端源码快照限制在当前项目的 Lua 模块空间内"""
 
         project_root = self._resolve_project(project_key)
         project_type = self._project_type(project_root)
@@ -998,7 +999,7 @@ class ProjectService:
         )
 
     def get_template_config_root(self, project_key: str) -> Path:
-        """返回项目模板调试配置的 Web 私有目录，不把配置写进可打包项目。"""
+        """返回项目模板调试配置的 Web 私有目录 不把配置写进可打包项目"""
 
         self._resolve_project(project_key)
         return (self.artifact_root.parent / "settings" / "templates" / project_key).resolve()
@@ -1009,7 +1010,7 @@ class ProjectService:
         *,
         descriptor_path: str = "",
     ) -> ProjectPipelineDebugTarget:
-        """读取 Maa 项目声明的调试描述文件，不允许把任意宿主路径交给 Pipeline。"""
+        """读取 Maa 项目声明的调试描述文件 不允许把任意宿主路径交给 Pipeline"""
 
         project_root = self._resolve_project(project_key)
         if self._project_type(project_root) != "maa":
@@ -1096,16 +1097,19 @@ class ProjectService:
                 generated_lua=generated_lua,
                 generated_lua_by_source=generated_modules,
             )
+        except ProjectPackageError as exc:
+            raise ProjectServiceError({
+                "message": str(exc),
+                "diagnostics": [item.model_dump() for item in exc.diagnostics],
+            }) from exc
         except Exception as exc:
-            if hasattr(exc, "diagnostics"):
-                raise ProjectServiceError({"message": str(exc), "diagnostics": [item.model_dump() for item in exc.diagnostics]}) from exc
             raise ProjectServiceError(str(exc)) from exc
         result = ProjectBuildResult.model_validate(data)
         self._build_artifacts[(project_key, result.build_id)] = Path(result.artifact_path)
         return result
 
     def get_build_artifact(self, project_key: str, build_id: str) -> tuple[Path, str]:
-        """按 project key 和 build id 定位宿主机管理的构建产物。"""
+        """按 project key 和 build id 定位宿主机管理的构建产物"""
 
         self._resolve_project(project_key)
         normalized_id = str(build_id or "").strip()

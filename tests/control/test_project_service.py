@@ -528,12 +528,17 @@ def test_blockly_validator_reports_stale_project_module_function(tmp_path: Path)
         <field name="MODULE_VALUE">lib/math</field>
         <field name="FUNCTION_VALUE">add</field>
       </block>
+      <block type="thread_spawn_selected_function">
+        <field name="TARGET_KIND">module</field>
+        <field name="MODULE_VALUE">lib/math</field>
+        <field name="FUNCTION_VALUE">add</field>
+      </block>
     </xml>'''
     service.write_file(project.key, "blockly/main.xml", source)
 
     diagnostics = service.validate(project.key)
 
-    assert any(item.code == "blockly.module_reference" and "lib/math" in item.message for item in diagnostics)
+    assert sum(item.code == "blockly.module_reference" and "lib/math" in item.message for item in diagnostics) == 2
 
 
 def test_moving_project_module_updates_saved_blockly_references(tmp_path: Path) -> None:

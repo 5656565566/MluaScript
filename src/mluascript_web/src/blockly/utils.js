@@ -2,6 +2,7 @@ import * as Blockly from 'blockly'
 import { actions, getters, state } from '../store'
 import { pickerActions } from '../store/pickerState'
 import { replaceCallableBlock } from './blockReplacement.js'
+import { getSelectableProjectModules } from '../features/projects/projectModuleRegistry.js'
 
 function asNonEmptyString(value) {
   const normalized = String(value || '').trim()
@@ -183,12 +184,13 @@ export function getWorkspaceFunctionPickerItems() {
 }
 
 export function getProjectModulePickerItems() {
-  return normalizePickerItems((state.projectModules?.value || []).map(module => ({
-    label: module.key,
-    value: module.key,
-    description: `${module.source} · ${(module.exports || []).length} 个静态导出`,
-    group: module.kind === 'blockly' ? 'Blockly' : 'Lua',
-  })))
+  return normalizePickerItems(getSelectableProjectModules(state.projectSelectedPath?.value)
+    .map(module => ({
+      label: module.key,
+      value: module.key,
+      description: `${module.source} · ${(module.exports || []).length} 个静态导出`,
+      group: module.kind === 'blockly' ? 'Blockly' : 'Lua',
+    })))
 }
 
 export function getProjectModuleExportItems(moduleKey) {
