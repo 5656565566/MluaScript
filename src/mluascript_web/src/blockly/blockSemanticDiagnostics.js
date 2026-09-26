@@ -11,17 +11,6 @@ function getDefinedProcedureNames(workspace) {
   )
 }
 
-function getThreadSpawnDiagnostic(block) {
-  const target = block.getInputTargetBlock?.('FUNC_CALL')
-  if (!target) return '请嵌入一个函数调用块'
-  const supported = target.type === 'procedures_callnoreturn'
-    || target.type === 'procedures_callreturn'
-    || target.type === 'procedure_call_picker'
-  if (!supported) return '这里只能嵌入函数调用块'
-  if (target.getNextBlock?.()) return '后台任务只能包含一个函数调用块'
-  return ''
-}
-
 function getSelectedThreadTaskDiagnostic(block, workspace) {
   const kind = block.getFieldValue?.('TARGET_KIND') || ''
   const functionName = block.getFieldValue?.('FUNCTION_VALUE') || ''
@@ -105,7 +94,6 @@ function getTemplateDiagnostic(block, workspace) {
 
 export function getBlockSemanticDiagnostic(block, workspace = block?.workspace) {
   if (!block || block.isDisposed?.()) return ''
-  if (block.type === 'thread_spawn_function') return getThreadSpawnDiagnostic(block)
   if (block.type === 'thread_spawn_selected_function') return getSelectedThreadTaskDiagnostic(block, workspace)
   if (block.type === 'lua_require_module_stmt' || block.type === 'lua_require_module_expr') {
     return block.getFieldValue?.('MODULE_VALUE') ? '' : '请选择要导入的模块'

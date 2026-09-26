@@ -1,6 +1,6 @@
 import * as Blockly from 'blockly'
 import { luaOrder, PICKER_ICON_TYPE } from '../constants'
-import { attachBlockSemanticWarning, getBlockSemanticDiagnostic } from '../blockSemanticDiagnostics'
+import { attachBlockSemanticWarning } from '../blockSemanticDiagnostics'
 import { MaaPickerIcon } from '../fields'
 import {
   createThreadTaskPickerConfig,
@@ -55,46 +55,6 @@ export const luaThreadBlocks = [
     generator(block, generator) {
       const entry = generator.valueToCode(block, 'ENTRY', luaOrder) || "''"
       return `maa.run_pipeline(${entry})\n`
-    },
-  },
-  {
-    type: 'thread_spawn_function',
-    category: null,
-    colour: '#10b981',
-    definition: {
-      message0: '作为任务运行 %1',
-      args0: [{ type: 'input_statement', name: 'FUNC_CALL' }],
-      output: 'ThreadTask',
-      tooltip: '将普通的【调用函数】块拖入此处，使其在后台作为任务运行并提取参数。',
-      helpUrl: '',
-    },
-    init(block) {
-      attachBlockSemanticWarning(block)
-    },
-    generator(block, generator) {
-      const diagnostic = getBlockSemanticDiagnostic(block)
-      if (diagnostic) throw new Error(diagnostic)
-      const targetBlock = block.getInputTargetBlock('FUNC_CALL')
-
-      let rawFuncName = ''
-      if (targetBlock.type === 'procedure_call_picker') {
-        rawFuncName = targetBlock.getFieldValue('PROC_NAME') || ''
-      } else {
-        rawFuncName = targetBlock.getFieldValue('NAME') || ''
-      }
-      
-      const funcName = generator.nameDB_ ? generator.nameDB_.getName(rawFuncName, Blockly.PROCEDURE_CATEGORY_NAME || 'PROCEDURE') : rawFuncName
-      
-      const args = []
-      let i = 0
-      while (targetBlock.getInput('ARG' + i)) {
-        const argCode = generator.valueToCode(targetBlock, 'ARG' + i, luaOrder) || 'nil'
-        args.push(argCode)
-        i++
-      }
-
-      const argsString = args.length > 0 ? `, nil, ${args.join(', ')}` : ''
-      return [`thread.spawn(${JSON.stringify(funcName)}${argsString})`, luaOrder]
     },
   },
   {
