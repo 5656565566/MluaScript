@@ -25,7 +25,7 @@ test('template threshold uses a replaceable slider shadow', () => {
   assert.match(visionSource, /type: 'field_slider',[\s\S]*value: 0\.8,[\s\S]*min: 0,[\s\S]*max: 1,[\s\S]*precision: 0\.01/)
   assert.match(visionSource, /toolboxInputs:[\s\S]*THRESHOLD:[\s\S]*type: 'maa_default_threshold'/)
   assert.match(visionSource, /type: 'input_value', name: 'THRESHOLD', check: 'Number'/)
-  assert.match(toolboxSource, /if \(spec\.toolboxInputs\) blockItem\.inputs = spec\.toolboxInputs/)
+  assert.match(toolboxSource, /\.\.\.\(spec\?\.toolboxInputs \|\| \{\}\)/)
   assert.match(insertionSource, /connectValue\(block, 'THRESHOLD', thresholdBlock\(workspace, recognition\.threshold \?\? 0\.8\)\)/)
   assert.match(insertionSource, /block\.setShadow\(true\)/)
   assert.match(styleSource, /\.blocklyDropDownDiv:not\(:has\(\.fieldSliderContainer\)\)/)

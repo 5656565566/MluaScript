@@ -1,4 +1,44 @@
 import { dynamicBlockSpecs } from './blocks'
+import { buildQuickInputShadows } from './quickInput.js'
+
+const dynamicBlockSpecsByType = new Map(dynamicBlockSpecs.map((spec) => [spec.type, spec]))
+
+const baseBlockDefinitions = {
+  controls_repeat_ext: {
+    args0: [{ type: 'input_value', name: 'TIMES', check: 'Number' }],
+  },
+  controls_for: {
+    args0: [
+      { type: 'input_value', name: 'FROM', check: 'Number' },
+      { type: 'input_value', name: 'TO', check: 'Number' },
+      { type: 'input_value', name: 'BY', check: 'Number' },
+    ],
+  },
+  math_arithmetic: {
+    args0: [
+      { type: 'input_value', name: 'A', check: 'Number' },
+      { type: 'input_value', name: 'B', check: 'Number' },
+    ],
+  },
+  math_round: {
+    args0: [{ type: 'input_value', name: 'NUM', check: 'Number' }],
+  },
+  text_length: {
+    args0: [{ type: 'input_value', name: 'VALUE', check: 'String' }],
+  },
+  math_change: {
+    args0: [{ type: 'input_value', name: 'DELTA', check: 'Number' }],
+  },
+}
+
+function withQuickInputShadows(blockItem, spec = null) {
+  const definition = spec?.definition || baseBlockDefinitions[blockItem.type] || {}
+  const inputs = buildQuickInputShadows(definition, {
+    ...(blockItem.inputs || {}),
+    ...(spec?.toolboxInputs || {}),
+  })
+  return Object.keys(inputs).length ? { ...blockItem, inputs } : blockItem
+}
 
 export const baseCategories = [
   {
@@ -133,8 +173,7 @@ export function buildDynamicCategories() {
         contents: [],
       })
     }
-    const blockItem = { kind: 'block', type: spec.type }
-    if (spec.toolboxInputs) blockItem.inputs = spec.toolboxInputs
+    const blockItem = withQuickInputShadows({ kind: 'block', type: spec.type }, spec)
     map.get(spec.category).contents.push(blockItem)
   }
   return [...map.values()]
@@ -143,6 +182,16 @@ export function buildDynamicCategories() {
 export function buildToolbox() {
   return {
     kind: 'categoryToolbox',
-    contents: [...baseCategories, ...buildDynamicCategories()],
+    contents: [
+      ...baseCategories.map((category) => ({
+        ...category,
+        contents: category.contents.map((item) => (
+          item.kind === 'block'
+            ? withQuickInputShadows(item, dynamicBlockSpecsByType.get(item.type))
+            : item
+        )),
+      })),
+      ...buildDynamicCategories(),
+    ],
   }
 }

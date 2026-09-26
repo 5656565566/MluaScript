@@ -12,6 +12,7 @@ import { functionBlocks } from './function'
 import { getProcedurePickerItems, getProcedureDefinitionByName, applyProcedureSelectionToPickerBlock } from '../utils'
 import { MaaPickerIcon, LuaVariableField } from '../fields'
 import { PICKER_ICON_TYPE } from '../constants'
+import { registerQuickInputBlocks } from '../quickInput.js'
 
 const unsupportedDeviceBlockTypes = new Set([
   'maa_human_swipe',
@@ -44,6 +45,8 @@ let registered = false
 
 export function ensureBlocklyBlocks() {
   if (registered) return
+
+  registerQuickInputBlocks()
 
   const patchProcedureCallBlock = (blockType) => {
     const originalInit = Blockly.Blocks[blockType]?.init
