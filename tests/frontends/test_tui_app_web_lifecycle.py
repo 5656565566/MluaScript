@@ -140,9 +140,20 @@ def test_hidden_tui_pages_pause_periodic_refresh(monkeypatch: pytest.MonkeyPatch
     asyncio.run(scenario())
 
 
-def test_tui_artifact_readme_is_primary_action() -> None:
+def test_tui_run_screen_drops_artifact_readme_tab() -> None:
+    """运行任务页不再托管包说明，改为统一走模板执行页"""
+
     source = Path(inspect.getsourcefile(RunScreen) or "").read_text(encoding="utf-8")
 
-    assert 'f"查看说明 {label}"' in source
-    assert 'run_button.label = "运行"' in source
-    assert "Horizontal(readme_button, run_button" in source
+    assert "run-tab-readme" not in source
+    assert "查看说明" not in source
+    assert "_open_artifact_readme" not in source
+
+
+def test_tui_script_rows_share_one_layout() -> None:
+    """脚本包与 Lua 脚本共用同一行容器，避免两类行间距不一致"""
+
+    source = Path(inspect.getsourcefile(RunScreen) or "").read_text(encoding="utf-8")
+
+    assert "Horizontal(run_button, classes=\"artifact-script-row\")" in source
+    assert "readme_button" not in source

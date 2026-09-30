@@ -64,6 +64,7 @@ test('构建包模板使用当前入口配置并交给构建包运行器', async
           hasTemplate: true,
           scriptPath: 'scripts/main.lua',
           name: '模板包',
+          artifact: { package_id: 'com.example.template-package', version: '1.0.0' },
           meta: { mode: 'task', tasks: [{ k: 'single', fn: 'run_single' }] },
           savedConfig: {},
         }
@@ -84,8 +85,32 @@ test('构建包模板使用当前入口配置并交给构建包运行器', async
   await actions.runTemplateWorkflow()
 
   assert.equal(state.selectedTemplateScript.value.artifactId, 'artifact-id')
+  assert.equal(state.selectedTemplateScript.value.artifact.package_id, 'com.example.template-package')
   assert.equal(calls[0][0], 'artifact-id')
   assert.equal(calls[0][1].mode, 'task')
+})
+
+test('没有 README 的模板默认进入工作流标签', async () => {
+  const state = templateState()
+  const actions = createTemplateActions({
+    state,
+    templateApi: {},
+    projectApi: {
+      async getTemplate() {
+        return {
+          hasTemplate: true,
+          scriptPath: 'scripts/main.lua',
+          meta: { mode: 'wf', tasks: [], flows: [{ k: 'main', steps: [] }] },
+          savedConfig: {},
+        }
+      },
+    },
+    getActions: () => actions,
+  })
+
+  await actions.loadProjectTemplate('project-key', 'scripts/main.lua')
+
+  assert.equal(state.templateRunnerTab.value, '__workflow__')
 })
 
 test('自动保存模板数据时不会关闭编辑器', async () => {

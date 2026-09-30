@@ -124,7 +124,7 @@ def _test_web_config() -> SimpleNamespace:
 
 def _authenticated_client(monkeypatch, tmp_path: Path) -> TestClient:
     monkeypatch.setattr(web_app, "_get_web_config", _test_web_config)
-    client = TestClient(web_app.create_web_app(tmp_path))
+    client = TestClient(web_app.create_web_app(tmp_path, runtime_dir=tmp_path, script_roots=[]))
     response = client.post("/api/auth/login", json={"username": "admin", "password": "secret-pass"})
     assert response.status_code == 200
     return client
@@ -359,7 +359,10 @@ def test_artifact_template_can_be_configured_and_run(monkeypatch, tmp_path: Path
 
     template = client.get(f"/api/system/scripts/{artifact['id']}/template")
     assert template.status_code == 200
-    assert template.json()["data"]["hasTemplate"] is True
+    template_data = template.json()["data"]
+    assert template_data["hasTemplate"] is True
+    assert template_data["artifact"]["package_id"] == "com.example.template-package"
+    assert template_data["verificationStatus"] == "入口摘要已校验"
 
     started = client.post(
         "/api/run/artifact",
@@ -373,6 +376,23 @@ def test_artifact_template_can_be_configured_and_run(monkeypatch, tmp_path: Path
     code = facade.artifact_run_calls[0]["code"]
     assert isinstance(code, str)
     assert "value = 7" in code
+
+
+def test_default_scripts_directory_package_is_discoverable_and_template_configurable(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    package = tmp_path / "scripts" / "template.mlspkg"
+    _write_template_package(package)
+    package_before = package.read_bytes()
+    client = _authenticated_client(monkeypatch, tmp_path)
+
+    items = client.get("/api/system/scripts").json()["data"]["items"]
+    artifact = next(item for item in items if item["package_id"] == "com.example.template-package")
+    template = client.get(f"/api/system/scripts/{artifact['id']}/template")
+
+    assert artifact["source"] == "configured"
+    assert template.status_code == 200
+    assert template.json()["data"]["hasTemplate"] is True
+    assert package.read_bytes() == package_before
 
 
 def test_task_detail_views_pass_task_kind_to_stop_action() -> None:

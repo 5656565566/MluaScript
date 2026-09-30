@@ -6,6 +6,7 @@ from typing import Iterable, List
 import yaml
 
 from mluascript.shared.config import GlobalConfig, config
+from mluascript.shared.config.manager import get_runtime_dir
 from mluascript.shared.logging import logger
 from .models import (
     PipelineRunLocator,
@@ -325,7 +326,7 @@ class WorkspaceManager:
             return False
 
 
-_global_workspace_manager = WorkspaceManager()
+_global_workspace_manager = WorkspaceManager(get_runtime_dir())
 
 
 def get_workspace_manager() -> WorkspaceManager:

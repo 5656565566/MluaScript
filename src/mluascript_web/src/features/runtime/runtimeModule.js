@@ -82,14 +82,6 @@ export function createRuntimeActions({ state, systemApi, runApi, runtimeStreams,
       return state.taskOutputById.value[taskId]
     },
 
-    async openArtifactReadme(artifactId) {
-      if (!artifactId) throw new Error('缺少构建产物 ID')
-      const payload = await systemApi.getArtifactReadme(artifactId)
-      state.artifactReadme.value = payload.data || payload
-      state.taskManagerActiveTab.value = 'artifact-readme'
-      return state.artifactReadme.value
-    },
-
     stopRuntimeStreams() {
       runtimeStreams.stopLogs()
     },

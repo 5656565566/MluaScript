@@ -84,6 +84,9 @@ test('the editor uses file tabs, right-click tree actions, and compact top menus
   const sidebarSource = readFileSync(`${srcRoot}/components/Sidebar.vue`, 'utf8')
   const taskManagerSource = readFileSync(`${srcRoot}/components/TaskManagerView.vue`, 'utf8')
 
+  assert.doesNotMatch(taskManagerSource, /artifact-readme|openArtifactReadme|>说明</)
+  assert.match(taskManagerSource, /artifactTypeLabel\(row\) === '单文件' \? row\.path : row\.author/)
+
   assert.match(appSource, /activeView === 'editor'[\s\S]*sidebarCollapsed\.value = true/)
   assert.match(editorSource, /v-for="tab in openFiles"/)
   assert.match(editorSource, /documentLabel\(tab\)/)

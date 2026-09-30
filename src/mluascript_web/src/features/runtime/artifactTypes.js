@@ -1,12 +1,12 @@
 const ARTIFACT_TYPE_LABELS = {
-  'lua-package': 'Lua 可打包项目',
-  'blockly-package': 'Blockly 可打包项目',
-  maa: 'Maa 自动化项目',
-  'lua-file': 'Lua 单文件',
-  'blockly-file': 'Blockly 单文件',
+  'lua-package': '脚本包',
+  'blockly-package': '脚本包',
+  maa: '脚本包',
+  'lua-file': '单文件',
+  'blockly-file': '单文件',
   package: '脚本包',
-  lua: 'Lua 脚本',
-  pipeline: 'Pipeline',
+  lua: '单文件',
+  pipeline: '脚本包',
 }
 
 export function artifactTypeKey(artifact) {
@@ -22,4 +22,18 @@ export function artifactTypeClass(artifact) {
   const key = artifactTypeKey(artifact)
   if (key === 'maa' || key === 'pipeline') return 'task-kind-pipeline'
   return 'task-kind-lua'
+}
+
+export function matchesResourceQuery(resource, query) {
+  const normalized = String(query || '').trim().toLocaleLowerCase()
+  if (!normalized) return true
+  return [
+    resource?.name,
+    resource?.path,
+    resource?.description,
+    resource?.author,
+    resource?.version,
+    resource?.package_id,
+    resource?.entrypoint,
+  ].some(value => String(value || '').toLocaleLowerCase().includes(normalized))
 }

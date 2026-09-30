@@ -208,6 +208,7 @@ def test_load_config_uses_runtime_dir_when_path_missing(monkeypatch):
         load_config()
 
         assert (runtime_dir / "config" / "config.yaml").exists()
+        assert (runtime_dir / "scripts").is_dir()
 
 
 def test_get_runtime_dir_falls_back_to_project_root_for_source_tree():

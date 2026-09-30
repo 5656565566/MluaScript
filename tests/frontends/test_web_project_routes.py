@@ -21,7 +21,7 @@ def _web_config(project_root: Path) -> SimpleNamespace:
 
 def _client(monkeypatch, tmp_path: Path) -> TestClient:
     monkeypatch.setattr(web_app, "_get_web_config", lambda: _web_config(tmp_path / "projects"))
-    client = TestClient(web_app.create_web_app(tmp_path / "dist"))
+    client = TestClient(web_app.create_web_app(tmp_path / "dist", runtime_dir=tmp_path))
     response = client.post("/api/auth/login", json={"username": "admin", "password": "secret-pass"})
     assert response.status_code == 200
     return client
@@ -144,7 +144,7 @@ def test_device_items_payload_returns_all_discovered_desktop_windows(monkeypatch
 
 def test_project_routes_require_authentication(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(web_app, "_get_web_config", lambda: _web_config(tmp_path / "projects"))
-    client = TestClient(web_app.create_web_app(tmp_path / "dist"))
+    client = TestClient(web_app.create_web_app(tmp_path / "dist", runtime_dir=tmp_path))
 
     response = client.get("/api/projects")
 

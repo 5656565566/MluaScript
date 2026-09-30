@@ -1,5 +1,12 @@
 from .manager import WorkspaceManager, get_workspace_manager
-from .artifact_service import ArtifactReadme, ArtifactService, ArtifactServiceError, PreparedArtifactRun, RunnableArtifact
+from .artifact_service import (
+    ArtifactReadme,
+    ArtifactService,
+    ArtifactServiceError,
+    ArtifactTemplateData,
+    PreparedArtifactRun,
+    RunnableArtifact,
+)
 from .project_models import (
     ProjectBuildResult,
     ProjectDiagnostic,
@@ -49,6 +56,7 @@ __all__ = [
     "ArtifactReadme",
     "ArtifactService",
     "ArtifactServiceError",
+    "ArtifactTemplateData",
     "PipelineRunLocator",
     "PreparedArtifactRun",
     "ProjectBuildResult",

@@ -10,7 +10,7 @@ import mimetypes
 import secrets
 import time
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Iterable, Literal
 
 import numpy as np
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
@@ -34,7 +34,8 @@ from mluascript.control.workspace import (
 from mluascript.frontends.web.preferences import WebPreferences, WebPreferenceService
 from mluascript.maa.lifecycle.runtime import initialize_maa_runtime
 from mluascript.maa.recognition import find_color, find_feature, find_nnd, find_ocr, find_template
-from mluascript.shared.config import WebServerConfig, config
+from mluascript.shared.config import WebServerConfig, config, resolve_configured_script_roots
+from mluascript.shared.config.manager import get_runtime_dir
 from mluascript.shared.logging import get_logs, get_logs_by_channel, get_logs_by_session
 
 auth_router = APIRouter(prefix="/api/auth")
@@ -784,30 +785,39 @@ def system_script_template(artifact_id: str, request: Request) -> dict[str, Any]
 
     service = _artifact_service(request)
     try:
-        source = service.get_template_source(artifact_id)
-        store = TemplateStore(
-            WorkspaceManager(service.builds_root.parent.parent),
-            config_dir=service.template_config_dir(artifact_id),
-        )
-        meta = store.get_template_meta_from_source(source.code, script_path=source.script_path)
-        if meta is None:
-            return _ok({"hasTemplate": False, "scriptPath": source.script_path, "meta": None, "savedConfig": None})
-        saved_config = store.load_saved_config(source.script_path)
-        readme = service.read_readme(artifact_id) if source.artifact.has_readme else None
+        template = service.get_template(artifact_id)
     except ArtifactServiceError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"模板解析失败: {exc}") from exc
+    source = template.source
+    if not template.has_template:
+        return _ok(
+            {
+                "hasTemplate": False,
+                "scriptPath": source.script_path,
+                "meta": None,
+                "savedConfig": None,
+                "artifact": source.artifact.model_dump(),
+                "verificationStatus": template.verification_status,
+            }
+        )
+    meta = template.meta
+    saved_config = template.saved_config
+    if meta is None or saved_config is None:
+        raise HTTPException(status_code=500, detail="构建入口模板数据不完整")
     return _ok(
         {
             "hasTemplate": True,
             "scriptPath": source.script_path,
             "meta": meta.model_dump(by_alias=True, exclude_none=True),
             "savedConfig": saved_config.model_dump(),
-            "configPath": store.get_saved_config_path(source.script_path),
-            "readme": readme.model_dump() if readme else None,
+            "configPath": template.config_path,
+            "readme": template.readme.model_dump() if template.readme else None,
             "artifactId": source.artifact.id,
             "name": source.artifact.name,
+            "artifact": source.artifact.model_dump(),
+            "verificationStatus": template.verification_status,
         }
     )
 
@@ -1601,65 +1611,24 @@ def run_build_artifact(payload: RunArtifactPayload, request: Request) -> dict[st
     facade = get_control_facade()
     overview = facade.get_device_overview()
     target = payload.sessionLabel or overview.connection.label or "LOCAL"
+    artifact_service = _artifact_service(request)
     try:
-        prepared = _artifact_service(request).prepare_run(payload.artifactId)
+        prepared = (
+            artifact_service.prepare_template_run(
+                payload.artifactId,
+                template_mode=payload.templateMode,
+                workflow_key=payload.workflowKey,
+                workflow=payload.workflow,
+                runtime=payload.runtime,
+            )
+            if payload.templateMode
+            else artifact_service.prepare_run(payload.artifactId)
+        )
     except ArtifactServiceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
         if prepared.mode == "script":
-            if payload.templateMode:
-                artifact_service = _artifact_service(request)
-                template_script_path = Path(prepared.script_path).name
-                if prepared.project_path:
-                    try:
-                        template_script_path = Path(prepared.script_path).resolve().relative_to(
-                            Path(prepared.project_path).resolve()
-                        ).as_posix()
-                    except ValueError as exc:
-                        raise ArtifactServiceError("构建包入口路径无效") from exc
-                store = TemplateStore(
-                    WorkspaceManager(Path(prepared.project_path or Path(prepared.script_path).parent)),
-                    config_dir=artifact_service.template_config_dir(payload.artifactId),
-                )
-                meta = store.get_template_meta_from_source(prepared.code, script_path=template_script_path)
-                if meta is None:
-                    raise ArtifactServiceError("构建入口没有模板元数据")
-                current_saved = store.load_saved_config(template_script_path)
-                if payload.templateMode == "task" or (meta.mode == "task" and not meta.flows):
-                    task_key = str(payload.runtime.get("selectedTaskKey") or meta.entry.task or "").strip()
-                    tasks = {
-                        str(key): {"params": value if isinstance(value, dict) else {}}
-                        for key, value in (payload.runtime.get("tasks") or {}).items()
-                    }
-                    saved = store.save_saved_config(
-                        template_script_path,
-                        TemplateSavedConfig.model_validate({
-                            **current_saved.model_dump(),
-                            "scriptPath": template_script_path,
-                            "selectedTaskKey": task_key,
-                            "tasks": tasks,
-                        }),
-                    )
-                    runtime_code = store.build_task_runtime_script(meta, saved, task_key=task_key)
-                else:
-                    workflow_key = payload.workflowKey or meta.entry.flow
-                    if not workflow_key:
-                        raise ArtifactServiceError("模板调试缺少工作流入口")
-                    saved = store.save_saved_config(
-                        template_script_path,
-                        TemplateSavedConfig.model_validate({
-                            **current_saved.model_dump(),
-                            "scriptPath": template_script_path,
-                            "selectedFlowKey": workflow_key,
-                            "flows": {
-                                **current_saved.model_dump().get("flows", {}),
-                                workflow_key: payload.workflow,
-                            },
-                        }),
-                    )
-                    runtime_code = store.build_runtime_script(meta, saved, flow_key=workflow_key)
-                prepared.code = f"{prepared.code}\n\n{runtime_code}\n"
             task_id = facade.run_script(
                 prepared.script_path,
                 prepared.code,
@@ -1898,15 +1867,30 @@ def stream_task_output(task_id: str) -> StreamingResponse:
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-def create_web_app(dist_dir: Path, *, preferences_path: Path | None = None) -> FastAPI:
+def create_web_app(
+    dist_dir: Path,
+    *,
+    preferences_path: Path | None = None,
+    runtime_dir: Path | None = None,
+    script_roots: Iterable[str | Path] | None = None,
+) -> FastAPI:
     app = FastAPI(title="MluaScript Web", version="1.0.0")
+    runtime_root = Path(runtime_dir or get_runtime_dir()).resolve()
     try:
         configured_roots = list(getattr(_get_web_config(), "project_roots", []) or [])
     except Exception:
         configured_roots = []
     if not configured_roots:
-        configured_roots = [str(Path.cwd() / ".mluascript_web" / "projects")]
-    primary_project_root = Path(configured_roots[0]).expanduser().resolve()
+        configured_roots = [str(runtime_root / ".mluascript_web" / "projects")]
+    configured_roots = [
+        str(path.resolve() if path.is_absolute() else (runtime_root / path).resolve())
+        for raw_path in configured_roots
+        if str(raw_path).strip()
+        for path in [Path(str(raw_path)).expanduser()]
+    ]
+    if not configured_roots:
+        configured_roots = [str(runtime_root / ".mluascript_web" / "projects")]
+    primary_project_root = Path(configured_roots[0])
     artifact_root = primary_project_root.parent / "builds"
     app.state.project_service = ProjectService(
         configured_roots,
@@ -1915,10 +1899,13 @@ def create_web_app(dist_dir: Path, *, preferences_path: Path | None = None) -> F
     app.state.artifact_service = ArtifactService(
         artifact_root,
         runtime_root=primary_project_root.parent / "runtime" / "tasks",
+        scripts_root=runtime_root / "scripts",
+        script_roots=resolve_configured_script_roots(runtime_root) if script_roots is None else script_roots,
+        workspace_manager=WorkspaceManager(runtime_root),
         project_service=app.state.project_service,
     )
     app.state.preference_service = WebPreferenceService(
-        preferences_path or (Path.cwd() / ".mluascript_web" / "settings" / "web" / "preferences.json")
+        preferences_path or (runtime_root / ".mluascript_web" / "settings" / "web" / "preferences.json")
     )
     app.add_middleware(
         CORSMiddleware,

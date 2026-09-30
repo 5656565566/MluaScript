@@ -9,7 +9,6 @@ export function createRuntimeState() {
     blocklyFiles: ref([]),
     luaFiles: ref([]),
     availableScripts: ref([]),
-    artifactReadme: ref(null),
     logs: ref([]),
     selectedPipeline: ref(''),
     selectedTaskId: ref(''),

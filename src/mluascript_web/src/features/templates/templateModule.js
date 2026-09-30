@@ -9,7 +9,7 @@ export function createTemplateActions({ state, templateApi, projectApi, artifact
   function applyTemplateState(meta, savedConfig, readme = null) {
     state.selectedTemplateMeta.value = meta
     state.templateReadme.value = readme
-    state.templateRunnerTab.value = readme ? '__readme__' : ''
+    state.templateRunnerTab.value = readme ? '__readme__' : '__workflow__'
     if (meta?.type === 'workflow-template') {
       state.templateScriptType.value = 'workflow-template'
       state.selectedWorkflowKey.value = savedConfig?.selectedFlowKey || meta.entry?.defaultWorkflow || meta.workflows?.[0]?.key || ''
@@ -83,6 +83,8 @@ export function createTemplateActions({ state, templateApi, projectApi, artifact
         name: payload.name || String(payload.scriptPath || '').split('/').pop() || '模板脚本',
         artifactId,
         entryPath: payload.scriptPath || '',
+        artifact: payload.artifact || null,
+        verificationStatus: payload.verificationStatus || '',
       }
       state.selectedTemplateConfigPath.value = payload.configPath || ''
       state.selectedTemplateSavedConfig.value = savedConfig
@@ -234,4 +236,3 @@ export function createTemplateActions({ state, templateApi, projectApi, artifact
     },
   }
 }
-

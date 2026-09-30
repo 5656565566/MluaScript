@@ -9,7 +9,7 @@ import {
   NButton,
   NEmpty,
   NTabs,
-  NTabPane,
+  NTab,
   NCollapse,
   NCollapseItem,
   NForm,
@@ -27,6 +27,9 @@ import {
   NText,
   NIcon,
   NScrollbar,
+  NDescriptions,
+  NDescriptionsItem,
+  NTag,
 } from 'naive-ui'
 
 const templateTitle = computed(() => state.selectedTemplateMeta.value?.userTitle || state.selectedTemplateMeta.value?.title || state.selectedTemplateScript.value?.name || '模板执行')
@@ -37,18 +40,27 @@ const tasks = computed(() => state.selectedTemplateMeta.value?.tasks || [])
 const currentTask = computed(() => tasks.value.find(item => item.key === state.selectedTaskKey.value) || tasks.value[0] || null)
 const hasReadme = computed(() => Boolean(state.templateReadme.value?.markdown))
 const showingReadme = computed(() => hasReadme.value && state.templateRunnerTab.value === '__readme__')
-const runnerTab = computed({
+const showingWorkflow = computed(() => state.templateRunnerTab.value === '__workflow__' || (!hasReadme.value && !['__info__'].includes(state.templateRunnerTab.value)))
+const showingInfo = computed(() => state.templateRunnerTab.value === '__info__')
+const sectionTab = computed({
   get() {
     if (showingReadme.value) return '__readme__'
-    return isWorkflow.value ? state.selectedWorkflowKey.value : state.selectedTaskKey.value
+    if (showingInfo.value) return '__info__'
+    return '__workflow__'
   },
   set(value) {
     state.templateRunnerTab.value = value
-    if (value === '__readme__') return
-    if (isWorkflow.value) actions.setTemplateSelectedFlow(value)
-    else actions.setTemplateCurrentStep(value)
   },
 })
+const workflowTab = computed({
+  get: () => currentWorkflow.value?.key || '',
+  set: value => actions.setTemplateSelectedFlow(value),
+})
+const taskTab = computed({
+  get: () => currentTask.value?.key || '',
+  set: value => actions.setTemplateCurrentStep(value),
+})
+const artifactInfo = computed(() => state.selectedTemplateScript.value?.artifact || {})
 
 const currentWorkflowState = computed(() => {
   const workflowKey = currentWorkflow.value?.key
@@ -309,9 +321,10 @@ function renderFieldControl(field, value, onUpdate) {
         <n-space>
           <n-button size="small" @click="openFromScriptManager">返回脚本管理</n-button>
           <n-button
+            v-if="showingWorkflow"
             type="primary"
             size="small"
-            :disabled="state.loading.value || showingReadme || !state.selectedTemplateScript.value || (isWorkflow ? !currentWorkflow : !currentTask)"
+            :disabled="state.loading.value || !state.selectedTemplateScript.value || (isWorkflow ? !currentWorkflow : !currentTask)"
             @click="actions.handleAction(() => actions.runTemplateWorkflow())"
           >{{ isWorkflow ? '执行工作流' : '执行任务' }}</n-button>
         </n-space>
@@ -321,17 +334,36 @@ function renderFieldControl(field, value, onUpdate) {
     <div style="flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
       <n-empty v-if="!state.selectedTemplateScript.value" description="请先在脚本管理中选择一个模板脚本" style="margin: auto;" />
 
-      <template v-else-if="isWorkflow">
-        <n-tabs v-if="hasReadme || workflows.length > 1" v-model:value="runnerTab" type="line" size="small" style="flex-shrink: 0;">
-          <n-tab-pane v-if="hasReadme" name="__readme__" tab="说明" />
-          <n-tab-pane v-for="workflow in workflows" :key="workflow.key" :name="workflow.key" :tab="workflow.userTitle || workflow.title || workflow.key" />
+      <template v-else>
+        <n-tabs v-model:value="sectionTab" type="line" size="small" style="flex-shrink: 0;">
+          <n-tab v-if="hasReadme" name="__readme__" tab="脚本说明" />
+          <n-tab name="__workflow__" tab="工作流" />
+          <n-tab name="__info__" tab="脚本信息" />
         </n-tabs>
 
         <n-scrollbar v-if="showingReadme" class="template-readme-scroll">
           <ReadmeRenderer :markdown="state.templateReadme.value.markdown" />
         </n-scrollbar>
 
-        <div v-else-if="currentWorkflow" class="template-runner-shell">
+        <n-scrollbar v-else-if="showingInfo" class="template-info-scroll">
+          <n-descriptions bordered :column="1" size="small" label-placement="left" class="template-info-panel">
+            <n-descriptions-item label="名称">{{ artifactInfo.name || state.selectedTemplateScript.value.name || '-' }}</n-descriptions-item>
+            <n-descriptions-item label="版本">{{ artifactInfo.version || '-' }}</n-descriptions-item>
+            <n-descriptions-item label="作者">{{ artifactInfo.author || '-' }}</n-descriptions-item>
+            <n-descriptions-item label="包 ID">{{ artifactInfo.package_id || '-' }}</n-descriptions-item>
+            <n-descriptions-item label="入口">{{ artifactInfo.entrypoint || state.selectedTemplateScript.value.entryPath || '-' }}</n-descriptions-item>
+            <n-descriptions-item label="文件路径"><n-text class="template-meta-code">{{ artifactInfo.path || state.selectedTemplateScript.value.path || '-' }}</n-text></n-descriptions-item>
+            <n-descriptions-item label="配置路径"><n-text class="template-meta-code">{{ state.selectedTemplateConfigPath.value || '尚未生成' }}</n-text></n-descriptions-item>
+            <n-descriptions-item label="校验状态">
+              <n-tag size="small" type="success" :bordered="false">{{ state.selectedTemplateScript.value.verificationStatus || '脚本已读取' }}</n-tag>
+            </n-descriptions-item>
+          </n-descriptions>
+        </n-scrollbar>
+
+        <div v-else-if="showingWorkflow && isWorkflow && currentWorkflow" class="template-runner-shell">
+          <n-tabs v-if="workflows.length > 1" v-model:value="workflowTab" type="line" size="small" style="flex-shrink: 0;">
+            <n-tab v-for="workflow in workflows" :key="workflow.key" :name="workflow.key" :tab="workflow.userTitle || workflow.title || workflow.key" />
+          </n-tabs>
           <div style="flex-shrink: 0;">
             <n-text style="font-size: 16px; font-weight: bold;">{{ currentWorkflow.userTitle || currentWorkflow.title || currentWorkflow.key }}</n-text>
             <p v-if="currentWorkflow.userDescription || currentWorkflow.description" style="margin: 4px 0 0; color: var(--n-text-color-3); font-size: 13px;">
@@ -412,58 +444,34 @@ function renderFieldControl(field, value, onUpdate) {
             </div>
           </div>
         </div>
-      </template>
 
-      <template v-else>
-        <n-tabs v-if="hasReadme || tasks.length > 1" v-model:value="runnerTab" type="line" size="small" style="flex-shrink: 0;">
-          <n-tab-pane v-if="hasReadme" name="__readme__" tab="说明" />
-          <n-tab-pane v-for="task in tasks" :key="task.key" :name="task.key" :tab="task.userTitle || task.title || task.key" />
-        </n-tabs>
-        <n-scrollbar v-if="showingReadme" class="template-readme-scroll">
-          <ReadmeRenderer :markdown="state.templateReadme.value.markdown" />
-        </n-scrollbar>
-        <div v-else-if="currentTask" class="template-runner-shell">
-          <div>
-            <n-text style="font-size: 16px; font-weight: bold;">{{ currentTask.userTitle || currentTask.title || currentTask.key }}</n-text>
-            <p v-if="currentTask.userDescription || currentTask.description" style="margin: 4px 0 0; color: var(--n-text-color-3); font-size: 13px;">
-              {{ currentTask.userDescription || currentTask.description }}
-            </p>
+        <template v-else-if="showingWorkflow && !isWorkflow">
+          <n-tabs v-if="tasks.length > 1" v-model:value="taskTab" type="line" size="small" style="flex-shrink: 0;">
+            <n-tab v-for="task in tasks" :key="task.key" :name="task.key" :tab="task.userTitle || task.title || task.key" />
+          </n-tabs>
+          <div v-if="currentTask" class="template-runner-shell">
+            <div>
+              <n-text style="font-size: 16px; font-weight: bold;">{{ currentTask.userTitle || currentTask.title || currentTask.key }}</n-text>
+              <p v-if="currentTask.userDescription || currentTask.description" style="margin: 4px 0 0; color: var(--n-text-color-3); font-size: 13px;">
+                {{ currentTask.userDescription || currentTask.description }}
+              </p>
+            </div>
+            <n-form v-if="groupedTaskFields(currentTask).length" label-placement="top" :show-feedback="false" class="template-step-form">
+              <n-form-item v-for="field in groupedTaskFields(currentTask)" :key="`${currentTask.key}-${field.key}`" :label="field.label || field.key" :style="fieldItemStyle(field)">
+                <template #label v-if="field.description">
+                  <n-text>{{ field.label || field.key }}</n-text>
+                  <n-text depth="3" style="font-size: 12px; margin-left: 8px;">{{ field.description }}</n-text>
+                </template>
+                <component :is="renderFieldControl(field, taskFieldValue(currentTask.key, field), value => actions.updateTemplateTaskValue(currentTask.key, field.key, value))" />
+              </n-form-item>
+            </n-form>
+            <n-empty v-else description="该任务未定义配置字段" style="margin: auto;" />
           </div>
-          <n-form v-if="groupedTaskFields(currentTask).length" label-placement="top" :show-feedback="false" class="template-step-form">
-            <n-form-item v-for="field in groupedTaskFields(currentTask)" :key="`${currentTask.key}-${field.key}`" :label="field.label || field.key" :style="fieldItemStyle(field)">
-              <template #label v-if="field.description">
-                <n-text>{{ field.label || field.key }}</n-text>
-                <n-text depth="3" style="font-size: 12px; margin-left: 8px;">{{ field.description }}</n-text>
-              </template>
-              <component :is="renderFieldControl(field, taskFieldValue(currentTask.key, field), value => actions.updateTemplateTaskValue(currentTask.key, field.key, value))" />
-            </n-form-item>
-          </n-form>
-          <n-empty v-else description="该任务未定义配置字段" style="margin: auto;" />
-        </div>
+        </template>
       </template>
 
     </div>
 
-    <template #footer v-if="state.selectedTemplateScript.value">
-      <n-collapse class="template-footer-meta" style="background: var(--n-color-embedded); padding: 0 16px; border-radius: 4px; border: 1px solid var(--n-border-color); margin: 0;">
-        <n-collapse-item title="脚本信息" name="script-info" style="margin: 0;">
-          <div style="display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; font-size: 12px;">
-            <div class="template-meta-row">
-              <n-text depth="3">脚本：</n-text>
-              <n-text>{{ state.selectedTemplateScript.value.name }}</n-text>
-            </div>
-            <div class="template-meta-row">
-              <n-text depth="3">路径：</n-text>
-              <n-text class="template-meta-code" depth="2">{{ state.selectedTemplateScript.value.path }}</n-text>
-            </div>
-            <div v-if="state.selectedTemplateConfigPath.value" class="template-meta-row">
-              <n-text depth="3">配置：</n-text>
-              <n-text class="template-meta-code" depth="2">{{ state.selectedTemplateConfigPath.value }}</n-text>
-            </div>
-          </div>
-        </n-collapse-item>
-      </n-collapse>
-    </template>
   </n-card>
 </template>
 
@@ -479,6 +487,8 @@ function renderFieldControl(field, value, onUpdate) {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding-top: 12px;
   gap: 12px;
 }
@@ -488,9 +498,18 @@ function renderFieldControl(field, value, onUpdate) {
   min-height: 0;
 }
 
-.template-content-grid {
+.template-info-scroll {
   flex: 1;
   min-height: 0;
+}
+
+.template-info-panel {
+  margin-top: 12px;
+}
+
+.template-content-grid {
+  flex: 1 0 320px;
+  min-height: 320px;
   min-width: 0;
   display: flex;
   gap: 12px;

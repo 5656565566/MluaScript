@@ -49,3 +49,11 @@ test('legacy accent preference becomes a custom color theme', () => {
   assert.equal(buildWebPreferences(state).appearance.colorTheme, 'custom')
   assert.equal('accentColor' in buildWebPreferences(state).appearance, false)
 })
+
+test('removed task manager tabs fall back to the task list', () => {
+  const state = createUiState()
+
+  applyWebPreferences(state, { tasks: { activeTab: 'artifact-readme' } })
+
+  assert.equal(state.taskManagerActiveTab.value, 'resource-list')
+})

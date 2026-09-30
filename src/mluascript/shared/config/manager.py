@@ -56,6 +56,25 @@ def resolve_path_from_runtime(raw_path: str, runtime_dir: Path) -> Path:
     return (runtime_dir / candidate).resolve()
 
 
+def resolve_configured_script_roots(runtime_dir: Path | None = None) -> list[Path]:
+    """将 scripts_path 相对路径稳定解析到程序运行目录"""
+
+    base_dir = (runtime_dir or get_runtime_dir()).resolve()
+    try:
+        configured_paths = list(registry.get(GlobalConfig).scripts_path)
+    except RuntimeError:
+        configured_paths = []
+    roots: list[Path] = []
+    for raw_path in configured_paths:
+        path_text = str(raw_path).strip()
+        if not path_text:
+            continue
+        resolved = resolve_path_from_runtime(path_text, base_dir)
+        if resolved not in roots:
+            roots.append(resolved)
+    return roots
+
+
 def _prepare_web_server_config_node(node_data: dict[str, Any]) -> dict[str, Any]:
     prepared = dict(node_data)
 
@@ -77,6 +96,7 @@ def load_config(path: str = "") -> None:
     file = Path(path) if path else runtime_dir / "config" / "config.yaml"
 
     file.parent.mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "scripts").mkdir(parents=True, exist_ok=True)
 
     yaml_config = YamlConfig(file)
     raw_data = yaml_config.read_config()

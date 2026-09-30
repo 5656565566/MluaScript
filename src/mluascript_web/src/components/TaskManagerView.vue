@@ -1,8 +1,7 @@
 <script setup>
 import { computed, h, watch, onBeforeUnmount } from 'vue'
 import { state, getters, actions } from '../store'
-import { artifactTypeClass, artifactTypeLabel } from '../features/runtime/artifactTypes.js'
-import ReadmeRenderer from './ReadmeRenderer.vue'
+import { artifactTypeClass, artifactTypeLabel, matchesResourceQuery } from '../features/runtime/artifactTypes.js'
 import { NTabs, NTabPane, NCard, NInput, NButton, NCheckbox, NSpace, NTag, NText, NIcon, NDataTable, NLayout, NLayoutSider, NLayoutContent, NEmpty, NDescriptions, NDescriptionsItem, NLog, NScrollbar, NTooltip } from 'naive-ui'
 
 const activeTab = computed({
@@ -28,11 +27,7 @@ const resourceData = computed(() => {
   let list = [...pipelines, ...artifacts]
   const q = resourceQuery.value.trim().toLowerCase()
   if (q) {
-    list = list.filter(item => {
-      const name = String(item.name || item.path || '').toLowerCase()
-      const desc = String(item.description || '').toLowerCase()
-      return name.includes(q) || desc.includes(q)
-    })
+    list = list.filter(item => matchesResourceQuery(item, q))
   }
   return list
 })
@@ -56,13 +51,11 @@ const resourceColumns = [
     title: '名称 / 路径', 
     key: 'name',
     render(row) {
-      if (row._kind === 'lua') {
-        return h('div', { style: 'display: flex; flex-direction: column; gap: 4px;' }, [
-          h('span', { style: 'font-weight: 500;' }, row.name),
-          h(NText, { depth: 3, style: 'font-size: 12px; word-break: break-all;' }, { default: () => row.path })
-        ])
-      }
-      return h('div', { style: 'font-weight: 500;' }, row.name)
+      const secondaryText = artifactTypeLabel(row) === '单文件' ? row.path : row.author
+      return h('div', { style: 'display: flex; flex-direction: column; gap: 4px;' }, [
+        h('span', { style: 'font-weight: 500;' }, row.name),
+        h(NText, { depth: 3, style: 'font-size: 12px; word-break: break-all;' }, { default: () => secondaryText || '-' })
+      ])
     }
   },
   { 
@@ -78,7 +71,7 @@ const resourceColumns = [
     width: 150,
     align: 'right',
     render(row) {
-      const buttons = [h(NButton, {
+      return h(NSpace, { size: 6, justify: 'end', wrap: false }, { default: () => [h(NButton, {
         size: 'small',
         type: 'primary',
         secondary: true,
@@ -89,7 +82,7 @@ const resourceColumns = [
               activeTab.value = 'task-status'
               return
             }
-            if (row.source === 'build') {
+            if (row.run_mode === 'artifact' && row.id) {
               try {
                 const payload = await actions.loadArtifactTemplate(row.id)
                 if (payload.hasTemplate) {
@@ -121,15 +114,7 @@ const resourceColumns = [
             }
           })
         }
-      }, { default: () => '运行' })]
-      if (row.has_readme) {
-        buttons.push(h(NButton, {
-          size: 'small',
-          secondary: true,
-          onClick: () => actions.handleAction(() => actions.openArtifactReadme(row.id)),
-        }, { default: () => '说明' }))
-      }
-      return h(NSpace, { size: 6, justify: 'end', wrap: false }, { default: () => buttons })
+      }, { default: () => '运行' })] })
     }
   }
 ]
@@ -211,7 +196,7 @@ onBeforeUnmount(() => {
         
         <n-tab-pane name="resource-list" tab="任务列表">
           <div style="display: flex; flex-direction: column; height: 100%; gap: 12px;">
-            <n-input v-model:value="resourceQuery" placeholder="搜索脚本名称或描述..." clearable>
+            <n-input v-model:value="resourceQuery" placeholder="搜索名称、路径、描述、包 ID 或版本..." clearable>
               <template #prefix>
                 <n-icon><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M456.69 421.39L362.6 327.3a173.81 173.81 0 0 0 34.84-104.58C397.44 126.38 319.06 48 222.72 48S48 126.38 48 222.72s78.38 174.72 174.72 174.72A173.81 173.81 0 0 0 327.3 362.6l94.09 94.09a25 25 0 0 0 35.3-35.3zM97.92 222.72a124.8 124.8 0 1 1 124.8 124.8a124.95 124.95 0 0 1-124.8-124.8z" fill="currentColor"></path></svg></n-icon>
               </template>
@@ -223,18 +208,6 @@ onBeforeUnmount(() => {
               flex-height
               style="flex: 1; min-height: 0;"
             />
-          </div>
-        </n-tab-pane>
-
-        <n-tab-pane v-if="state.artifactReadme.value" name="artifact-readme" tab="说明">
-          <div class="artifact-readme-pane">
-            <div class="artifact-readme-header">
-              <div class="artifact-readme-title">{{ state.artifactReadme.value.name }}</div>
-              <n-text depth="3" class="font-mono">{{ state.artifactReadme.value.path }}</n-text>
-            </div>
-            <n-scrollbar class="artifact-readme-scroll">
-              <ReadmeRenderer :markdown="state.artifactReadme.value.markdown" />
-            </n-scrollbar>
           </div>
         </n-tab-pane>
 
@@ -431,32 +404,6 @@ onBeforeUnmount(() => {
 .task-detail-pane {
   display: flex;
   flex-direction: column;
-}
-
-.artifact-readme-pane {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.artifact-readme-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 4px 12px;
-  border-bottom: 1px solid var(--n-border-color);
-}
-
-.artifact-readme-title {
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.artifact-readme-scroll {
-  flex: 1;
-  min-height: 0;
 }
 
 .task-log-shell {

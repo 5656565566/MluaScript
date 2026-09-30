@@ -137,28 +137,3 @@ test('running a build artifact refreshes only task manager data', async () => {
   assert.deepEqual(calls, [{ artifactId: 'artifact-id', sessionLabel: 'ADB:selected' }])
   assert.equal(refreshCount, 1)
 })
-
-test('opening an artifact readme stores the document and selects the readme tab', async () => {
-  const state = {
-    artifactReadme: ref(null),
-    taskManagerActiveTab: ref('resource-list'),
-  }
-  const actions = createRuntimeActions({
-    state,
-    systemApi: {
-      async getArtifactReadme(artifactId) {
-        assert.equal(artifactId, 'artifact-id')
-        return { artifact_id: artifactId, name: 'Demo', path: 'builds/demo.mlspkg', markdown: '# Demo' }
-      },
-    },
-    runApi: {},
-    runtimeStreams: {},
-    getActions: () => actions,
-  })
-
-  const readme = await actions.openArtifactReadme('artifact-id')
-
-  assert.equal(readme.markdown, '# Demo')
-  assert.equal(state.artifactReadme.value.name, 'Demo')
-  assert.equal(state.taskManagerActiveTab.value, 'artifact-readme')
-})

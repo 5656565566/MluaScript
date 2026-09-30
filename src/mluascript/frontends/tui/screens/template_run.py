@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -12,15 +13,38 @@ from textual.containers import Container, Horizontal, ScrollableContainer, Verti
 from textual.timer import Timer
 import uuid
 
-from textual.widgets import Button, ContentSwitcher, Input, Static, Switch, TabbedContent, TabPane, Tabs, Tab
+from textual.widgets import Button, ContentSwitcher, Input, Markdown, Static, Switch, TabbedContent, TabPane, Tabs, Tab
 
 from mluascript.control.facade import get_control_facade
 from mluascript.control.state.models import TaskListItemView
-from mluascript.control.workspace import SavedFlowConfig, TemplateCondition, TemplateSavedConfig, TemplateVarDef, get_template_store, is_condition_active
+from mluascript.control.workspace import (
+    ArtifactTemplateData,
+    SavedFlowConfig,
+    TemplateCondition,
+    TemplateSavedConfig,
+    TemplateVarDef,
+    get_template_store,
+    is_condition_active,
+)
 from mluascript.frontends.tui.components.pagination import paginate_items
 
 
 TEMPLATE_TASK_PAGE_SIZE = 10
+
+
+_HEADING_SLUG_STRIP_RE = re.compile(r"[^\w一-鿿]+", re.UNICODE)
+"""标题锚点只保留字母、数字、下划线与中日韩表意文字，其余一律折叠成连字符。"""
+
+
+def _slugify_heading(title: str) -> str:
+    """生成与 GitHub 风格接近、且不会把中文标题抹成空串的标题锚点
+
+    Textual 自带的 `textual._slug.slug` 会把 U+24C2–U+1F251 整段判为非语言字符，
+    也就是连 CJK 表意文字一起删掉，于是「安装说明」这类纯中文标题的锚点恒为空串，
+    页内跳转永远匹配不上。这里改成只剔除标点与空白。
+    """
+
+    return _HEADING_SLUG_STRIP_RE.sub("-", title.strip().lower()).strip("-")
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,6 +272,16 @@ class TemplateRunScreen(Container):
         width: 100%;
     }
 
+    .top-action-row {
+        align-vertical: middle;
+        align-horizontal: right;
+    }
+
+    .top-action-title {
+        width: 1fr;
+        margin: 1 0 0 0;
+    }
+
     .small-btn {
         width: 12;
         margin-right: 1;
@@ -273,6 +307,8 @@ class TemplateRunScreen(Container):
         super().__init__(name=name, id=id, classes=classes)
         self._refresh_timer: Timer | None = None
         self._selected_script_path: str | None = None
+        self._selected_artifact_id: str | None = None
+        self._selected_artifact = None
         self._selected_workflow_key: str | None = None
         self._selected_step_key: str | None = None
         self._step_page_index = 0
@@ -287,9 +323,12 @@ class TemplateRunScreen(Container):
         self._selected_script_meta: dict[str, Any] | None = None
         self._selected_saved_config: TemplateSavedConfig | None = None
         self._selected_config_path: str = ""
+        self._selected_readme: dict[str, str] | None = None
+        self._readme_error: str = ""
         self._rendered_detail_key: tuple[str | None, str | None, str | None] = (None, None, None)
         self._rendered_global_key: tuple[str | None, str | None] = (None, None)
         self._rendered_step_list_key: tuple[Any, ...] | None = None
+        self._rendered_readme_key: tuple[str, str, str, str] | None = None
 
     @property
     def _control(self):
@@ -303,9 +342,9 @@ class TemplateRunScreen(Container):
         with TabbedContent(id="template-run-tabs"):
             with TabPane("模板配置", id="template-run-tab-config"):
                 with ScrollableContainer(classes="tab-scroll-area"):
-                    yield Static("模板运行", classes="section-title")
                     with Horizontal(classes="top-action-row"):
-                        yield Button("执行工作流", id="btn-template-run", classes="run-btn")
+                        yield Static("模板运行", classes="section-title top-action-title")
+                        yield Button("执行工作流", id="btn-template-run", classes="run-btn", disabled=True)
                     yield Static("当前未选择模板任务", id="template-header", classes="workflow-header")
                     yield Static("请从运行任务页进入模板执行", id="template-description", classes="section-desc")
                     yield Vertical(id="template-globals", classes="global-panel")
@@ -330,6 +369,11 @@ class TemplateRunScreen(Container):
                                     id="template-step-page-next",
                                     classes="template-page-btn",
                                 )
+            with TabPane("包说明", id="template-run-tab-readme"):
+                with ScrollableContainer(classes="tab-scroll-area"):
+                    yield Static("包说明", classes="section-title")
+                    yield Static("当前模板没有 README.md", id="template-readme-summary", classes="section-desc")
+                    yield Markdown("当前模板没有 README.md", id="template-readme-view", open_links=False)
             with TabPane("任务配置", id="template-run-tab-step"):
                 with ScrollableContainer(classes="tab-scroll-area"):
                     yield Static("任务配置", classes="section-title")
@@ -368,6 +412,7 @@ class TemplateRunScreen(Container):
         self._render_step_list()
         self._render_step_detail()
         self._render_meta_panel()
+        self._render_readme_panel()
 
     def _sync_selected_template(self) -> None:
         if not self._selected_script_path:
@@ -523,12 +568,22 @@ class TemplateRunScreen(Container):
         if meta is None:
             header.update("当前未选择模板任务")
             description.update("请从运行任务页进入模板执行")
+            self._set_run_button_enabled(False)
             return
         title = meta.ut or meta.t or self._selected_script_path or "模板运行"
         if flow is not None:
             title = f"{title} / {flow.ut or flow.t or flow.k}"
         header.update(title)
         description.update((flow.ud or flow.d) if flow is not None and (flow.ud or flow.d) else (meta.ud or meta.d or "暂无模板描述"))
+        self._set_run_button_enabled(flow is not None)
+
+    def _set_run_button_enabled(self, enabled: bool) -> None:
+        """没有选中模板或工作流时置灰按钮，避免点击后静默无反应"""
+
+        try:
+            self.query_one("#btn-template-run", Button).disabled = not enabled
+        except Exception:
+            pass
 
     def _render_globals_panel(self) -> None:
         container = self.query_one("#template-globals", Vertical)
@@ -752,9 +807,10 @@ class TemplateRunScreen(Container):
         if meta is None or not script_path:
             container.mount(Static("当前没有选中的模板脚本", classes="muted-box"))
             return
+        artifact = self._selected_artifact
         items = [
-            f"脚本: {Path(script_path).name}",
-            f"路径: {script_path}",
+            f"脚本: {artifact.name if artifact is not None else Path(script_path).name}",
+            f"路径: {artifact.path if artifact is not None else script_path}",
             f"配置: {self._selected_config_path or '未生成'}",
             f"模板标题: {meta.ut or meta.t or '-'}",
             f"默认工作流: {meta.entry.flow or '-'}",
@@ -762,6 +818,37 @@ class TemplateRunScreen(Container):
         ]
         for text in items:
             container.mount(Static(text, classes="footer-box"))
+
+    def _render_readme_panel(self) -> None:
+        summary = self.query_one("#template-readme-summary", Static)
+        view = self.query_one("#template-readme-view", Markdown)
+        if self._readme_error:
+            render_key = ("error", self._readme_error, "", "")
+        else:
+            readme = self._selected_readme
+            if not readme:
+                render_key = ("empty", "", "", "")
+            else:
+                name = readme.get("name") or "README.md"
+                path = readme.get("path") or "README.md"
+                body = readme.get("markdown") or ""
+                render_key = ("ok", f"{name} · {path}", path, body)
+
+        if self._rendered_readme_key == render_key:
+            return
+        self._rendered_readme_key = render_key
+
+        kind, headline, _path, body = render_key
+        if kind == "error":
+            summary.update("包说明读取失败")
+            view.update(f"无法读取包说明：{headline}")
+            return
+        if kind == "empty":
+            summary.update("当前模板没有 README.md")
+            view.update("当前模板没有 README.md")
+            return
+        summary.update(headline)
+        view.update(body)
 
     def _build_active_values(self, step_key: str) -> dict[str, Any]:
         values = dict(self._get_globals_values())
@@ -978,8 +1065,14 @@ class TemplateRunScreen(Container):
         if built is None or not self._selected_script_path:
             return
         _, saved = built
-        self._selected_saved_config = self._template_store.save_saved_config(self._selected_script_path, saved)
-        self._selected_config_path = self._template_store.get_saved_config_path(self._selected_script_path)
+        if self._selected_artifact_id:
+            self._selected_saved_config = self._control.save_artifact_template_config(
+                self._selected_artifact_id,
+                saved,
+            )
+        else:
+            self._selected_saved_config = self._template_store.save_saved_config(self._selected_script_path, saved)
+            self._selected_config_path = self._template_store.get_saved_config_path(self._selected_script_path)
 
     def _get_or_create_saved_flow(self, saved: TemplateSavedConfig, workflow_key: str):
         saved_flow = saved.flows.get(workflow_key)
@@ -1062,7 +1155,8 @@ class TemplateRunScreen(Container):
         self._refresh_all()
 
     def action_refresh_templates(self) -> None:
-        self._selected_script_meta = None
+        if not self._selected_artifact_id:
+            self._selected_script_meta = None
         self._refresh_all()
         self.notify("模板列表已刷新")
 
@@ -1092,12 +1186,15 @@ class TemplateRunScreen(Container):
             return
         if self._selected_script_path != script_path:
             self._selected_script_meta = None
+        self._selected_artifact_id = None
+        self._selected_artifact = None
         self._selected_script_path = script_path
         workflow_key = str(payload.get("workflowKey") or "").strip()
         if workflow_key:
             self._selected_workflow_key = workflow_key
         self._selected_step_key = None
         self._step_page_index = 0
+        self._load_selected_readme(script_path)
         self._sync_selected_template()
         self._load_selected_template_state()
         self._render_workflow_tabs()
@@ -1106,6 +1203,95 @@ class TemplateRunScreen(Container):
         self._render_step_list()
         self._render_step_detail()
         self._render_meta_panel()
+        self._render_readme_panel()
+        self._activate_default_tab()
+
+    def _load_template_artifact(self, template: ArtifactTemplateData) -> None:
+        if not template.has_template or template.meta is None or template.saved_config is None:
+            return
+        source = template.source
+        self._selected_artifact_id = source.artifact.id
+        self._selected_artifact = source.artifact
+        self._selected_script_path = source.script_path
+        self._selected_script_meta = {"path": source.script_path, "meta": template.meta}
+        self._selected_saved_config = template.saved_config
+        self._selected_config_path = template.config_path
+        self._selected_workflow_key = (
+            template.saved_config.selectedFlowKey
+            or template.meta.entry.flow
+            or (template.meta.flows[0].k if template.meta.flows else None)
+        )
+        self._selected_step_key = None
+        self._step_page_index = 0
+        self._selected_readme = (
+            {"name": template.readme.name, "path": template.readme.path, "markdown": template.readme.markdown}
+            if template.readme is not None
+            else None
+        )
+        self._readme_error = ""
+        self._sync_selected_template()
+        self._refresh_all()
+        self._activate_default_tab()
+
+    def _load_selected_readme(self, script_path: str) -> None:
+        """读取模板脚本所属项目根目录的 README，读取失败时降级为占位提示"""
+
+        self._selected_readme = None
+        self._readme_error = ""
+        try:
+            self._selected_readme = self._template_store.get_readme(script_path)
+        except Exception as exc:
+            self._readme_error = str(exc)
+
+    def _activate_default_tab(self) -> None:
+        """从运行任务页进入时默认展示包说明，没有 README 则停留在模板配置"""
+
+        try:
+            tabs = self.query_one("#template-run-tabs", TabbedContent)
+        except Exception:
+            return
+        tabs.active = "template-run-tab-readme" if self._selected_readme else "template-run-tab-config"
+
+    def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
+        """支持 README 内部的标题跳转，其余链接不在终端里打开"""
+
+        event.stop()
+        href = (event.href or "").strip()
+        if not href:
+            return
+        if href.startswith("#"):
+            self._jump_to_heading(event.markdown, href[1:])
+            return
+        self.notify(f"链接地址: {href}", title="包说明", timeout=6)
+
+    def _jump_to_heading(self, view: Markdown, raw_anchor: str) -> None:
+        """把 #锚点 滚到对应标题
+
+        先走 Textual 自带实现，它只对纯 ASCII 标题有效；中文标题因为其 slug
+        会落成空串而匹配不上，所以再按自己的归一化规则比对标题文本。
+        """
+
+        anchor = raw_anchor.strip()
+        if not anchor:
+            return
+        if view.goto_anchor(anchor):
+            return
+        normalized = _slugify_heading(anchor)
+        if normalized and view.goto_anchor(normalized):
+            return
+        headings = self._find_heading_blocks(view)
+        target = next(
+            (block for block in headings if _slugify_heading(str(block._content.plain)) == normalized),
+            None,
+        )
+        if target is not None:
+            target.scroll_visible(top=True)
+            return
+        self.notify(f"未找到标题: {raw_anchor}", title="包说明", severity="warning", timeout=4)
+
+    @staticmethod
+    def _find_heading_blocks(view: Markdown) -> list[Any]:
+        return [child for child in view.children if child.__class__.__name__.startswith("MarkdownH")]
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         button = event.button
@@ -1202,6 +1388,21 @@ class TemplateRunScreen(Container):
             return
         workflow_key, saved = built
         try:
+            if self._selected_artifact_id:
+                saved_config = self._control.save_artifact_template_config(self._selected_artifact_id, saved)
+                saved_flow = saved_config.flows.get(workflow_key)
+                target = self._control.get_device_overview().connection.label or "LOCAL"
+                task_id = self._control.run_artifact_template(
+                    self._selected_artifact_id,
+                    target,
+                    template_mode="workflow",
+                    workflow_key=workflow_key,
+                    workflow=saved_flow.model_dump() if saved_flow is not None else {},
+                )
+                self.app.call_from_thread(self.notify, f"模板工作流已启动: {task_id}", severity="information")
+                self._selected_saved_config = saved_config
+                self.app.call_from_thread(self._refresh_all)
+                return
             meta = self._template_store.get_template_meta(script_path)
             if meta is None:
                 self.app.call_from_thread(self.notify, "脚本未声明模板元数据", severity="error")

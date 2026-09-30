@@ -5,22 +5,40 @@ from __future__ import annotations
 import time
 from typing import Any, cast
 
-from textual import work
+from textual import on, work
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.timer import Timer
-from textual.widgets import Button, Markdown, RichLog, Static, TabbedContent, TabPane
+from textual.widgets import Button, Input, Markdown, RichLog, Static, TabbedContent, TabPane
 
 from mluascript.control.facade import get_control_facade
 from mluascript.control.state.models import TaskListItemView
-from mluascript.control.workspace import ArtifactReadme, RunnableArtifact, get_template_store
+from mluascript.control.workspace import RunnableArtifact, get_template_store
 from mluascript.frontends.tui.components.pagination import paginate_items
 
 
 TASK_PAGE_SIZE = 10
 SCRIPT_PAGE_SIZE = 10
+
+
+def _matches_artifact_query(artifact: RunnableArtifact, query: str) -> bool:
+    normalized = query.strip().casefold()
+    if not normalized:
+        return True
+    return any(
+        normalized in str(value or "").casefold()
+        for value in (
+            artifact.name,
+            artifact.path,
+            artifact.description,
+            artifact.author,
+            artifact.version,
+            artifact.package_id,
+            artifact.entrypoint,
+        )
+    )
 
 
 def _paginate_tasks(
@@ -60,24 +78,16 @@ class RunScreen(ScrollableContainer):
     }
 
     .artifact-script-row {
-        height: 3;
+        height: auto;
         width: 100%;
+        margin: 1 0;
         align-vertical: middle;
     }
 
-    Button.artifact-run-btn {
-        width: 1fr;
-    }
-
-    Button.artifact-readme-btn {
-        width: 1fr;
-    }
-
-    .artifact-script-row Button.artifact-run-btn {
-        width: 10;
-        min-width: 10;
+    .artifact-script-row Button.script-btn {
+        width: 100%;
         height: 3;
-        margin: 0 0 0 1;
+        margin: 0;
     }
 
     #task-pagination {
@@ -176,7 +186,6 @@ class RunScreen(ScrollableContainer):
         self._script_page_index = 0
         self._task_page_index = 0
         self._script_button_action_map: dict[str, tuple[str, str]] = {}
-        self._readme_button_name_map: dict[str, str] = {}
         self._task_button_name_map: dict[str, str] = {}
         self._task_action_name_map: dict[str, tuple[str, str]] = {}
         self._script_buttons: dict[str, Button] = {}
@@ -194,6 +203,7 @@ class RunScreen(ScrollableContainer):
         self._available_scripts_cache: list[Any] = []
         self._artifact_cache: list[RunnableArtifact] = []
         self._last_resource_refresh = 0.0
+        self._script_query = ""
 
     @property
     def _control(self):
@@ -205,6 +215,7 @@ class RunScreen(ScrollableContainer):
                 with ScrollableContainer(classes="tab-scroll-area"):
                     yield Markdown("### 可运行脚本")
                     yield Static("点击脚本即可直接创建 Lua 运行任务", classes="panel-desc")
+                    yield Input(placeholder="搜索名称、路径、描述、包 ID 或版本", id="script-search")
                     yield Vertical(id="available-script-list")
                     with Horizontal(id="script-pagination"):
                         yield Button(
@@ -253,11 +264,6 @@ class RunScreen(ScrollableContainer):
                     yield Static("运行日志: 当前未选择脚本任务", id="runtime-log-summary")
                     yield RichLog(id="runtime-log-view", markup=False, wrap=True, auto_scroll=True, max_lines=200)
 
-            with TabPane("包说明", id="run-tab-readme"):
-                with ScrollableContainer(classes="tab-scroll-area"):
-                    yield Static("当前未选择构建包", id="artifact-readme-summary", classes="panel-desc")
-                    yield Markdown("请选择带 README 的构建包", id="artifact-readme-view")
-
     def on_mount(self) -> None:
         self._refresh_timer = self.set_interval(0.5, self._refresh_all)
         self.set_active(getattr(self.app, "active_tab", None) == self.id)
@@ -299,17 +305,23 @@ class RunScreen(ScrollableContainer):
     def _render_available_scripts(self, scripts, artifacts: list[RunnableArtifact]) -> None:
         container = self.query_one("#available-script-list", Vertical)
         kind_labels = {"package": "脚本包", "maa": "Maa 包", "lua": "Lua"}
-        resources: list[tuple[str, str, str, bool]] = [
+        visible_artifacts = [artifact for artifact in artifacts if _matches_artifact_query(artifact, self._script_query)]
+        resources: list[tuple[str, str, str]] = [
             (
                 "artifact",
                 artifact.id,
                 f"[{kind_labels[artifact.kind]}] {artifact.name}"
                 f"{f' · {artifact.version}' if artifact.version else ''}",
-                artifact.has_readme,
             )
-            for artifact in artifacts
+            for artifact in visible_artifacts
         ]
-        resources.extend(("script", script.path, script.path, False) for script in scripts)
+        artifact_paths = {artifact.path.casefold() for artifact in artifacts if artifact.kind == "lua"}
+        resources.extend(
+            ("script", script.path, script.path)
+            for script in scripts
+            if script.path.casefold() not in artifact_paths
+            and self._script_query.strip().casefold() in script.path.casefold()
+        )
         page_resources, self._script_page_index, total_pages = paginate_items(
             resources,
             self._script_page_index,
@@ -324,12 +336,7 @@ class RunScreen(ScrollableContainer):
         self._script_buttons.clear()
         self._script_button_action_map = {
             f"script-run-{index}": (kind, identifier)
-            for index, (kind, identifier, _label, _has_readme) in enumerate(page_resources)
-        }
-        self._readme_button_name_map = {
-            f"artifact-readme-{index}": identifier
-            for index, (kind, identifier, _label, has_readme) in enumerate(page_resources)
-            if kind == "artifact" and has_readme
+            for index, (kind, identifier, _label) in enumerate(page_resources)
         }
 
         if not page_resources:
@@ -339,20 +346,11 @@ class RunScreen(ScrollableContainer):
             return
 
         self._empty_script_widget = None
-        for index, (kind, _identifier, label, has_readme) in enumerate(page_resources):
+        for index, (_kind, _identifier, label) in enumerate(page_resources):
             run_name = f"script-run-{index}"
             run_button = Button(f"运行 {label}", name=run_name, classes="script-btn artifact-run-btn")
             self._script_buttons[run_name] = run_button
-            if kind == "artifact" and has_readme:
-                readme_button = Button(
-                    f"查看说明 {label}",
-                    name=f"artifact-readme-{index}",
-                    classes="artifact-readme-btn",
-                )
-                run_button.label = "运行"
-                container.mount(Horizontal(readme_button, run_button, classes="artifact-script-row"))
-            else:
-                container.mount(run_button)
+            container.mount(Horizontal(run_button, classes="artifact-script-row"))
         self._available_render_key = render_key
 
     def _render_script_pagination(self, script_count: int, total_pages: int) -> None:
@@ -607,12 +605,6 @@ class RunScreen(ScrollableContainer):
             self._script_page_index += 1
             self._refresh_all()
             return
-        if button_name in self._readme_button_name_map:
-            self._activate_tab("run-tab-readme")
-            self.query_one("#artifact-readme-summary", Static).update("正在读取包说明...")
-            self.query_one("#artifact-readme-view", Markdown).update("正在读取包说明，请稍候...")
-            self._open_artifact_readme(self._readme_button_name_map[button_name])
-            return
         if button_name == "task-page-previous":
             self._task_page_index = max(0, self._task_page_index - 1)
             self._refresh_all()
@@ -655,28 +647,22 @@ class RunScreen(ScrollableContainer):
                 else:
                     self._open_script(identifier)
 
-    @work(thread=True)
-    def _open_artifact_readme(self, artifact_id: str) -> None:
-        try:
-            readme = self._control.get_artifact_readme(artifact_id)
-            self.app.call_from_thread(self._show_artifact_readme, readme)
-        except Exception as exc:
-            self.app.call_from_thread(self._show_artifact_readme_error, str(exc))
-
-    def _show_artifact_readme(self, readme: ArtifactReadme) -> None:
-        self.query_one("#artifact-readme-summary", Static).update(f"{readme.name} · {readme.path}")
-        self.query_one("#artifact-readme-view", Markdown).update(readme.markdown)
-        self._activate_tab("run-tab-readme")
-
-    def _show_artifact_readme_error(self, message: str) -> None:
-        self.query_one("#artifact-readme-summary", Static).update("包说明读取失败")
-        self.query_one("#artifact-readme-view", Markdown).update(f"无法读取包说明：{message}")
-        self._activate_tab("run-tab-readme")
-        self.notify(f"读取包说明失败: {message}", severity="error")
+    @on(Input.Changed, "#script-search")
+    def _on_script_search_changed(self, event: Input.Changed) -> None:
+        self._script_query = event.value
+        self._script_page_index = 0
+        self._available_render_key = None
+        self._render_available_scripts(self._available_scripts_cache, self._artifact_cache)
 
     @work(thread=True)
     def _run_artifact(self, artifact_id: str) -> None:
         try:
+            artifact = next((item for item in self._artifact_cache if item.id == artifact_id), None)
+            if artifact is not None and artifact.kind != "maa":
+                template = self._control.get_artifact_template(artifact_id)
+                if template.has_template and template.meta is not None and template.meta.flows:
+                    self.app.call_from_thread(self._open_artifact_template, template)
+                    return
             overview = self._control.get_device_overview()
             target = overview.connection.label or "LOCAL"
             task_id = self._control.run_artifact(artifact_id, target)
@@ -687,6 +673,16 @@ class RunScreen(ScrollableContainer):
             self.app.call_from_thread(self._refresh_all)
         except Exception as exc:
             self.app.call_from_thread(self.notify, f"启动构建产物失败: {exc}", severity="error")
+
+    def _open_artifact_template(self, template) -> None:
+        template_screen = self.app.query_one("#template-run")
+        loader = getattr(template_screen, "_load_template_artifact", None)
+        if not callable(loader):
+            self.notify("模板执行页不可用", severity="error")
+            return
+        loader(template)
+        cast("Any", self.app).action_switch_tab("template-run")
+        self.notify(f"已打开模板执行页: {template.source.artifact.name}")
 
     @work(thread=True)
     def _open_script(self, script_path: str) -> None:

@@ -185,6 +185,43 @@ def test_catalog_keeps_latest_same_version_and_latest_single_file_build(tmp_path
     assert lua_items[0].path.endswith("2222222222222222/single.lua")
 
 
+def test_default_scripts_directory_is_created_and_discovers_lua_and_package(tmp_path: Path) -> None:
+    builds = tmp_path / ".mluascript_web" / "builds"
+    scripts = tmp_path / "scripts"
+    service = ArtifactService(builds)
+
+    assert not scripts.exists()
+    assert service.list_artifacts() == []
+    assert scripts.is_dir()
+
+    lua_path = scripts / "direct.lua"
+    package_path = _write_package(scripts / "demo.mlspkg", "lua-package")
+    lua_path.write_text("return 42\n", encoding="utf-8")
+    package_before = package_path.read_bytes()
+
+    artifacts = service.list_artifacts()
+
+    assert {(item.kind, item.source) for item in artifacts} == {
+        ("lua", "configured"),
+        ("package", "configured"),
+    }
+    assert package_path.read_bytes() == package_before
+
+
+def test_additional_script_roots_discover_top_level_lua_and_package(tmp_path: Path) -> None:
+    builds = tmp_path / ".mluascript_web" / "builds"
+    external = tmp_path / "external-scripts"
+    external.mkdir()
+    (external / "extra.lua").write_text("return true\n", encoding="utf-8")
+    _write_package(external / "extra.mlspkg", "lua-package", package_id="com.example.extra")
+
+    artifacts = ArtifactService(builds, script_roots=[external]).list_artifacts()
+
+    assert {item.package_id for item in artifacts if item.kind == "package"} == {"com.example.extra"}
+    assert {item.name for item in artifacts if item.kind == "lua"} == {"extra.lua"}
+    assert all(item.source == "configured" for item in artifacts)
+
+
 def test_catalog_restores_blockly_single_file_project_type(tmp_path: Path) -> None:
     projects = tmp_path / ".mluascript_web" / "projects"
     builds = tmp_path / ".mluascript_web" / "builds"

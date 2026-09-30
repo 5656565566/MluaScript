@@ -72,6 +72,33 @@ renderer.renderer.rules.link_open = (tokens, index, options, env, self) => {
   return defaultLinkOpen(tokens, index, options, env, self)
 }
 
+export function readmeHeadingId(title) {
+  return String(title || '')
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/\s+/gu, '-')
+    .replace(/[^\p{Letter}\p{Number}\p{Mark}_-]/gu, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || 'section'
+}
+
+renderer.core.ruler.push('readme_heading_ids', (state) => {
+  const counts = new Map()
+  for (let index = 0; index < state.tokens.length; index += 1) {
+    const token = state.tokens[index]
+    if (token.type !== 'heading_open') continue
+    const inlineToken = state.tokens[index + 1]
+    const title = inlineToken?.children
+      ?.filter(child => child.type === 'text' || child.type === 'code_inline')
+      .map(child => child.content)
+      .join('') || inlineToken?.content
+    const baseId = readmeHeadingId(title)
+    const duplicateCount = counts.get(baseId) || 0
+    counts.set(baseId, duplicateCount + 1)
+    token.attrSet('id', duplicateCount ? `${baseId}-${duplicateCount}` : baseId)
+  }
+})
+
 export function renderReadmeMarkdown(markdown) {
   return renderer.render(String(markdown || ''))
 }

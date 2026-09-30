@@ -13,9 +13,14 @@ const renderRevision = ref(0)
 let themeObserver = null
 let mermaidGeneration = 0
 
-function sanitize(html) {
+function sanitize(html, isMermaid = false) {
   return DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true, svg: true, svgFilters: true, mathMl: true },
+    // Mermaid labels are HTML inside SVG foreignObject elements.
+    ...(isMermaid ? {
+      ADD_TAGS: ['foreignObject'],
+      HTML_INTEGRATION_POINTS: { foreignobject: true },
+    } : {}),
   })
 }
 
@@ -38,7 +43,7 @@ async function renderMermaidDiagrams(generation) {
       const id = `readme-mermaid-${generation}-${index}`
       const result = await mermaid.render(id, source)
       if (generation !== mermaidGeneration) return
-      node.innerHTML = sanitize(result.svg)
+      node.innerHTML = sanitize(result.svg, true)
       node.classList.add('is-rendered')
       result.bindFunctions?.(node)
     } catch (error) {

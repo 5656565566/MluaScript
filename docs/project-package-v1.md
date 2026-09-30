@@ -77,6 +77,12 @@ manifest 中的路径只能是项目内相对路径。所有 entrypoint、resour
 
 ## Web 工作流
 
+已发布的 `.mlspkg` 不需要安装。将文件放到可执行文件同级的 `scripts/` 顶层，或放入
+`GlobalConfig.scripts_path` 指定目录的顶层，即可在 Web“任务管理”中搜索并运行。
+模板包点击“运行”后进入统一配置页：顶部“脚本说明”显示包内 README，“工作流”用于
+选择工作流、填写参数并执行，“脚本信息”显示包 ID、版本、入口、路径和校验状态。
+运行配置保存在包外的宿主设置目录，归档本身不会被修改。
+
 Web 配置中的 `WebServerConfig.project_roots` 控制可创建和发现的项目根目录，默认是
 `./projects`。前端统一使用“编辑器”工作区：manifest 声明的 Blockly XML 由 Blockly
 编辑，其他 UTF-8 文件由带语法高亮的文本编辑器处理，二进制资源和模型只上传、下载，

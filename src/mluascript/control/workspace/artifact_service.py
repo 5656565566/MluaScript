@@ -10,16 +10,16 @@ import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Iterable, Literal
 
 import yaml
 from pydantic import BaseModel, Field
 
-from mluascript.shared.config import GlobalConfig, config
-
 from .manager import WorkspaceManager
 from .package_builder import normalize_package_path
 from .project_models import ProjectManifest
+from .template_models import TemplateMeta, TemplateSavedConfig
+from .template_store import TemplateStore
 
 if TYPE_CHECKING:
     from .project_service import ProjectService
@@ -39,6 +39,22 @@ class ArtifactTemplateSource:
     artifact: "RunnableArtifact"
     script_path: str
     code: str
+
+
+@dataclass(slots=True)
+class ArtifactTemplateData:
+    """构建入口的模板、持久化配置和只读展示信息"""
+
+    source: ArtifactTemplateSource
+    meta: TemplateMeta | None
+    saved_config: TemplateSavedConfig | None
+    config_path: str = ""
+    readme: "ArtifactReadme | None" = None
+    verification_status: str = ""
+
+    @property
+    def has_template(self) -> bool:
+        return self.meta is not None
 
 
 def cleanup_artifact_runtime_dir(raw_path: str | Path | None) -> bool:
@@ -123,20 +139,25 @@ class ArtifactService:
         builds_root: str | Path,
         *,
         runtime_root: str | Path | None = None,
+        scripts_root: str | Path | None = None,
+        script_roots: Iterable[str | Path] = (),
         workspace_manager: WorkspaceManager | None = None,
         project_service: ProjectService | None = None,
     ) -> None:
         self.builds_root = Path(builds_root).resolve()
         self.runtime_root = Path(runtime_root or (self.builds_root.parent / "runtime" / "tasks")).resolve()
         self.workspace_manager = workspace_manager or WorkspaceManager(self.builds_root.parent.parent)
+        self.scripts_root = Path(scripts_root or (self.builds_root.parent.parent / "scripts")).resolve()
+        self.script_roots = self._resolve_script_roots(script_roots)
         self.project_service = project_service
         self._manifest_cache: dict[Path, tuple[int, int, ProjectManifest | None, str]] = {}
         self._readme_presence_cache: dict[Path, tuple[int, int, bool]] = {}
 
     def list_artifacts(self) -> list[RunnableArtifact]:
+        self.scripts_root.mkdir(parents=True, exist_ok=True)
         packages = self._latest_packages()
         single_files = self._latest_single_file_builds()
-        configured = self._configured_scripts()
+        configured = self._configured_artifacts()
         items = [*packages, *single_files, *configured]
         return sorted(items, key=lambda item: (item.kind, item.name.casefold(), item.version, item.entrypoint))
 
@@ -170,11 +191,116 @@ class ArtifactService:
             raise ArtifactServiceError(f"读取 Lua 产物失败: {exc}") from exc
         return ArtifactTemplateSource(artifact=artifact, script_path=path.name, code=code)
 
+    def get_template(self, artifact_id: str) -> ArtifactTemplateData:
+        """读取入口模板及宿主侧配置；脚本包本身始终只读"""
+
+        source = self.get_template_source(artifact_id)
+        store = self._template_store(source)
+        meta = store.get_template_meta_from_source(source.code, script_path=source.script_path)
+        verification_status = "入口摘要已校验" if source.artifact.kind == "package" else "脚本已读取"
+        if meta is None:
+            return ArtifactTemplateData(
+                source=source,
+                meta=None,
+                saved_config=None,
+                verification_status=verification_status,
+            )
+        readme = self.read_readme(artifact_id) if source.artifact.has_readme else None
+        return ArtifactTemplateData(
+            source=source,
+            meta=meta,
+            saved_config=store.load_saved_config(source.script_path),
+            config_path=store.get_saved_config_path(source.script_path),
+            readme=readme,
+            verification_status=verification_status,
+        )
+
+    def prepare_template_run(
+        self,
+        artifact_id: str,
+        *,
+        template_mode: str,
+        workflow_key: str = "",
+        workflow: dict[str, object] | None = None,
+        runtime: dict[str, object] | None = None,
+    ) -> PreparedArtifactRun:
+        """保存宿主侧模板配置并生成运行代码，不修改原始脚本或脚本包"""
+
+        prepared = self.prepare_run(artifact_id)
+        try:
+            if prepared.mode != "script":
+                raise ArtifactServiceError("当前构建产物不支持 Lua 模板")
+            template = self.get_template(artifact_id)
+            meta = template.meta
+            if meta is None or template.saved_config is None:
+                raise ArtifactServiceError("构建入口没有模板元数据")
+            store = self._template_store(template.source)
+            current_saved = template.saved_config
+            runtime_payload = runtime or {}
+            if template_mode == "task" or (meta.mode == "task" and not meta.flows):
+                task_key = str(runtime_payload.get("selectedTaskKey") or meta.entry.task or "").strip()
+                raw_tasks = runtime_payload.get("tasks") or {}
+                if not isinstance(raw_tasks, dict):
+                    raise ArtifactServiceError("模板任务配置必须是对象")
+                tasks = {
+                    str(key): {"params": value if isinstance(value, dict) else {}}
+                    for key, value in raw_tasks.items()
+                }
+                saved = store.save_saved_config(
+                    template.source.script_path,
+                    TemplateSavedConfig.model_validate(
+                        {
+                            **current_saved.model_dump(),
+                            "scriptPath": template.source.script_path,
+                            "selectedTaskKey": task_key,
+                            "tasks": tasks,
+                        }
+                    ),
+                )
+                runtime_code = store.build_task_runtime_script(meta, saved, task_key=task_key)
+            else:
+                selected_flow = str(workflow_key or meta.entry.flow or "").strip()
+                if not selected_flow:
+                    raise ArtifactServiceError("模板调试缺少工作流入口")
+                saved = store.save_saved_config(
+                    template.source.script_path,
+                    TemplateSavedConfig.model_validate(
+                        {
+                            **current_saved.model_dump(),
+                            "scriptPath": template.source.script_path,
+                            "selectedFlowKey": selected_flow,
+                            "flows": {
+                                **current_saved.model_dump().get("flows", {}),
+                                selected_flow: workflow or {},
+                            },
+                        }
+                    ),
+                )
+                runtime_code = store.build_runtime_script(meta, saved, flow_key=selected_flow)
+            prepared.code = f"{prepared.code}\n\n{runtime_code}\n"
+            return prepared
+        except Exception:
+            prepared.cleanup()
+            raise
+
+    def save_template_config(self, artifact_id: str, saved: TemplateSavedConfig) -> TemplateSavedConfig:
+        template = self.get_template(artifact_id)
+        if not template.has_template:
+            raise ArtifactServiceError("构建入口没有模板元数据")
+        return self._template_store(template.source).save_saved_config(template.source.script_path, saved)
+
     def template_config_dir(self, artifact_id: str) -> Path:
         """返回按构建产物隔离的模板配置目录 不修改包内容"""
 
         self.get_artifact(artifact_id)
         return (self.builds_root.parent / "settings" / "templates" / "artifacts" / artifact_id).resolve()
+
+    def _template_store(self, source: ArtifactTemplateSource) -> TemplateStore:
+        artifact_root = Path(source.artifact.artifact_path).resolve().parent
+        return TemplateStore(
+            WorkspaceManager(artifact_root),
+            config_dir=self.template_config_dir(source.artifact.id),
+        )
 
     def prepare_run(self, artifact_id: str) -> PreparedArtifactRun:
         artifact = self.get_artifact(artifact_id)
@@ -210,13 +336,8 @@ class ArtifactService:
     def _latest_packages(self) -> list[RunnableArtifact]:
         latest: dict[tuple[str, str], tuple[Path, ProjectManifest]] = {}
         if not self.builds_root.is_dir():
-            self._manifest_cache.clear()
             return []
         package_paths = sorted(self.builds_root.rglob("*.mlspkg"))
-        current_paths = {path.resolve() for path in package_paths}
-        self._manifest_cache = {
-            path: entry for path, entry in self._manifest_cache.items() if path in current_paths
-        }
         for path in package_paths:
             try:
                 manifest = self._read_package_manifest(path)
@@ -229,28 +350,7 @@ class ArtifactService:
 
         items: list[RunnableArtifact] = []
         for path, manifest in latest.values():
-            for entrypoint, entry in manifest.entrypoints.items():
-                entry_name = entry.name or entrypoint
-                item_name = manifest.package.name if len(manifest.entrypoints) == 1 else f"{manifest.package.name} · {entry_name}"
-                items.append(
-                    RunnableArtifact(
-                        id=self._artifact_id("package", path, entrypoint),
-                        kind="maa" if manifest.project_type == "maa" else "package",
-                        name=item_name,
-                        path=self._display_path(path),
-                        mtime=path.stat().st_mtime,
-                        description=manifest.package.description,
-                        author=manifest.package.author,
-                        version=manifest.package.version,
-                        package_id=manifest.package.id,
-                        project_type=manifest.project_type,
-                        entrypoint=entrypoint,
-                        source="build",
-                        run_mode="artifact",
-                        has_readme=self._package_has_readme(path),
-                        artifact_path=str(path),
-                    )
-                )
+            items.extend(self._package_artifacts(path, manifest, source="build"))
         return items
 
     def _latest_single_file_builds(self) -> list[RunnableArtifact]:
@@ -292,28 +392,67 @@ class ArtifactService:
             return ""
         return project.project_type if project.project_type in {"lua-file", "blockly-file"} else ""
 
-    def _configured_scripts(self) -> list[RunnableArtifact]:
-        # 隔离测试或嵌入式工作区不继承宿主进程的外部脚本目录
-        if self.workspace_manager.root_dir != Path.cwd().resolve():
-            return []
-        try:
-            configured_paths = list(config.get(GlobalConfig).scripts_path)
-        except Exception:
-            configured_paths = []
+    def _configured_artifacts(self) -> list[RunnableArtifact]:
         items: list[RunnableArtifact] = []
         seen: set[Path] = set()
-        for raw_root in configured_paths:
-            root = Path(str(raw_root)).expanduser()
-            root = root.resolve() if root.is_absolute() else (self.workspace_manager.root_dir / root).resolve()
+        for root in [self.scripts_root, *self.script_roots]:
             if not root.is_dir():
                 continue
-            for path in sorted(root.glob("*.lua")):
+            for path in sorted([*root.glob("*.lua"), *root.glob("*.mlspkg")]):
                 resolved = path.resolve()
                 if resolved in seen or not resolved.is_file():
                     continue
                 seen.add(resolved)
-                items.append(self._lua_artifact(resolved, source="configured", run_mode="artifact"))
+                if resolved.suffix.lower() == ".lua":
+                    items.append(self._lua_artifact(resolved, source="configured", run_mode="artifact"))
+                    continue
+                try:
+                    manifest = self._read_package_manifest(resolved)
+                except ArtifactServiceError:
+                    continue
+                items.extend(self._package_artifacts(resolved, manifest, source="configured"))
         return items
+
+    def _package_artifacts(
+        self,
+        path: Path,
+        manifest: ProjectManifest,
+        *,
+        source: Literal["build", "configured"],
+    ) -> list[RunnableArtifact]:
+        items: list[RunnableArtifact] = []
+        for entrypoint, entry in manifest.entrypoints.items():
+            entry_name = entry.name or entrypoint
+            item_name = manifest.package.name if len(manifest.entrypoints) == 1 else f"{manifest.package.name} · {entry_name}"
+            items.append(
+                RunnableArtifact(
+                    id=self._artifact_id(source, path, entrypoint),
+                    kind="maa" if manifest.project_type == "maa" else "package",
+                    name=item_name,
+                    path=self._display_path(path),
+                    mtime=path.stat().st_mtime,
+                    description=manifest.package.description,
+                    author=manifest.package.author,
+                    version=manifest.package.version,
+                    package_id=manifest.package.id,
+                    project_type=manifest.project_type,
+                    entrypoint=entrypoint,
+                    source=source,
+                    run_mode="artifact",
+                    has_readme=self._package_has_readme(path),
+                    artifact_path=str(path),
+                )
+            )
+        return items
+
+    def _resolve_script_roots(self, roots: Iterable[str | Path]) -> list[Path]:
+        resolved_roots: list[Path] = []
+        for raw_root in roots:
+            candidate = Path(raw_root).expanduser()
+            resolved = candidate.resolve() if candidate.is_absolute() else (self.workspace_manager.root_dir / candidate).resolve()
+            if resolved != self.scripts_root and resolved not in resolved_roots:
+                resolved_roots.append(resolved)
+        return resolved_roots
 
     def _lua_artifact(
         self,
@@ -537,6 +676,7 @@ __all__ = [
     "ArtifactService",
     "ArtifactServiceError",
     "ArtifactReadme",
+    "ArtifactTemplateData",
     "ArtifactTemplateSource",
     "PreparedArtifactRun",
     "RunnableArtifact",

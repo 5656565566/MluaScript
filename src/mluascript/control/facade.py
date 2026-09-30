@@ -4,6 +4,8 @@ from typing import Any
 
 from mluascript.maa.connections import current_desktop_label
 from mluascript.runtime.output_buffer import TaskOutputBuffer
+from mluascript.shared.config import resolve_configured_script_roots
+from mluascript.shared.config.manager import get_runtime_dir
 
 from .devices import ConnectAdbRequest, DeviceActionResult, DeviceOverview, get_device_facade
 from .execution.manager import get_execution_manager
@@ -20,7 +22,14 @@ from .state.models import (
 )
 from .workspace.manager import get_workspace_manager
 from .workspace.models import ScriptInfo
-from .workspace.artifact_service import ArtifactReadme, ArtifactService, PreparedArtifactRun, RunnableArtifact
+from .workspace.artifact_service import (
+    ArtifactReadme,
+    ArtifactService,
+    ArtifactTemplateData,
+    PreparedArtifactRun,
+    RunnableArtifact,
+)
+from .workspace.template_models import TemplateSavedConfig
 
 
 class ControlFacade:
@@ -31,8 +40,11 @@ class ControlFacade:
         self.state_mgr = get_state_manager()
         self.workspace_mgr = get_workspace_manager()
         self.device_facade = get_device_facade()
+        runtime_dir = get_runtime_dir()
         self.artifact_service = ArtifactService(
-            self.workspace_mgr.root_dir / ".mluascript_web" / "builds",
+            runtime_dir / ".mluascript_web" / "builds",
+            scripts_root=runtime_dir / "scripts",
+            script_roots=resolve_configured_script_roots(runtime_dir),
             workspace_manager=self.workspace_mgr,
         )
 
@@ -45,17 +57,49 @@ class ControlFacade:
         return self.workspace_mgr.read_script(rel_path)
 
     def list_build_artifacts(self) -> list[RunnableArtifact]:
-        """列出 TUI 与 Web 共用格式的 builds 构建产物"""
+        """列出 TUI 与 Web 共用格式的可运行产物"""
 
-        return [item for item in self.artifact_service.list_artifacts() if item.source == "build"]
+        return self.artifact_service.list_artifacts()
 
     def get_artifact_readme(self, artifact_id: str) -> ArtifactReadme:
         return self.artifact_service.read_readme(artifact_id)
 
+    def get_artifact_template(self, artifact_id: str) -> ArtifactTemplateData:
+        return self.artifact_service.get_template(artifact_id)
+
+    def save_artifact_template_config(
+        self,
+        artifact_id: str,
+        saved: TemplateSavedConfig,
+    ) -> TemplateSavedConfig:
+        return self.artifact_service.save_template_config(artifact_id, saved)
+
     def run_artifact(self, artifact_id: str, target: str) -> str:
         """准备并运行构建产物，失败时回收尚未托管给任务的运行目录"""
 
-        prepared: PreparedArtifactRun = self.artifact_service.prepare_run(artifact_id)
+        prepared = self.artifact_service.prepare_run(artifact_id)
+        return self._run_prepared_artifact(prepared, target)
+
+    def run_artifact_template(
+        self,
+        artifact_id: str,
+        target: str,
+        *,
+        template_mode: str,
+        workflow_key: str = "",
+        workflow: dict[str, object] | None = None,
+        runtime: dict[str, object] | None = None,
+    ) -> str:
+        prepared = self.artifact_service.prepare_template_run(
+            artifact_id,
+            template_mode=template_mode,
+            workflow_key=workflow_key,
+            workflow=workflow,
+            runtime=runtime,
+        )
+        return self._run_prepared_artifact(prepared, target)
+
+    def _run_prepared_artifact(self, prepared: PreparedArtifactRun, target: str) -> str:
         try:
             if prepared.mode == "script":
                 return self.run_script(
