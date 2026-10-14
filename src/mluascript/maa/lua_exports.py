@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import csv
+import shlex
 import subprocess
 
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Any
 
+import psutil
 from lupa.lua54 import LuaRuntime
+
+from mluascript.shared.logging import logger
 
 from .controllers.app import start_app, stop_app
 from .controllers.base import controller_is_connected
@@ -194,23 +200,40 @@ class LuaMaaExports:
         return get_connection_label(self.context)
 
     def is_app_alive(self, intent: str) -> bool:
+        if not intent or not intent.strip() or "\0" in intent:
+            return False
         label = self.get_connection_label()
         if label.startswith("ADB:"):
-            res = self.shell(f"pidof {intent}")
-            if res and res.strip():
-                return True
-            return False
+            res = self.shell(f"pidof {shlex.quote(intent)}")
+            pids = res.split() if res else []
+            return bool(pids) and all(pid.isascii() and pid.isdigit() and int(pid) > 0 for pid in pids)
         elif label.startswith("DESKTOP:windows:"):
-            res = self.shell(f'tasklist /FI "IMAGENAME eq {intent}" /NH')
-            if res and intent.lower() in res.lower():
-                return True
-            
             try:
-                out = subprocess.check_output(f'tasklist /FI "IMAGENAME eq {intent}" /NH', shell=True, text=True)
-                if intent.lower() in out.lower():
-                    return True
-            except Exception:
-                pass
+                result = subprocess.run(
+                    ["tasklist.exe", "/FI", f"IMAGENAME eq {intent}", "/FO", "CSV", "/NH"],
+                    shell=False, capture_output=True, text=True, encoding="oem", timeout=20,
+                )
+                if result.returncode != 0:
+                    logger.warning("Application process query failed (tasklist exit {}): {}", result.returncode, result.stderr.strip())
+                    return False
+                return any(
+                    len(row) >= 2 and row[1].isascii() and row[1].isdigit() and row[0].casefold() == intent.casefold()
+                    for row in csv.reader(result.stdout.splitlines())
+                )
+            except (OSError, subprocess.SubprocessError, UnicodeError, csv.Error) as exc:
+                logger.warning("Application process query failed: {}", exc)
+                return False
+        elif label.startswith(("DESKTOP:macos:", "DESKTOP:wlroots:")):
+            try:
+                for process in psutil.process_iter(["name", "exe", "status"], ad_value=None):
+                    if process.info.get("status") in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
+                        continue
+                    executable = process.info.get("exe")
+                    # The executable filename also covers names truncated by the OS.
+                    if process.info.get("name") == intent or (executable and PurePosixPath(executable).name == intent):
+                        return True
+            except (psutil.Error, OSError) as exc:
+                logger.warning("Application process query failed: {}", exc)
             return False
         return False
 
