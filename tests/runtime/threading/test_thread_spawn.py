@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from mluascript.runtime.engine import LuaEngine
 from mluascript.runtime.output_buffer import TaskOutputBuffer
 from mluascript.runtime.utils.table_lua import lua_2_python
@@ -40,6 +42,91 @@ def _make_engine() -> LuaEngine:
     engine = LuaEngine(Path("."), _HostAPI())
     engine.inject()
     return engine
+
+
+@pytest.mark.parametrize("setup, expression, expected", [
+    ("local value = 42", "value", 42),
+    ("local value = nil", "value == nil", True),
+    ("local value = false", "value == false", True),
+    (r'local value = "中文\0\255"', r'value == "中文\0\255"', True),
+    ("local value = {[false] = 42, [7] = 8}", "value[false] + value[7]", 50),
+    ("local value = {nested = {answer = 42}}", "value.nested.answer", 42),
+    ("local value = {}; value.self = value", "value.self == value", True),
+    ("local answer = 42; local value = function() return answer end", "value()", 42),
+    ("local value; value = function(n) if n == 0 then return 1 end return n * value(n - 1) end", "value(5)", 120),
+])
+def test_thread_spawn_copies_closure_upvalues(setup, expression, expected) -> None:
+    engine = _make_engine()
+    result = engine.execute(f'''
+        {setup}
+        function captured_target() return {expression} end
+        local task = thread.spawn("captured_target")
+        assert(task:join(2))
+        return task:result(), task:error()
+    ''')
+    assert result == (expected, "")
+
+
+def test_thread_spawn_copies_helpers_and_preserves_shared_upvalue_cells() -> None:
+    engine = _make_engine()
+    result = engine.execute('''
+        local count = 40
+        function increment() count = count + 1 end
+        function read_count() return count end
+        function captured_target()
+            increment(); increment()
+            return read_count()
+        end
+        local task = thread.spawn("captured_target")
+        assert(task:join(2))
+        return task:result(), task:error(), count
+    ''')
+    assert result == (42, "", 40)
+
+
+def test_thread_spawn_snapshot_is_captured_before_main_changes() -> None:
+    engine = _make_engine()
+    result = engine.execute('''
+        local value = {answer = 42}
+        function captured_target()
+            while not shared.get_key("ready") do sleep(0.01) end
+            local answer = value.answer
+            value.answer = 99
+            return answer
+        end
+        local task = thread.spawn("captured_target")
+        value.answer = 7
+        shared.set_key("ready", true)
+        assert(task:join(2))
+        return task:result(), task:error(), value.answer
+    ''')
+    assert result == (42, "", 7)
+
+
+@pytest.mark.parametrize("value", ["print", "math.abs", "coroutine.create(function() end)", "setmetatable({}, {})"])
+def test_thread_spawn_rejects_unsafe_upvalues_before_starting(value) -> None:
+    engine = _make_engine()
+    result = engine.execute(f'''
+        local value = {value}
+        function captured_target() return value end
+        local ok, err = pcall(thread.spawn, "captured_target")
+        return ok, tostring(err)
+    ''')
+    assert result[0] is False
+    assert "upvalue" in result[1]
+    assert engine.thread_manager.list() == []
+
+
+def test_thread_spawn_restores_environment_when_it_is_not_first_upvalue() -> None:
+    engine = _make_engine()
+    result = engine.execute('''
+        local value = 40
+        function captured_target() return value + math.abs(-2) end
+        local task = thread.spawn("captured_target")
+        assert(task:join(2))
+        return task:result(), task:error()
+    ''')
+    assert result == (42, "")
 
 
 

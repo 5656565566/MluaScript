@@ -5,6 +5,7 @@ from lupa.lua54 import LuaRuntime
 CORE_MODULES = (
     "utils",
     "json",
+    "closures",
     "results",
     "io_override",
     "log",

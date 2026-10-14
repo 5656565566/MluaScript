@@ -14,7 +14,7 @@ from .inject_lua import build_lua_runtime_inject
 from .llm import build_llm_exports
 from .threading import RuntimeThreadManager, build_shared_exports, build_thread_exports
 from .threading.shared_value import SharedValue
-from .utils.table_lua import lua_2_python
+from .utils.table_lua import lua_2_python, python_2_lua
 from .utils.virtual_io import VirtualIO
 
 
@@ -23,10 +23,10 @@ NamespaceBuilder = Callable[[LuaRuntime], Any]
 
 @dataclass(frozen=True, slots=True)
 class RuntimeGlobalsSnapshot:
-    """可安全复制到子运行时的全局值与 Lua 函数字节码"""
+    """可安全复制到子运行时的全局值与 Lua 闭包快照"""
 
     values: dict[str, Any]
-    functions: dict[str, str]
+    functions: dict[str, Any]
 
 
 class LuaEngine:
@@ -100,12 +100,15 @@ class LuaEngine:
     def _capture_runtime_globals_snapshot(self, lua: LuaRuntime) -> RuntimeGlobalsSnapshot:
         """捕获受限 globals 快照及可在子运行时重建的 Lua 全局函数"""
         values: dict[str, Any] = {}
-        functions = {
-            key: bytecode
+        function_names = {
+            key
             for key, bytecode in self._dump_lua_global_functions(lua).items()
             if self._builtin_lua_function_bytecodes.get(key) != bytecode
         }
         globals_table = lua.globals()
+        functions = lua_2_python(globals_table["capture_lua_functions"](
+            lua.table_from({key: globals_table[key] for key in function_names})
+        ))
         for key in list(globals_table.keys()):
             if not isinstance(key, str):
                 continue
@@ -160,11 +163,8 @@ class LuaEngine:
         for key, value in snapshot.values.items():
             globals_table[key] = value
 
-        safe_load = globals_table["safe_load"]
-        for key, bytecode in snapshot.functions.items():
-            function_ref = safe_load(bytecode)
-            if function_ref is None:
-                raise ValueError(f"Failed to restore Lua global function in sub-thread: {key}")
+        functions = globals_table["restore_lua_functions"](python_2_lua(lua, snapshot.functions))
+        for key, function_ref in functions.items():
             globals_table[key] = function_ref
 
     def _register_builtin_namespaces(self, lua: LuaRuntime) -> None:

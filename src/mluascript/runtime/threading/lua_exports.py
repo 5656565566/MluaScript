@@ -86,11 +86,16 @@ class LuaThreadExports:
             raise ValueError(f"Thread target function does not exist: {function_name}")
         if not callable(function_ref):
             raise ValueError(f"Thread target is not callable globally: {function_name}, type={type(function_ref)!r}")
-        
-        string_dump = globals_table["safe_dump"]
-        bytecode = string_dump(function_ref) # type: ignore
+        # 保持原有拒绝宿主/C 函数的行为，在创建任务前完成校验。
+        globals_table["safe_dump"](function_ref)
+
         safe_args = [lua_2_python(arg) for arg in args]
         snapshot = self.capture_subruntime_snapshot() if self.capture_subruntime_snapshot is not None else None
+        function_snapshot = None
+        if self.build_subruntime_from_snapshot is None:
+            function_snapshot = lua_2_python(globals_table["capture_lua_functions"](
+                self.lupa.table_from({function_name: function_ref})
+            ))
 
         def target(cancel_event: Event) -> Any:
             if self.build_subruntime_from_snapshot is not None:
@@ -99,8 +104,11 @@ class LuaThreadExports:
                 subruntime = self.build_subruntime()
             globals_table = subruntime.globals()
             globals_table["is_cancelled"] = cancel_event.is_set
-            load_func = subruntime.eval("safe_load")
-            sub_function_ref = load_func(bytecode) # type: ignore
+            if function_snapshot is not None:
+                functions = globals_table["restore_lua_functions"](python_2_lua(subruntime, function_snapshot))
+                sub_function_ref = functions[function_name]
+            else:
+                sub_function_ref = globals_table[function_name]
             if sub_function_ref is None:
                 raise ValueError(f"Failed to deserialize target function in sub-thread: {function_name}")
             
