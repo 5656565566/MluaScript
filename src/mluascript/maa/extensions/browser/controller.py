@@ -72,34 +72,59 @@ class BrowserController(CustomController):
         self.last_error = ""
         self._browser_tasks: queue.Queue[tuple[Callable[[], Any], Future[Any]] | None] | None = None
         self._browser_thread: threading.Thread | None = None
+        self._connection_lock = threading.RLock()
+        self._browser_lock = threading.RLock()
 
     def connect(self) -> bool:
-        logger.info(f"Connecting to browser at {self.url}")
-        try:
-            if self.executable_path:
-                self._launch_browser_process()
-                self._wait_for_debug_endpoint()
-            self._start_browser_thread()
-            self._connected = True
-            self.last_error = ""
-            return True
-        except Exception as exc:
-            self.last_error = str(exc) or exc.__class__.__name__
-            logger.error(f"Browser connect failed: {self.last_error}")
-            self._close_transport()
-            return False
+        with self._connection_lock:
+            logger.info(f"Connecting to browser at {self.url}")
+            launched = False
+            try:
+                if self._connected:
+                    try:
+                        healthy = self._submit_browser(lambda: self.browser is not None and self.browser.is_connected())
+                    except Exception as exc:
+                        logger.debug(f"Browser connection check failed: {exc}")
+                        healthy = False
+                    if healthy:
+                        self.last_error = ""
+                        return True
+                if not self._stop_browser_thread():
+                    self.last_error = "Previous browser worker has not stopped"
+                    logger.error(f"Browser connect failed: {self.last_error}")
+                    return False
+                if self.executable_path:
+                    if self.process is None or self.process.poll() is not None:
+                        self._launch_browser_process()
+                        launched = True
+                    self._wait_for_debug_endpoint()
+                self._start_browser_thread()
+                with self._browser_lock:
+                    self._connected = True
+                self.last_error = ""
+                return True
+            except Exception as exc:
+                self.last_error = str(exc) or exc.__class__.__name__
+                logger.error(f"Browser connect failed: {self.last_error}")
+                if launched:
+                    self._close_transport()
+                elif not self._stop_browser_thread():
+                    logger.error("Browser worker did not stop after connection failure")
+                return False
 
     def _start_browser_thread(self) -> None:
         tasks: queue.Queue[tuple[Callable[[], Any], Future[Any]] | None] = queue.Queue()
         ready: Future[None] = Future()
-        self._browser_tasks = tasks
-        self._browser_thread = threading.Thread(
+        worker = threading.Thread(
             target=self._browser_thread_main,
             args=(tasks, ready),
             name=f"browser-controller-{self._extract_debug_port()}",
             daemon=True,
         )
-        self._browser_thread.start()
+        with self._browser_lock:
+            self._browser_tasks = tasks
+            self._browser_thread = worker
+        worker.start()
         ready.result(timeout=15.0)
 
     def _browser_thread_main(
@@ -108,6 +133,7 @@ class BrowserController(CustomController):
         ready: Future[None],
     ) -> None:
         playwright = None
+        running: Future[Any] | None = None
         try:
             playwright = sync_playwright().start()
             self.playwright = playwright
@@ -121,39 +147,82 @@ class BrowserController(CustomController):
                 if task is None:
                     break
                 operation, result = task
-                if result.cancelled():
+                if not result.set_running_or_notify_cancel():
                     continue
+                running = result
                 try:
                     result.set_result(operation())
                 except Exception as exc:
                     result.set_exception(exc)
+                finally:
+                    if result.done():
+                        running = None
         except Exception as exc:
             if not ready.done():
                 ready.set_exception(exc)
             else:
                 logger.error(f"Browser worker failed: {exc}")
         finally:
+            if running is not None and not running.done():
+                running.set_exception(RuntimeError("Browser worker stopped during operation"))
             if playwright is not None:
                 try:
                     playwright.stop()
-                except Exception:
-                    pass
-            self.playwright = None
-            self.browser = None
-            self.page = None
+                except Exception as exc:
+                    logger.error(f"Browser worker cleanup failed: {exc}")
+            with self._browser_lock:
+                self._connected = False
+                self._fail_pending_browser_tasks(tasks)
+                self.playwright = None
+                self.browser = None
+                self.page = None
 
     def _submit_browser(self, operation: Callable[[], Any], *, timeout: float = 30.0) -> Any:
-        tasks = getattr(self, "_browser_tasks", None)
-        thread = getattr(self, "_browser_thread", None)
-        if tasks is None or thread is None:
+        with self._browser_lock:
+            tasks = self._browser_tasks
+            thread = self._browser_thread
+            if not self._connected or tasks is None or thread is None or not thread.is_alive():
+                raise RuntimeError("Browser worker is not available")
+            inline = threading.current_thread() is thread
+            if not inline:
+                result: Future[Any] = Future()
+                tasks.put((operation, result))
+        if inline:
             return operation()
-        if not thread.is_alive():
-            raise RuntimeError("Browser worker is not running")
-        if threading.current_thread() is thread:
-            return operation()
-        result: Future[Any] = Future()
-        tasks.put((operation, result))
         return result.result(timeout=timeout)
+
+    @staticmethod
+    def _fail_pending_browser_tasks(tasks: queue.Queue[tuple[Callable[[], Any], Future[Any]] | None]) -> None:
+        while True:
+            try:
+                task = tasks.get_nowait()
+            except queue.Empty:
+                return
+            if task is not None:
+                _, result = task
+                if result.set_running_or_notify_cancel():
+                    result.set_exception(RuntimeError("Browser worker stopped before operation"))
+
+    def _stop_browser_thread(self) -> bool:
+        with self._browser_lock:
+            self._connected = False
+            tasks = self._browser_tasks
+            worker = self._browser_thread
+            if tasks is not None:
+                self._fail_pending_browser_tasks(tasks)
+                tasks.put(None)
+        # The worker needs the state lock during cleanup; never hold it while joining.
+        if worker is not None:
+            if threading.current_thread() is worker:
+                return False
+            if worker.ident is not None:
+                worker.join(timeout=2.0)
+            if worker.is_alive():
+                return False
+        with self._browser_lock:
+            self._browser_tasks = None
+            self._browser_thread = None
+        return True
 
     def _get_active_page(self) -> Any:
         if self.browser is None or not self.browser.contexts:
@@ -183,21 +252,20 @@ class BrowserController(CustomController):
         return None
 
     def _close_transport(self) -> None:
-        self._connected = False
-        tasks = self._browser_tasks
-        thread = self._browser_thread
-        self._browser_tasks = None
-        self._browser_thread = None
-        if tasks is not None:
-            tasks.put(None)
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=2.0)
-        if self.process is not None and self.process.poll() is None:
-            try:
-                self.process.terminate()
-            except OSError:
-                pass
-        self.process = None
+        with self._connection_lock:
+            if not self._stop_browser_thread():
+                self.last_error = "Browser worker has not stopped"
+                logger.error(f"Browser close failed: {self.last_error}")
+                return
+            if self.process is not None and self.process.poll() is None:
+                try:
+                    self.process.terminate()
+                    self.process.wait(timeout=2.0)
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    self.last_error = str(exc) or exc.__class__.__name__
+                    logger.error(f"Browser process cleanup failed: {self.last_error}")
+                    return
+            self.process = None
 
     def _launch_browser_process(self) -> None:
         if not self.executable_path:

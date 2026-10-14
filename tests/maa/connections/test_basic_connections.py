@@ -139,6 +139,7 @@ def _build_browser_controller_without_native_handle() -> BrowserController:
     controller = BrowserController.__new__(BrowserController)
     controller._handle = None
     controller._own = False
+    controller._submit_browser = lambda operation: operation()
     return controller
 
 

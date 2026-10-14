@@ -18,6 +18,7 @@ def build_controller(mocker, *, connected: bool = True) -> BrowserController:
     controller = BrowserController.__new__(BrowserController)
     controller._handle = None
     controller._own = False
+    controller._submit_browser = lambda operation: operation()
     controller._connected = connected
     controller.browser = None
     controller.page = mocker.MagicMock()
@@ -179,3 +180,30 @@ def test_native_maa_click_and_touch_drag_deliver_real_browser_mouse_events(nativ
     assert not controller.post_touch_move(550, 350, 3).wait().succeeded
     assert not controller.post_touch_up(3).wait().succeeded
     assert evaluate("window.mouseEvents") == []
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(os.name != "nt" or not _EDGE.is_file(), reason="Requires installed Windows Edge")
+def test_native_browser_repeated_connect_and_cdp_reconnect_preserve_page(native_browser_controller) -> None:
+    controller = native_browser_controller
+    worker = controller._browser_thread
+    owners = [(controller._browser_tasks, worker)]
+    try:
+        for _ in range(8):
+            assert controller.post_connection().wait().succeeded, controller.last_error
+            owners.append((controller._browser_tasks, controller._browser_thread))
+            assert controller._browser_thread is worker
+        controller._submit_browser(lambda: controller._current_page().evaluate("window.retainedValue = 42"))
+        controller._submit_browser(lambda: controller.browser.close())
+        assert controller.post_connection().wait().succeeded, controller.last_error
+        owners.append((controller._browser_tasks, controller._browser_thread))
+        assert not worker.is_alive()
+        assert controller._submit_browser(lambda: controller._current_page().evaluate("window.retainedValue")) == 42
+        assert controller.post_click(150, 140).wait().succeeded
+        assert controller._submit_browser(lambda: controller._current_page().evaluate("window.clickCount")) == 1
+    finally:
+        for tasks, _ in owners:
+            tasks.put(None)
+        for _, owned_worker in owners:
+            owned_worker.join(timeout=5)
+            assert not owned_worker.is_alive()
