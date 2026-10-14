@@ -18,6 +18,10 @@ from playwright.sync_api import sync_playwright
 from mluascript.shared.logging import logger
 
 
+# Desktop contacts select mouse buttons; pressure has no mouse equivalent.
+_MOUSE_BUTTON_MAP = {0: "left", 1: "right", 2: "middle"}
+
+
 _KEYCODE_MAP = {
     8: "Backspace",
     9: "Tab",
@@ -297,6 +301,52 @@ class BrowserController(CustomController):
             return True
         except Exception as exc:
             logger.error(f"Browser swipe failed: {exc}")
+            return False
+
+    def touch_down(self, contact: int, x: int, y: int, pressure: int) -> bool:
+        if not self._connected:
+            return False
+        button = _MOUSE_BUTTON_MAP.get(contact)
+        if button is None:
+            logger.warning(f"Unsupported browser mouse contact: {contact}")
+            return False
+        try:
+            def press() -> None:
+                mouse = self._current_page().mouse
+                mouse.move(x, y)
+                mouse.down(button=button)
+
+            self._submit_browser(press)
+            return True
+        except Exception as exc:
+            logger.error(f"Browser touch down failed: {exc}")
+            return False
+
+    def touch_move(self, contact: int, x: int, y: int, pressure: int) -> bool:
+        if not self._connected:
+            return False
+        if contact not in _MOUSE_BUTTON_MAP:
+            logger.warning(f"Unsupported browser mouse contact: {contact}")
+            return False
+        try:
+            self._submit_browser(lambda: self._current_page().mouse.move(x, y))
+            return True
+        except Exception as exc:
+            logger.error(f"Browser touch move failed: {exc}")
+            return False
+
+    def touch_up(self, contact: int) -> bool:
+        if not self._connected:
+            return False
+        button = _MOUSE_BUTTON_MAP.get(contact)
+        if button is None:
+            logger.warning(f"Unsupported browser mouse contact: {contact}")
+            return False
+        try:
+            self._submit_browser(lambda: self._current_page().mouse.up(button=button))
+            return True
+        except Exception as exc:
+            logger.error(f"Browser touch up failed: {exc}")
             return False
 
     def input_text(self, text: str) -> bool:
