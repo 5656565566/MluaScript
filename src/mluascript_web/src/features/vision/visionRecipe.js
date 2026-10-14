@@ -1,5 +1,4 @@
-export const MAA_COORDINATE_WIDTH = 1280
-export const MAA_COORDINATE_HEIGHT = 720
+const MAA_COORDINATE_SHORT_SIDE = 720
 
 function finiteNumber(value, fallback = 0) {
   const number = Number(value)
@@ -21,31 +20,39 @@ export function normalizeImageSize(size = {}) {
   }
 }
 
+function coordinateSize(value, imageSize) {
+  const size = normalizeImageSize({
+    width: value.imageWidth || imageSize.width,
+    height: value.imageHeight || imageSize.height,
+  })
+  if (!size.width || !size.height) return { image: size, maa: size }
+  // 与 MaaFramework 默认短边缩放及长边取整保持一致。
+  const scale = MAA_COORDINATE_SHORT_SIDE / Math.min(size.width, size.height)
+  return { image: size, maa: { width: Math.round(size.width * scale), height: Math.round(size.height * scale) } }
+}
+
 export function normalizeMaaPoint(point = {}, imageSize = {}) {
   if (!point) return null
-  const size = normalizeImageSize(imageSize)
-  const x = clamp(point.x, 0, MAA_COORDINATE_WIDTH)
-  const y = clamp(point.y, 0, MAA_COORDINATE_HEIGHT)
+  const { image: size, maa } = coordinateSize(point, imageSize)
+  const x = clamp(point.x, 0, maa.width || Infinity)
+  const y = clamp(point.y, 0, maa.height || Infinity)
   return {
     coordinateSpace: 'maa',
     x,
     y,
-    rawX: point.rawX ?? (size.width ? Math.round(x * size.width / MAA_COORDINATE_WIDTH) : null),
-    rawY: point.rawY ?? (size.height ? Math.round(y * size.height / MAA_COORDINATE_HEIGHT) : null),
+    rawX: point.rawX ?? (size.width ? Math.round(x * size.width / maa.width) : null),
+    rawY: point.rawY ?? (size.height ? Math.round(y * size.height / maa.height) : null),
     imageWidth: point.imageWidth || size.width,
     imageHeight: point.imageHeight || size.height,
   }
 }
 
 export function rawToMaaPoint(point = {}, imageSize = {}) {
-  const size = normalizeImageSize({
-    width: point.imageWidth || imageSize.width,
-    height: point.imageHeight || imageSize.height,
-  })
+  const { image: size, maa } = coordinateSize(point, imageSize)
   if (!size.width || !size.height) return normalizeMaaPoint(point, size)
   return normalizeMaaPoint({
-    x: finiteNumber(point.rawX ?? point.x) * MAA_COORDINATE_WIDTH / size.width,
-    y: finiteNumber(point.rawY ?? point.y) * MAA_COORDINATE_HEIGHT / size.height,
+    x: finiteNumber(point.rawX ?? point.x) * maa.width / size.width,
+    y: finiteNumber(point.rawY ?? point.y) * maa.height / size.height,
     rawX: clamp(point.rawX ?? point.x, 0, size.width),
     rawY: clamp(point.rawY ?? point.y, 0, size.height),
     imageWidth: size.width,
@@ -62,58 +69,54 @@ export function normalizePoint(point, imageSize = {}) {
 
 export function normalizeMaaRoi(roi = {}, imageSize = {}) {
   if (!roi) return null
-  const size = normalizeImageSize(imageSize)
-  const x = clamp(roi.x, 0, MAA_COORDINATE_WIDTH)
-  const y = clamp(roi.y, 0, MAA_COORDINATE_HEIGHT)
-  const width = clamp(roi.width, 0, MAA_COORDINATE_WIDTH - x)
-  const height = clamp(roi.height, 0, MAA_COORDINATE_HEIGHT - y)
+  const { image: size, maa } = coordinateSize(roi, imageSize)
+  const x = clamp(roi.x, 0, maa.width || Infinity)
+  const y = clamp(roi.y, 0, maa.height || Infinity)
+  const width = clamp(roi.width, 0, (maa.width || Infinity) - x)
+  const height = clamp(roi.height, 0, (maa.height || Infinity) - y)
   return {
     coordinateSpace: 'maa',
     x,
     y,
     width,
     height,
-    rawX: roi.rawX ?? (size.width ? Math.round(x * size.width / MAA_COORDINATE_WIDTH) : null),
-    rawY: roi.rawY ?? (size.height ? Math.round(y * size.height / MAA_COORDINATE_HEIGHT) : null),
-    rawWidth: roi.rawWidth ?? (size.width ? Math.round(width * size.width / MAA_COORDINATE_WIDTH) : null),
-    rawHeight: roi.rawHeight ?? (size.height ? Math.round(height * size.height / MAA_COORDINATE_HEIGHT) : null),
+    rawX: roi.rawX ?? (size.width ? Math.round(x * size.width / maa.width) : null),
+    rawY: roi.rawY ?? (size.height ? Math.round(y * size.height / maa.height) : null),
+    rawWidth: roi.rawWidth ?? (size.width ? Math.round(width * size.width / maa.width) : null),
+    rawHeight: roi.rawHeight ?? (size.height ? Math.round(height * size.height / maa.height) : null),
     imageWidth: roi.imageWidth || size.width,
     imageHeight: roi.imageHeight || size.height,
   }
 }
 
 export function rawToMaaRoi(roi = {}, imageSize = {}) {
-  const size = normalizeImageSize({
-    width: roi.imageWidth || imageSize.width,
-    height: roi.imageHeight || imageSize.height,
-  })
+  const { image: size, maa } = coordinateSize(roi, imageSize)
   if (!size.width || !size.height) return normalizeMaaRoi(roi, size)
-  const rawX = finiteNumber(roi.rawX ?? roi.x)
-  const rawY = finiteNumber(roi.rawY ?? roi.y)
-  const rawWidth = finiteNumber(roi.rawWidth ?? roi.width)
-  const rawHeight = finiteNumber(roi.rawHeight ?? roi.height)
+  const rawX = clamp(roi.rawX ?? roi.x, 0, size.width)
+  const rawY = clamp(roi.rawY ?? roi.y, 0, size.height)
+  const rawWidth = clamp(roi.rawWidth ?? roi.width, 0, size.width - rawX)
+  const rawHeight = clamp(roi.rawHeight ?? roi.height, 0, size.height - rawY)
   return normalizeMaaRoi({
-    x: rawX * MAA_COORDINATE_WIDTH / size.width,
-    y: rawY * MAA_COORDINATE_HEIGHT / size.height,
-    width: rawWidth * MAA_COORDINATE_WIDTH / size.width,
-    height: rawHeight * MAA_COORDINATE_HEIGHT / size.height,
+    x: rawX * maa.width / size.width,
+    y: rawY * maa.height / size.height,
+    width: rawWidth * maa.width / size.width,
+    height: rawHeight * maa.height / size.height,
     rawX: clamp(rawX, 0, size.width),
     rawY: clamp(rawY, 0, size.height),
-    rawWidth: clamp(rawWidth, 0, size.width),
-    rawHeight: clamp(rawHeight, 0, size.height),
+    rawWidth,
+    rawHeight,
     imageWidth: size.width,
     imageHeight: size.height,
   }, size)
 }
 
 export function maaRoiToRaw(roi, imageSize = {}) {
-  const size = normalizeImageSize(imageSize)
-  const normalized = normalizeMaaRoi(roi, size)
+  const normalized = normalizeMaaRoi(roi, imageSize)
   return {
-    x: normalized.rawX ?? (size.width ? Math.round(normalized.x * size.width / MAA_COORDINATE_WIDTH) : normalized.x),
-    y: normalized.rawY ?? (size.height ? Math.round(normalized.y * size.height / MAA_COORDINATE_HEIGHT) : normalized.y),
-    width: normalized.rawWidth ?? (size.width ? Math.round(normalized.width * size.width / MAA_COORDINATE_WIDTH) : normalized.width),
-    height: normalized.rawHeight ?? (size.height ? Math.round(normalized.height * size.height / MAA_COORDINATE_HEIGHT) : normalized.height),
+    x: normalized.rawX ?? normalized.x,
+    y: normalized.rawY ?? normalized.y,
+    width: normalized.rawWidth ?? normalized.width,
+    height: normalized.rawHeight ?? normalized.height,
   }
 }
 

@@ -361,7 +361,8 @@ export const deviceBlocks = [
     generator(block, generator) {
       const realCoord = generator.valueToCode(block, 'REAL_COORD', luaOrder) || '0'
       const realSize = generator.valueToCode(block, 'REAL_SIZE', luaOrder) || '1920'
-      return [`(${realCoord} / ${realSize} * 1280)`, luaOrder]
+      // X/Y 都按 MaaFramework 的短边等比缩放，并对目标尺寸取整。
+      return [`((function(res, coord, size) return coord / size * math.floor(size * 720 / math.min(res.width, res.height) + 0.5) end)(maa.get_resolution(), ${realCoord}, ${realSize}))`, luaOrder]
     },
   },
   {

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { NButton, NDropdown, NEmpty, NGrid, NGridItem, NInput, NInputNumber, NSelect, NSlider, NSpace, NTag, NText } from 'naive-ui'
 import { state, getters, actions } from '../store'
+import { maaRoiToRaw } from '../features/vision/visionRecipe.js'
 
 const props = defineProps({
   modalId: { type: String, required: true },
@@ -178,7 +179,8 @@ function clearImage() {
 function parseRoi() {
   const roi = state.visionSession.value?.roi
   if (!roi || Number(roi.width) <= 0 || Number(roi.height) <= 0) return null
-  return [roi.x, roi.y, roi.width, roi.height]
+  const raw = maaRoiToRaw(roi, imageSize.value)
+  return [raw.x, raw.y, raw.width, raw.height]
 }
 
 function updateRoiField(key, value) {
@@ -405,19 +407,19 @@ function switchVisionDialog(key) {
           <n-grid :cols="2" :x-gap="8" :y-gap="8">
             <n-grid-item>
               <n-text depth="3">X</n-text>
-              <n-input-number :value="draft.roiX" :min="0" :max="1280" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiX', value)" />
+              <n-input-number :value="draft.roiX" :min="0" :max="imageSize.width || undefined" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiX', value)" />
             </n-grid-item>
             <n-grid-item>
               <n-text depth="3">Y</n-text>
-              <n-input-number :value="draft.roiY" :min="0" :max="720" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiY', value)" />
+              <n-input-number :value="draft.roiY" :min="0" :max="imageSize.height || undefined" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiY', value)" />
             </n-grid-item>
             <n-grid-item>
               <n-text depth="3">宽</n-text>
-              <n-input-number :value="draft.roiWidth" :min="0" :max="1280" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiWidth', value)" />
+              <n-input-number :value="draft.roiWidth" :min="0" :max="imageSize.width || undefined" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiWidth', value)" />
             </n-grid-item>
             <n-grid-item>
               <n-text depth="3">高</n-text>
-              <n-input-number :value="draft.roiHeight" :min="0" :max="720" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiHeight', value)" />
+              <n-input-number :value="draft.roiHeight" :min="0" :max="imageSize.height || undefined" placeholder="全图" style="width: 100%;" @update:value="value => updateRoiField('roiHeight', value)" />
             </n-grid-item>
           </n-grid>
         </div>
