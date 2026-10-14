@@ -6,21 +6,21 @@ authors = [
     {name = "5656565566", email = "2393963330@qq.com"},
 ]
 dependencies = [
-    "maafw>=5.14.0",
+    "maafw>=5.14.3",
     "loguru>=0.7.3",
     "textual>=8.2.8",
     "rich>=15.0.0",
-    "pydantic>=2.13.5",
+    "pydantic>=2.14.1",
     "pyyaml>=6.0.3",
     "keyboard>=0.13.5",
     "lupa>=2.8",
     "pillow>=12.3.0",
-    "fastapi>=0.141.1",
+    "fastapi>=0.143.0",
     "uvicorn>=0.54.0",
     "pyinstaller>=6.22.3",
     "plyer>=2.1.0",
     "httpx>=0.28.1",
-    "playwright>=1.63.0",
+    "playwright>=1.64.0",
 ]
 requires-python = "==3.12.*"
 readme = "README.md"
@@ -30,7 +30,7 @@ license = {text = "MIT"}
 dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
-    "pytest-mock>=3.15.1",
+    "pytest-mock>=3.16.0",
 ]
 
 [tool.pytest.ini_options]

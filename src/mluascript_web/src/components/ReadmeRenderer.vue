@@ -34,6 +34,9 @@ async function renderMermaidDiagrams(generation) {
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: 'strict',
+    // Mermaid 12 changed these defaults; preserve the existing diagram appearance.
+    layout: 'dagre',
+    look: 'classic',
     theme: dark ? 'dark' : 'default',
     fontFamily: 'var(--font-family, sans-serif)',
   })
