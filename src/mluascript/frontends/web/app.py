@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -1796,38 +1797,43 @@ def get_structured_logs(
 
 @streams_router.get("/logs")
 def stream_logs(
+    request: Request,
     channel: str | None = None,
     sessionLabel: str | None = None,
     replay: int = 50,
 ) -> StreamingResponse:
-    def generate():
+    async def generate():
+        if await request.is_disconnected():
+            return
         snapshot = _build_log_items(limit=max(0, replay), channel=channel, session_label=sessionLabel)
         yield _sse_event("snapshot", {"items": snapshot})
         sent = {item.get("formatted") for item in snapshot}
-        while True:
+        while not await request.is_disconnected():
             items = _build_log_items(limit=max(50, replay), channel=channel, session_label=sessionLabel)
             latest = [item for item in items if item.get("formatted") not in sent]
             for item in latest:
                 sent.add(item.get("formatted"))
                 yield _sse_event("log", item)
             yield _sse_event("heartbeat", {"ts": int(time.time())})
-            time.sleep(1.5)
+            await asyncio.sleep(1.5)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @streams_router.get("/tasks/{task_id}/logs")
-def stream_task_logs(task_id: str) -> StreamingResponse:
+def stream_task_logs(task_id: str, request: Request) -> StreamingResponse:
     facade = get_control_facade()
 
-    def generate():
+    async def generate():
+        if await request.is_disconnected():
+            return
         current = facade.get_task_logs(task_id)
         if current is None:
             yield _sse_event("not_found", {"taskId": task_id})
             return
         yield _sse_event("snapshot", current.model_dump())
         signature = _task_logs_signature(current)
-        while True:
+        while not await request.is_disconnected():
             latest = facade.get_task_logs(task_id)
             if latest is None:
                 yield _sse_event("not_found", {"taskId": task_id})
@@ -1837,23 +1843,25 @@ def stream_task_logs(task_id: str) -> StreamingResponse:
                 signature = next_signature
                 yield _sse_event("update", latest.model_dump())
             yield _sse_event("heartbeat", {"ts": int(time.time())})
-            time.sleep(1.0)
+            await asyncio.sleep(1.0)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @streams_router.get("/tasks/{task_id}/output")
-def stream_task_output(task_id: str) -> StreamingResponse:
+def stream_task_output(task_id: str, request: Request) -> StreamingResponse:
     facade = get_control_facade()
 
-    def generate():
+    async def generate():
+        if await request.is_disconnected():
+            return
         current = facade.get_task_output(task_id)
         if current is None:
             yield _sse_event("not_found", {"taskId": task_id})
             return
         yield _sse_event("snapshot", current.model_dump())
         version = current.version
-        while True:
+        while not await request.is_disconnected():
             latest = facade.get_task_output(task_id)
             if latest is None:
                 yield _sse_event("not_found", {"taskId": task_id})
@@ -1862,7 +1870,7 @@ def stream_task_output(task_id: str) -> StreamingResponse:
                 version = latest.version
                 yield _sse_event("update", latest.model_dump())
             yield _sse_event("heartbeat", {"ts": int(time.time())})
-            time.sleep(0.75)
+            await asyncio.sleep(0.75)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 

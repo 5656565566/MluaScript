@@ -184,8 +184,14 @@ def _write_template_package(path: Path) -> None:
 
 
 def _read_stream_chunks(response, count: int) -> list[str]:
-    iterator = response.body_iterator
-    return [asyncio.run(anext(iterator)) for _ in range(count)]
+    async def read():
+        iterator = response.body_iterator
+        try:
+            return [await anext(iterator) for _ in range(count)]
+        finally:
+            await iterator.aclose()
+
+    return asyncio.run(read())
 
 
 def test_api_routes_require_login(monkeypatch, tmp_path: Path) -> None:
@@ -405,10 +411,11 @@ def test_task_detail_views_pass_task_kind_to_stop_action() -> None:
     assert "actions.stopTask(task.task_id, task.kind)" in detail_modal
 
 
-def test_task_logs_stream_emits_snapshot_and_update(monkeypatch, tmp_path: Path) -> None:
+def test_task_logs_stream_emits_snapshot_and_update(monkeypatch, mocker, tmp_path: Path) -> None:
     facade = FakeStreamFacade()
     monkeypatch.setattr(web_app, "get_control_facade", lambda: facade)
-    response = web_app.stream_task_logs("task-1")
+    request = SimpleNamespace(is_disconnected=mocker.AsyncMock(return_value=False))
+    response = web_app.stream_task_logs("task-1", request=request)
     snapshot, update = _read_stream_chunks(response, 2)
 
     assert response.media_type == "text/event-stream"
@@ -418,10 +425,11 @@ def test_task_logs_stream_emits_snapshot_and_update(monkeypatch, tmp_path: Path)
     assert '"message": "second"' in update
 
 
-def test_task_output_stream_emits_snapshot_and_update(monkeypatch, tmp_path: Path) -> None:
+def test_task_output_stream_emits_snapshot_and_update(monkeypatch, mocker, tmp_path: Path) -> None:
     facade = FakeStreamFacade()
     monkeypatch.setattr(web_app, "get_control_facade", lambda: facade)
-    response = web_app.stream_task_output("task-1")
+    request = SimpleNamespace(is_disconnected=mocker.AsyncMock(return_value=False))
+    response = web_app.stream_task_output("task-1", request=request)
     snapshot, update = _read_stream_chunks(response, 2)
 
     assert response.media_type == "text/event-stream"
