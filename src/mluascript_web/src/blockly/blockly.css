@@ -140,9 +140,7 @@
 
 .blocklyDraggable > .blocklyPath {
   stroke: var(--blockly-path-outline) !important;
-}
-
-.blocklyDraggable {
+  /* 阴影只作用于轮廓，避免文字和嵌套拼图经过多层滤镜而在缩放时发糊。 */
   filter: drop-shadow(0 2px 4px var(--blockly-block-shadow));
 }
 
