@@ -36,6 +36,7 @@ class LogEntry:
     message: str
     formatted: str
     extra: dict[str, Any] = field(default_factory=dict)
+    sequence: int = field(default=0, init=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,6 +58,7 @@ class LogBufferManager:
         self.maxlen = maxlen
         self.bucket_maxlen = bucket_maxlen
         self._lock = Lock()
+        self._sequence = 0
         self._all: deque[LogEntry] = deque(maxlen=maxlen)
         self._by_session: dict[str, deque[LogEntry]] = {}
         self._by_channel: dict[str, deque[LogEntry]] = {}
@@ -69,6 +71,8 @@ class LogBufferManager:
 
     def append(self, entry: LogEntry) -> None:
         with self._lock:
+            self._sequence += 1
+            entry.sequence = self._sequence
             # 二级索引只保留全局窗口内的条目 避免会话或频道不断增加时绕过总量限制
             if self._all.maxlen is not None and len(self._all) == self._all.maxlen:
                 evicted = self._all[0]
@@ -77,6 +81,27 @@ class LogBufferManager:
             self._all.append(entry)
             self._get_session_buffer(entry.session_label).append(entry)
             self._get_channel_buffer(entry.channel).append(entry)
+
+    def snapshot(
+        self,
+        *,
+        after: int | None = None,
+        limit: int | None = None,
+        channel: str | None = None,
+        session_label: str | None = None,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """在同一锁内读取日志和当前位置，清空记录时不回拨位置。"""
+        with self._lock:
+            if session_label:
+                source = self._by_session.get(session_label, ())
+            elif channel:
+                source = self._by_channel.get(channel, ())
+            else:
+                source = self._all
+            items = [entry for entry in source if after is None or entry.sequence > after]
+            if limit is not None:
+                items = items[-limit:] if limit > 0 else []
+            return self._sequence, [entry.to_dict() for entry in items]
 
     @staticmethod
     def _discard_index_entry(
@@ -371,6 +396,16 @@ def get_logs_by_session(session_label: str, limit: int | None = None) -> list[di
 
 def get_logs_by_channel(channel: str, limit: int | None = None) -> list[dict[str, Any]]:
     return log_buffer_manager.list_by_channel(channel, limit=limit)
+
+
+def get_log_snapshot(
+    *,
+    after: int | None = None,
+    limit: int | None = None,
+    channel: str | None = None,
+    session_label: str | None = None,
+) -> tuple[int, list[dict[str, Any]]]:
+    return log_buffer_manager.snapshot(after=after, limit=limit, channel=channel, session_label=session_label)
 
 
 

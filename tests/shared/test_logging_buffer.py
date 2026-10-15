@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from mluascript.shared.logging.logger import LogBufferManager, LogEntry
 
 
@@ -35,3 +37,33 @@ def test_log_buffer_manager_defaults_to_latest_200_entries() -> None:
     assert len(manager.list_all()) == 200
     assert manager.list_all()[0]["message"] == "1"
     assert len(manager.iter_sessions()) == 200
+
+
+def test_cursor_survives_clear_and_advances_even_for_empty_snapshots() -> None:
+    manager = LogBufferManager()
+    manager.append(_entry(1))
+    cursor, items = manager.snapshot(limit=0)
+    assert cursor == 1 and items == []
+    assert manager.snapshot(channel='missing') == (cursor, [])
+    manager.clear()
+    assert manager.snapshot(after=cursor) == (cursor, [])
+    manager.append(_entry(2))
+    next_cursor, items = manager.snapshot(after=cursor)
+    assert next_cursor == 2
+    assert [item['message'] for item in items] == ['2']
+
+
+def test_concurrent_writes_assign_unique_ordered_sequences_with_a_bounded_snapshot() -> None:
+    manager = LogBufferManager()
+
+    def write(index):
+        entry = _entry(index)
+        manager.append(entry)
+        return entry.sequence
+
+    with ThreadPoolExecutor(max_workers=8) as writers:
+        sequences = list(writers.map(write, range(1000)))
+    assert sorted(sequences) == list(range(1, 1001))
+    cursor, items = manager.snapshot()
+    assert cursor == 1000 and len(items) == 200
+    assert len(manager.snapshot(after=990)[1]) == 10

@@ -29,7 +29,11 @@ def parse_event(value: str) -> tuple[str, dict]:
 
 def test_logs_stream_preserves_snapshot_delta_heartbeat_and_disconnect(monkeypatch) -> None:
     items = [{"formatted": "first", "message": "one"}]
-    monkeypatch.setattr(web_app, "_build_log_items", lambda **kwargs: list(items))
+
+    def snapshot(*, after=None, **kwargs):
+        return len(items), list(items[after or 0:])
+
+    monkeypatch.setattr(web_app, "get_log_snapshot", snapshot)
 
     async def scenario():
         request = Disconnection()
@@ -82,7 +86,7 @@ def test_task_stream_preserves_snapshot_update_and_not_found(monkeypatch, kind) 
 def test_stream_already_disconnected_does_not_read_snapshots(monkeypatch, mocker, kind) -> None:
     logs = mocker.Mock()
     facade = SimpleNamespace(get_task_logs=mocker.Mock(), get_task_output=mocker.Mock())
-    monkeypatch.setattr(web_app, "_build_log_items", logs)
+    monkeypatch.setattr(web_app, "get_log_snapshot", logs)
     monkeypatch.setattr(web_app, "get_control_facade", lambda: facade)
 
     async def scenario():
@@ -100,7 +104,7 @@ def test_stream_already_disconnected_does_not_read_snapshots(monkeypatch, mocker
 
 @pytest.mark.parametrize("kind", ["logs", "task_logs", "task_output"])
 def test_stream_cancellation_interrupts_idle_wait(monkeypatch, kind) -> None:
-    monkeypatch.setattr(web_app, "_build_log_items", lambda **kwargs: [])
+    monkeypatch.setattr(web_app, "get_log_snapshot", lambda **kwargs: (0, []))
     monkeypatch.setattr(web_app, "get_control_facade", lambda: SimpleNamespace(
         get_task_logs=lambda task_id: TaskLogsView(task_id=task_id),
         get_task_output=lambda task_id: TaskOutputView(task_id=task_id),
@@ -152,7 +156,7 @@ def test_real_sse_connections_do_not_consume_idle_threadpool_tokens(monkeypatch,
         session_max_age_seconds=3600, project_roots=[str(tmp_path / "projects")],
     )
     monkeypatch.setattr(web_app, "_get_web_config", lambda: configuration)
-    monkeypatch.setattr(web_app, "_build_log_items", lambda **kwargs: [])
+    monkeypatch.setattr(web_app, "get_log_snapshot", lambda **kwargs: (0, []))
     monkeypatch.setattr(web_app, "get_control_facade", lambda: SimpleNamespace(
         get_task_logs=lambda task_id: TaskLogsView(task_id=task_id),
         get_task_output=lambda task_id: TaskOutputView(task_id=task_id),

@@ -37,7 +37,7 @@ from mluascript.maa.lifecycle.runtime import initialize_maa_runtime
 from mluascript.maa.recognition import find_color, find_feature, find_nnd, find_ocr, find_template
 from mluascript.shared.config import WebServerConfig, config, resolve_configured_script_roots
 from mluascript.shared.config.manager import get_runtime_dir
-from mluascript.shared.logging import get_logs, get_logs_by_channel, get_logs_by_session
+from mluascript.shared.logging import get_log_snapshot, get_logs, get_logs_by_channel, get_logs_by_session
 
 auth_router = APIRouter(prefix="/api/auth")
 device_router = APIRouter(prefix="/api/device")
@@ -1805,14 +1805,11 @@ def stream_logs(
     async def generate():
         if await request.is_disconnected():
             return
-        snapshot = _build_log_items(limit=max(0, replay), channel=channel, session_label=sessionLabel)
+        cursor, snapshot = get_log_snapshot(limit=max(0, replay), channel=channel, session_label=sessionLabel)
         yield _sse_event("snapshot", {"items": snapshot})
-        sent = {item.get("formatted") for item in snapshot}
         while not await request.is_disconnected():
-            items = _build_log_items(limit=max(50, replay), channel=channel, session_label=sessionLabel)
-            latest = [item for item in items if item.get("formatted") not in sent]
-            for item in latest:
-                sent.add(item.get("formatted"))
+            cursor, items = get_log_snapshot(after=cursor, channel=channel, session_label=sessionLabel)
+            for item in items:
                 yield _sse_event("log", item)
             yield _sse_event("heartbeat", {"ts": int(time.time())})
             await asyncio.sleep(1.5)
