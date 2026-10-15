@@ -59,7 +59,14 @@ class TaskPreferences(_PreferenceModel):
 class LogPreferences(_PreferenceModel):
     auto_scroll: bool = Field(default=True, alias="autoScroll")
     selected_level: str = Field(default="all", alias="selectedLevel", max_length=32)
-    origin: str = Field(default="runtime", max_length=64)
+    origin: str = Field(default="default", max_length=64)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_runtime_channel(cls, value: object) -> object:
+        if isinstance(value, dict) and value.get("origin") == "runtime":
+            return {**value, "origin": "default"}
+        return value
 
 
 class LayoutPreferences(_PreferenceModel):

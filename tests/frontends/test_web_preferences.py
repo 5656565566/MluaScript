@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from mluascript.frontends.web import app as web_app
 from mluascript.frontends.web.preferences import WebPreferences, WebPreferenceService
+from mluascript.shared.logging import logger
 
 
 def _web_config(project_root: Path) -> SimpleNamespace:
@@ -106,3 +107,21 @@ def test_legacy_accent_color_migrates_to_custom_palette() -> None:
     assert preferences.appearance.custom_color == "#2080f0"
     dumped = preferences.model_dump(by_alias=True)
     assert "accentColor" not in dumped["appearance"]
+
+
+def test_run_log_preferences_migrate_the_old_channel(tmp_path: Path) -> None:
+    service = WebPreferenceService(tmp_path / "preferences.json")
+    assert service.get("admin").logs.origin == "default"
+    preferences = WebPreferences.model_validate({"logs": {"origin": "runtime", "selectedLevel": "ERROR"}})
+    service.put("admin", preferences)
+    assert service.get("admin").logs.origin == "default"
+    assert service.get("admin").logs.selected_level == "ERROR"
+    assert WebPreferences.model_validate({"logs": {"origin": "runtime.log"}}).logs.origin == "runtime.log"
+
+
+def test_run_logs_can_read_an_adb_connection_error(monkeypatch, tmp_path: Path) -> None:
+    client, _ = _client(monkeypatch, tmp_path)
+    logger.error("ADB connection failed: web-log-regression")
+    channel = client.get("/api/system/preferences").json()["data"]["logs"]["origin"]
+    items = client.get("/api/logs", params={"channel": channel}).json()["data"]["items"]
+    assert any(item["level"] == "ERROR" and "web-log-regression" in item["message"] for item in items)

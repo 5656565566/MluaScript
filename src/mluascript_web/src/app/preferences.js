@@ -42,7 +42,7 @@ export function applyWebPreferences(state, preferences = {}) {
   state.taskManagerActiveTab.value = oneOf(tasks.activeTab, ['resource-list', 'task-status'], 'resource-list')
   state.runLogsAutoScroll.value = Boolean(valueOr(logs.autoScroll, true))
   state.runLogsSelectedLevel.value = valueOr(logs.selectedLevel, 'all')
-  state.logOrigin.value = valueOr(logs.origin, 'runtime')
+  state.logOrigin.value = logs.origin === 'runtime' ? 'default' : valueOr(logs.origin, 'default')
   state.sidebarCollapsed.value = Boolean(valueOr(layout.sidebarCollapsed, false))
   state.activeView.value = valueOr(layout.activeView, 'editor')
   state.preferencesHydrated.value = true

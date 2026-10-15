@@ -110,7 +110,7 @@ function getLevelType(level) {
           
           <n-checkbox v-model:checked="autoScroll">自动滚动</n-checkbox>
           <n-button size="small" @click="copyAllLogs">复制全部</n-button>
-          <n-button size="small" @click="actions.refreshLogs('runtime')">刷新</n-button>
+          <n-button size="small" @click="actions.refreshLogs()">刷新</n-button>
           <n-button size="small" @click="clearLogs">清空</n-button>
         </n-space>
       </div>

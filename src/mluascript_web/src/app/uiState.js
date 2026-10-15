@@ -39,7 +39,7 @@ export function createUiState() {
     customColor: ref(DEFAULT_CUSTOM_COLOR),
     preferencesHydrated: ref(false),
     sidebarCollapsed: ref(false),
-    logOrigin: ref('runtime'),
+    logOrigin: ref('default'),
     autoRefresh: ref(true),
     autoSaveFiles: ref(true),
     projectTreeVisible: ref(true),
