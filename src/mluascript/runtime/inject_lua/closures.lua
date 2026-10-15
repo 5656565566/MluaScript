@@ -1,6 +1,6 @@
 -- 表和函数可能循环引用，多个闭包也可能共享同一个 upvalue cell。
 -- 快照只传递值和引用编号，不让主运行时对象进入子运行时。
-function capture_lua_functions(roots)
+function capture_lua_functions(roots, data_only)
     local nodes, references, cells = {}, {}, {}
     local next_cell = 0
     local encode
@@ -12,6 +12,9 @@ function capture_lua_functions(roots)
         end
         if kind == "nil" or kind == "boolean" or kind == "number" then
             return {kind = "value", value = value}
+        end
+        if data_only and kind == "function" then
+            error("Cannot copy " .. location .. ": unsupported function result", 0)
         end
         if kind ~= "table" and kind ~= "function" then
             error("Cannot copy " .. location .. ": unsupported " .. kind, 0)
@@ -61,6 +64,10 @@ function capture_lua_functions(roots)
         encoded_roots[name] = encode(value, "function '" .. name .. "'")
     end
     return {nodes = nodes, roots = encoded_roots}
+end
+
+function capture_thread_result(target, ...)
+    return capture_lua_functions({result = table.pack(target(...))}, true)
 end
 
 function restore_lua_functions(snapshot)

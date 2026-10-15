@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from threading import Event
+from time import monotonic
 from typing import Any, Callable
 
 from lupa.lua54 import LuaRuntime
+
+from mluascript.shared.logging import logger
 
 from .manager import RuntimeThreadManager
 from .shared_value import LuaSharedValueView, SharedValue
@@ -12,11 +15,27 @@ from .task import RuntimeTask
 from ..utils.table_lua import lua_2_python, python_2_lua
 
  
+@dataclass(frozen=True, slots=True)
+class LuaTaskResult:
+    snapshot: dict[str, Any]
+
+
 class LuaTaskHandle:
     """面向 Lua 暴露的任务句柄包装"""
 
-    def __init__(self, task: RuntimeTask) -> None:
+    def __init__(self, task: RuntimeTask, lupa: LuaRuntime | None = None) -> None:
         self._task = task
+        self._lupa = lupa
+        if lupa is not None:
+            # 解包留在调用方 Lua 内，避免二进制 Lua 字符串被 Python UTF-8 解码。
+            self.result = lupa.eval('''function(read)
+                return function(...)
+                    local copied, value = read()
+                    if not copied then return value end
+                    local packed = restore_lua_functions(value).result
+                    return table.unpack(packed, 1, packed.n)
+                end
+            end''')(self._read_result)
 
     def id(self) -> str:
         return self._task.id()
@@ -34,10 +53,25 @@ class LuaTaskHandle:
         return self._task.cancel()
 
     def join(self, timeout: float = 0) -> bool:
-        return self._task.join(timeout)
+        check_stop = self._lupa.globals()["check_stop"] if self._lupa is not None else None
+        deadline = monotonic() + timeout if timeout > 0 else None
+        while not self._task.is_done:
+            if check_stop is not None:
+                check_stop()
+            remaining = deadline - monotonic() if deadline is not None else 0.05
+            if remaining <= 0:
+                return False
+            self._task.done_event.wait(min(0.05, remaining))
+        return True
 
     def result(self) -> Any:
         return self._task.result()
+
+    def _read_result(self) -> tuple[bool, Any]:
+        result = self._task.result()
+        if isinstance(result, LuaTaskResult):
+            return True, python_2_lua(self._lupa, result.snapshot)
+        return False, result
 
     def error(self) -> str:
         return self._task.error()
@@ -102,23 +136,38 @@ class LuaThreadExports:
                 subruntime = self.build_subruntime_from_snapshot(snapshot)
             else:
                 subruntime = self.build_subruntime()
-            globals_table = subruntime.globals()
-            globals_table["is_cancelled"] = cancel_event.is_set
-            if function_snapshot is not None:
-                functions = globals_table["restore_lua_functions"](python_2_lua(subruntime, function_snapshot))
-                sub_function_ref = functions[function_name]
-            else:
-                sub_function_ref = globals_table[function_name]
-            if sub_function_ref is None:
-                raise ValueError(f"Failed to deserialize target function in sub-thread: {function_name}")
-            
-            lua_args = [python_2_lua(subruntime, arg) for arg in safe_args]
-            result = sub_function_ref(*lua_args)
-            return result
+            clear_globals = subruntime.eval('''(function()
+                local globals, iterate = _G, pairs
+                return function() for key in iterate(globals) do globals[key] = nil end end
+            end)()''')
+            remove_hook = subruntime.globals()["debug"]["sethook"]
+            try:
+                globals_table = subruntime.globals()
+                globals_table["is_cancelled"] = cancel_event.is_set
+                if function_snapshot is not None:
+                    functions = globals_table["restore_lua_functions"](python_2_lua(subruntime, function_snapshot))
+                    sub_function_ref = functions[function_name]
+                else:
+                    sub_function_ref = globals_table[function_name]
+                if sub_function_ref is None:
+                    raise ValueError(f"Failed to deserialize target function in sub-thread: {function_name}")
+
+                lua_args = [python_2_lua(subruntime, arg) for arg in safe_args]
+                result = globals_table["capture_thread_result"](sub_function_ref, *lua_args)
+                return LuaTaskResult(lua_2_python(result))
+            finally:
+                if subruntime is not self.lupa:
+                    try:
+                        # 命名空间中的 Python 回调可能反向持有 LuaRuntime，先解除根引用。
+                        remove_hook()
+                        clear_globals()
+                        subruntime.gccollect()
+                    except Exception as exc:
+                        logger.error(f"Lua subruntime cleanup failed: {exc}")
 
         task = self.manager.create_task(target, name=name or function_name)
         self.manager.start_task(task)
-        return LuaTaskHandle(task)
+        return LuaTaskHandle(task, self.lupa)
 
     def list(self) -> list[dict[str, Any]]:
         return [task.status() for task in self.manager.list()]
@@ -127,7 +176,7 @@ class LuaThreadExports:
         task = self.manager.get(task_id)
         if task is None:
             return None
-        return LuaTaskHandle(task)
+        return LuaTaskHandle(task, self.lupa)
 
     def cancel(self, task_id: str) -> bool:
         return self.manager.cancel(task_id)

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from lupa.lua54 import LuaRuntime
+from lupa.lua54 import LuaRuntime, lua_type
 
 from .exception import LuaExitException
 from .host_api import HostAPI
@@ -19,6 +19,8 @@ from .utils.virtual_io import VirtualIO
 
 
 NamespaceBuilder = Callable[[LuaRuntime], Any]
+# 每个任务持有独立 Lua 状态；限制活跃子任务，避免脚本耗尽宿主线程和内存。
+_MAX_ACTIVE_LUA_TASKS = 32
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,12 +52,13 @@ class LuaEngine:
             str(path).strip().replace("\\", "/"): str(source)
             for path, source in (source_overrides or {}).items()
         }
-        self.thread_manager = RuntimeThreadManager()
+        self.thread_manager = RuntimeThreadManager(max_tasks=_MAX_ACTIVE_LUA_TASKS)
         self.global_shared_store = SharedValue({})
         self._lua_require_base_dir: Path | None = None
         self._main_script: str = ""
         self._namespace_builders: dict[str, NamespaceBuilder] = {}
         self._builtin_lua_function_bytecodes: dict[str, str] = {}
+        self._builtin_global_names: set[str] = set()
 
     def register_namespace(self, name: str, builder: NamespaceBuilder) -> None:
         """注册额外 Lua 命名空间 构建时延迟注入到对应 runtime"""
@@ -65,6 +68,7 @@ class LuaEngine:
         self._namespace_builders[normalized_name] = builder
         if self.lupa is not None:
             self._register_dynamic_namespaces(self.lupa)
+            self._builtin_global_names.add(normalized_name)
 
     def stop_handler(self, message: str = "") -> None:
         """提供给 Lua 的主动停止处理器"""
@@ -92,7 +96,7 @@ class LuaEngine:
         globals_table["print"] = self.lua_print_handler
         globals_table["log_message"] = self.lua_log_handler
         globals_table["stop"] = self.stop_handler
-        globals_table["check_stop"] = self.host_api.check_stop
+        globals_table["check_stop"] = self._check_stop
         globals_table["clear_output"] = self.host_api.clear_output
         globals_table["set_output_limit"] = self.host_api.set_output_limit
         globals_table["get_output_limit"] = self.host_api.get_output_limit
@@ -106,9 +110,7 @@ class LuaEngine:
             if self._builtin_lua_function_bytecodes.get(key) != bytecode
         }
         globals_table = lua.globals()
-        functions = lua_2_python(globals_table["capture_lua_functions"](
-            lua.table_from({key: globals_table[key] for key in function_names})
-        ))
+        roots = {key: globals_table[key] for key in function_names}
         for key in list(globals_table.keys()):
             if not isinstance(key, str):
                 continue
@@ -117,12 +119,17 @@ class LuaEngine:
             except Exception:
                 continue
 
-            if callable(value):
+            if callable(value) and lua_type(value) != "table":
                 continue
 
             # 保持原有私有值隔离规则 函数不受此前缀限制
             # 因为 Blockly 会将中文函数名编码为以 _E 开头的合法 Lua 标识符
             if key.startswith("_"):
+                continue
+            if lua_type(value) == "table":
+                if key not in self._builtin_global_names:
+                    # 与闭包共用引用图，保留全局表的键类型、循环和 upvalue 别名。
+                    roots[key] = value
                 continue
             try:
                 normalized = lua_2_python(value)
@@ -130,6 +137,7 @@ class LuaEngine:
                 continue
             if isinstance(normalized, (type(None), bool, int, float, str, list, dict)):
                 values[key] = normalized
+        functions = lua_2_python(globals_table["capture_lua_functions"](lua.table_from(roots)))
         return RuntimeGlobalsSnapshot(values=values, functions=functions)
 
     def _dump_lua_global_functions(self, lua: LuaRuntime) -> dict[str, str]:
@@ -164,8 +172,8 @@ class LuaEngine:
             globals_table[key] = value
 
         functions = globals_table["restore_lua_functions"](python_2_lua(lua, snapshot.functions))
-        for key, function_ref in functions.items():
-            globals_table[key] = function_ref
+        for key, value in functions.items():
+            globals_table[key] = value
 
     def _register_builtin_namespaces(self, lua: LuaRuntime) -> None:
         """向 Lua 注入 runtime 内建命名空间"""
@@ -339,6 +347,7 @@ class LuaEngine:
         self._builtin_lua_function_bytecodes = self._dump_lua_global_functions(lua)
         self.lupa = lua
         self._register_all_namespaces(lua)
+        self._builtin_global_names = {key for key in lua.globals().keys() if isinstance(key, str)}
         return self.lupa
 
     def _build_subruntime(self) -> LuaRuntime:
@@ -354,9 +363,9 @@ class LuaEngine:
         self._register_host_globals(subruntime)
         self._configure_lua_package_path(subruntime)
         build_lua_runtime_inject(subruntime)
-        self._install_stop_hook(subruntime)
         self._apply_runtime_globals_snapshot(subruntime, snapshot)
         self._register_all_namespaces(subruntime)
+        self._install_stop_hook(subruntime)
         return subruntime
 
     def execute(self, file_content: str) -> Any:
@@ -372,16 +381,29 @@ class LuaEngine:
     def sleep_handler(self, seconds: float = 1.0) -> None:
         """休眠处理器，期间持续检查停止标记"""
         if seconds <= 0:
-            self.host_api.check_stop()
+            self._check_stop()
             return
 
-        end_time = time.time() + seconds
+        end_time = time.monotonic() + seconds
         while True:
-            self.host_api.check_stop()
-            remaining = end_time - time.time()
+            self._check_stop()
+            remaining = end_time - time.monotonic()
             if remaining <= 0:
                 break
-            time.sleep(min(0.1, remaining))
+            cancel_event = self.thread_manager.current_cancel_event
+            if cancel_event is None:
+                time.sleep(min(0.1, remaining))
+            else:
+                cancel_event.wait(min(0.1, remaining))
+
+    def _check_stop(self) -> None:
+        self.host_api.check_stop()
+        cancel_event = self.thread_manager.current_cancel_event
+        if cancel_event is not None and cancel_event.is_set():
+            raise LuaExitException("Thread task cancelled")
+
+    def shutdown_threads(self, timeout: float = 2.0) -> bool:
+        return self.thread_manager.shutdown(timeout)
 
 
 def python_namespace_to_lua(lua: LuaRuntime, namespace: Any) -> Any:
