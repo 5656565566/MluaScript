@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 from threading import Lock, RLock
+from time import monotonic, sleep
 from typing import Callable, Generic, Iterator, Protocol, TypeVar, runtime_checkable
 
 from mluascript.shared.logging import logger
@@ -133,6 +135,31 @@ def controller_is_connected(controller: object) -> bool:
 
 _CONTROLLER_OPERATION_LOCK_ATTR = "_mluascript_operation_lock"
 _controller_operation_lock_guard = Lock()
+_CONTROLLER_RECONNECT_ATTR = "_mluascript_reconnect"
+# 连接和首帧截图共享总时限；超时后保留原生作业，避免再次投递造成重叠。
+_RECONNECT_TIMEOUT_SECONDS = 30.0
+
+
+@dataclass
+class _ReconnectState:
+    job: Waitable | None = None
+    capturing: bool = False
+    waiting: bool = True
+
+
+def _check_stop(context: MaaContext) -> None:
+    check = context.state.extras.get("check_stop")
+    if check is not None:
+        check()
+
+
+def controller_reconnect_pending(controller: object) -> bool:
+    return getattr(controller, _CONTROLLER_RECONNECT_ATTR, None) is not None
+
+
+def _reject_reconnecting(controller: object) -> None:
+    if controller_reconnect_pending(controller):
+        raise MaaConnectionError("Maa controller is reconnecting")
 
 
 def _controller_operation_lock(controller: object):
@@ -176,7 +203,11 @@ def ensure_controller(context: MaaContext) -> MaaController:
 def locked_controller(context: MaaContext) -> Iterator[MaaController]:
     """串行化 MluaScript 直接提交到同一 Maa Controller 的操作"""
     controller = _require_bound_controller(context)
+    _check_stop(context)
+    _reject_reconnecting(controller)
     with _controller_operation_lock(controller):
+        _check_stop(context)
+        _reject_reconnecting(controller)
         yield ensure_controller(context)
 
 
@@ -194,36 +225,41 @@ def run_controller_operation(
     controller = _require_bound_controller(context)
     connection_label = context.state.connection_label
 
-    with _controller_operation_lock(controller):
-        if not _query_controller_connected(context, controller):
-            context.mark_connected(None)
-            if not replay_after_reconnect:
-                raise MaaConnectionError("Device or control object disconnected")
-            _reconnect_controller(context, controller, connection_label, operation)
+    reconnected = False
+    pending = getattr(controller, _CONTROLLER_RECONNECT_ATTR, None)
+    if pending is not None:
+        if not replay_after_reconnect or pending.waiting or pending.job is None or not getattr(pending.job, "done", True):
+            raise MaaConnectionError("Maa controller is reconnecting")
+        _reconnect_controller(context, controller, connection_label, operation)
+        reconnected = True
 
-        job = submit(controller)
-        try:
-            wait_for(job, operation=operation)
-            return job
-        except MaaConnectionError:
-            if not replay_after_reconnect or _query_controller_connected(context, controller):
-                raise
-
-            context.mark_connected(None)
-            logger.warning(f"Maa {operation} failed after disconnect; reconnecting and replaying once")
-            _reconnect_controller(context, controller, connection_label, operation)
-
-            retry_job = submit(controller)
-            try:
-                wait_for(retry_job, operation=f"{operation} replay")
-            except MaaConnectionError as retry_error:
+    for _ in range(2):
+        _check_stop(context)
+        _reject_reconnecting(controller)
+        with _controller_operation_lock(controller):
+            _check_stop(context)
+            _reject_reconnecting(controller)
+            if not _query_controller_connected(context, controller):
+                context.mark_connected(None)
+                if not replay_after_reconnect or reconnected:
+                    raise MaaConnectionError("Device or control object disconnected")
+            else:
+                job = submit(controller)
                 try:
-                    if not controller_is_connected(controller):
+                    wait_for(job, operation=f"{operation} replay" if reconnected else operation)
+                    return job
+                except MaaConnectionError as exc:
+                    connected = _query_controller_connected(context, controller)
+                    if not connected:
                         context.mark_connected(None)
-                except Exception:
-                    context.mark_connected(None)
-                raise MaaConnectionError(f"Maa {operation} failed after reconnect") from retry_error
-            return retry_job
+                    if reconnected:
+                        raise MaaConnectionError(f"Maa {operation} failed after reconnect") from exc
+                    if not replay_after_reconnect or connected:
+                        raise
+        # 重连期间释放操作锁，新操作通过重连状态明确失败。
+        _reconnect_controller(context, controller, connection_label, operation)
+        reconnected = True
+    raise MaaConnectionError(f"Maa {operation} failed after reconnect")
 
 
 def _reconnect_controller(
@@ -232,18 +268,56 @@ def _reconnect_controller(
     connection_label: str | None,
     operation: str,
 ) -> None:
-    logger.warning(f"Maa controller disconnected during {operation}; reconnecting")
-    wait_for(controller.post_connection(), operation="controller reconnect")
-    wait_for(controller.post_screencap(), operation="screencap after reconnect")
-    if not _query_controller_connected(context, controller):
-        context.mark_connected(None)
-        raise MaaConnectionError("Maa controller reconnect completed but controller is still disconnected")
+    _check_stop(context)
+    with _controller_operation_lock_guard:
+        state = getattr(controller, _CONTROLLER_RECONNECT_ATTR, None)
+        if state is not None:
+            if state.waiting or state.job is None or not getattr(state.job, "done", True):
+                raise MaaConnectionError("Maa controller is reconnecting")
+            state.waiting = True
+        else:
+            state = _ReconnectState()
+            setattr(controller, _CONTROLLER_RECONNECT_ATTR, state)
+    completed = False
+    try:
+        logger.warning(f"Maa controller disconnected during {operation}; reconnecting")
+        deadline = monotonic() + _RECONNECT_TIMEOUT_SECONDS
+        if state.job is None:
+            state.job = controller.post_connection()
+        _wait_reconnect(context, state.job, deadline, "screencap after reconnect" if state.capturing else "controller reconnect")
+        if not state.capturing:
+            state.job = controller.post_screencap()
+            state.capturing = True
+            _wait_reconnect(context, state.job, deadline, "screencap after reconnect")
+        completed = True
+        if not _query_controller_connected(context, controller):
+            context.mark_connected(None)
+            raise MaaConnectionError("Maa controller reconnect completed but controller is still disconnected")
 
-    restored_label = connection_label
-    if not restored_label:
-        try:
-            restored_label = str(controller.uuid or "").strip() or None
-        except Exception:
-            restored_label = None
-    context.mark_connected(restored_label or "Maa controller")
-    logger.info(f"Maa controller reconnected during {operation}")
+        restored_label = connection_label
+        if not restored_label:
+            try:
+                restored_label = str(controller.uuid or "").strip() or None
+            except Exception:
+                restored_label = None
+        context.mark_connected(restored_label or "Maa controller")
+        logger.info(f"Maa controller reconnected during {operation}")
+    finally:
+        with _controller_operation_lock_guard:
+            if completed or state.job is None or (getattr(state.job, "done", True) and not state.job.succeeded):
+                setattr(controller, _CONTROLLER_RECONNECT_ATTR, None)
+            else:
+                state.waiting = False
+
+
+def _wait_reconnect(context: MaaContext, job: Waitable, deadline: float, operation: str) -> None:
+    # Maa Job 支持状态查询；仅提供 wait() 的旧控制器适配器保持原有同步契约。
+    if hasattr(job, "done"):
+        while not job.done:
+            _check_stop(context)
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise MaaConnectionError(f"Maa {operation} timed out; native job is still pending")
+            sleep(min(0.05, remaining))
+    _check_stop(context)
+    wait_for(job, operation=operation)
