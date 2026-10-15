@@ -18,6 +18,7 @@ def bind_controller(context: MaaContext, controller: object) -> None:
             Library.framework().MaaTaskerBindController(
                 context.tasker._handle, controller_handle
             )
+            context.tasker._controller_holder = controller
         except Exception as exc:
             logger.error(f"Maa tasker 绑定 controller 失败: {exc}")
 

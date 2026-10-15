@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import time
+import gc
+import weakref
+from threading import Event, enumerate as enumerate_threads
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from mluascript.control.execution.manager import ExecutionManager
@@ -8,6 +12,7 @@ from mluascript.control.facade import ControlFacade
 from mluascript.control.state.manager import StateManager
 from mluascript.control.workspace.manager import WorkspaceManager
 from mluascript.shared.config.manager import load_config
+import pytest
 
 
 def _build_real_facade(root_dir: Path) -> ControlFacade:
@@ -37,6 +42,114 @@ def _wait_for_terminal_status(facade: ControlFacade, task_id: str, timeout: floa
             return task.status
         time.sleep(0.02)
     return last_status
+
+
+@pytest.mark.parametrize("ending, expected", [("return 42", "success"), ("error('main failed')", "failed")])
+def test_script_completion_cancels_and_joins_owned_children(tmp_path, ending, expected):
+    facade = _build_real_facade(tmp_path)
+    code = f'function child() while true do end end; thread.spawn("child", "owned-lifecycle-child"); {ending}'
+    task_id = facade.run_script('parent.lua', code, 'lifecycle-device')
+    assert _wait_for_terminal_status(facade, task_id) == expected
+    assert not any(thread.name == 'owned-lifecycle-child' for thread in enumerate_threads())
+    context = facade.state_mgr.get_run_context(task_id)
+    if context is not None:
+        assert context.host_task.join(1)
+    assert facade.state_mgr.get_run_context(task_id) is None
+
+
+def test_completed_runs_release_lua_engines_even_with_global_task_handles(tmp_path):
+    facade = _build_real_facade(tmp_path)
+    integration = facade.exec_mgr.integration_facade
+    create = integration.create_script_run
+    engines = []
+
+    def capture(*args, **kwargs):
+        context = create(*args, **kwargs)
+        engines.append(weakref.ref(context.runtime))
+        return context
+
+    integration.create_script_run = capture
+    code = 'function worker() return 42 end; handle = thread.spawn("worker"); assert(handle:join(2)); return handle:result()'
+    for _ in range(3):
+        task_id = facade.run_script('handles.lua', code, 'engine-release-device')
+        assert _wait_for_terminal_status(facade, task_id) == 'success'
+    gc.collect()
+    assert all(reference() is None for reference in engines)
+
+
+@pytest.mark.parametrize("stop_fails", [False, True])
+def test_stop_retains_native_child_and_device_admission_until_it_exits(tmp_path, monkeypatch, stop_fails):
+    facade = _build_real_facade(tmp_path)
+    entered, release = Event(), Event()
+    use_case = facade.exec_mgr.script_use_case
+    execute = use_case._execute_script
+
+    def execute_with_probe(runtime, code):
+        def block():
+            entered.set()
+            runtime.global_shared_store.set_key('entered', True)
+            assert release.wait(5)
+        runtime.register_namespace('probe', lambda lua: {'block': block})
+        return execute(runtime, code)
+
+    use_case._execute_script = execute_with_probe
+    code = '''
+        function child() probe.block() end
+        thread.spawn("child", "owned-native-child")
+        while not shared.get_key("entered") do sleep(0.005) end
+        return 42
+    '''
+    task_id = facade.run_script('parent.lua', code, 'native-child-device')
+    try:
+        assert entered.wait(2)
+        start = time.monotonic()
+        if stop_fails:
+            context = facade.state_mgr.get_run_context(task_id)
+            def fail_stop():
+                raise RuntimeError('native stop failed')
+            monkeypatch.setattr(context.maa.tasker, 'post_stop', fail_stop)
+            with pytest.raises(RuntimeError, match='native stop failed'):
+                facade.stop_script(task_id)
+        else:
+            facade.stop_script(task_id)
+        assert time.monotonic() - start < 0.8
+        assert facade.get_task_info(task_id).status == 'pending'
+        assert facade.state_mgr.get_run_context(task_id) is not None
+        with pytest.raises(RuntimeError, match='已有任务'):
+            facade.run_script('other.lua', 'return 1', 'native-child-device')
+    finally:
+        release.set()
+    assert _wait_for_terminal_status(facade, task_id) == 'stopped'
+    assert not any(thread.name == 'owned-native-child' for thread in enumerate_threads())
+
+
+def test_native_stop_submission_cannot_race_with_returning_resources(tmp_path, monkeypatch):
+    facade = _build_real_facade(tmp_path)
+    code = 'while not shared.get_key("finish") do sleep(0.005) end; return 42'
+    task_id = facade.run_script('stop-race.lua', code, 'stop-race-device')
+    context = facade.state_mgr.get_run_context(task_id)
+    tasker = context.maa.tasker
+    original = tasker.post_stop
+    entered, release = Event(), Event()
+
+    def slow_post():
+        entered.set()
+        assert release.wait(3)
+        return original()
+
+    monkeypatch.setattr(tasker, 'post_stop', slow_post)
+    with ThreadPoolExecutor(max_workers=1) as callers:
+        stopping = callers.submit(facade.stop_script, task_id)
+        try:
+            assert entered.wait(1)
+            context.runtime.global_shared_store.set_key('finish', True)
+            Event().wait(0.15)
+            assert context.maa.tasker is tasker
+            assert facade.get_task_info(task_id).status == 'pending'
+        finally:
+            release.set()
+        stopping.result(2)
+    assert _wait_for_terminal_status(facade, task_id) == 'stopped'
 
 
 def test_control_facade_run_script_executes_real_lua(tmp_path: Path) -> None:

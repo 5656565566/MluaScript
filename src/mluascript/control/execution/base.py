@@ -49,21 +49,27 @@ class BaseExecutionUseCase(ABC, Generic[TRunContext]):
     def stop(self, task_id: str, *, log_message: str) -> None:
         logger.info(log_message)
         task = self.state_manager.get_task(task_id)
-        if not task or task.kind != self.task_kind:
+        if not task or task.kind != self.task_kind or task.status not in ("pending", "running"):
             return
 
         self.state_manager.update_task_status(task_id, "pending")
+        completed = True
+        context = None
         try:
             context = self.resolve_task_context(task)
             if context is not None:
-                self.do_stop(task, context)
-            self.state_manager.update_task_status(task_id, "stopped")
+                completed = self.do_stop(task, context) is not False
+            if completed:
+                self.state_manager.update_task_status(task_id, "stopped")
         except Exception as exc:
             logger.error(f"Failed to stop {self.task_kind}: {exc}")
-            self.state_manager.update_task_status(task_id, "failed", error=str(exc))
+            host_task = getattr(context, "host_task", None)
+            completed = host_task is None or not host_task.is_alive
+            self.state_manager.update_task_status(task_id, "failed" if completed else "pending", error=str(exc))
             raise
         finally:
-            self.unbind_task_context(task)
+            if completed:
+                self.unbind_task_context(task)
 
     def bind_task_context(self, task: TaskInfo, context: TRunContext) -> None:
         self.state_manager.bind_run_context(task.task_id, cast(RunContext, context))
@@ -96,5 +102,5 @@ class BaseExecutionUseCase(ABC, Generic[TRunContext]):
         """执行具体启动逻辑"""
 
     @abstractmethod
-    def do_stop(self, task: TaskInfo, context: TRunContext) -> None:
-        """执行具体停止逻辑"""
+    def do_stop(self, task: TaskInfo, context: TRunContext) -> bool | None:
+        """执行停止逻辑；返回 False 时保留仍在退出的运行上下文"""

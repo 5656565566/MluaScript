@@ -119,6 +119,7 @@ def initialize_maa_runtime(context: MaaContext) -> MaaContext:
                 bind_resource = getattr(Library.framework(), "MaaTaskerBindResource", None)
                 if bind_resource is not None:
                     bind_resource(context.tasker._handle, context.resource._handle)
+                    context.tasker._resource_holder = context.resource
             except Exception as exc:
                 logger.error(f"Maa tasker 绑定 resource 失败: {exc}")
 
@@ -130,8 +131,12 @@ def initialize_maa_runtime(context: MaaContext) -> MaaContext:
                 if ocr_model_dir.exists():
                     try:
                         logger.info(f"加载 Maa OCR 模型目录: {ocr_model_dir}")
-                        context.resource.post_ocr_model(ocr_model_dir).wait()
+                        job = context.resource.post_ocr_model(ocr_model_dir).wait()
+                        if not job.succeeded:
+                            context.state.extras["resource_dirty"] = True
+                            logger.error(f"Maa OCR 模型加载失败: {ocr_model_dir}")
                     except Exception as exc:
+                        context.state.extras["resource_dirty"] = True
                         logger.error(f"Maa OCR 模型加载失败: {exc}")
                 else:
                     logger.warning(f"Maa OCR 模型目录不存在: {ocr_model_dir}")

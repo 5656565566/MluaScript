@@ -99,10 +99,11 @@ def test_cancel_script_run_requests_runtime_stop_and_stops_maa() -> None:
 
     cancel_script_run(context)
 
-    assert context.status is RunStatus.STOPPED
+    assert context.status is RunStatus.STOPPING
     assert context.stopper.is_stop_requested is True
     assert tasker.post_stop_called is True
-    assert tasker.stop_job.wait_called is True
+    assert tasker.stop_job.wait_called is False
+    assert maa.state.extras["stop_job"] is tasker.stop_job
     assert maa.state.connected is False
     assert maa.state.connection_label is None
 

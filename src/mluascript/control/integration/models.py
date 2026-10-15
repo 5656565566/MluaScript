@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from threading import RLock
 from typing import Any
 
 from mluascript.control.workspace.models import PipelineRunLocator, ScriptRunLocator
@@ -35,6 +36,7 @@ class ScriptRunContext:
     host_task: RuntimeTask | None = None
     print_buffer: TaskOutputBuffer = field(default_factory=TaskOutputBuffer)
     log_buffer: TaskLogBuffer = field(default_factory=TaskLogBuffer)
+    lifecycle_lock: Any = field(default_factory=RLock, repr=False)
 
 
 @dataclass

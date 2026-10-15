@@ -15,6 +15,7 @@ def load_resource(context: MaaContext, path: str | None = None) -> bool:
         logger.debug(f"Maa resource placeholder prepared: {target}")
         return True
     try:
+        context.state.extras["resource_dirty"] = True
         context.resource.post_bundle(target).wait()
         return True
     except Exception as exc:
@@ -26,6 +27,7 @@ def override_pipeline(context: MaaContext, override: dict[str, Any]) -> bool:
     if context.resource is None:
         logger.debug("Maa resource not initialized, skip override pipeline")
         return False
+    context.state.extras["resource_dirty"] = True
     return bool(context.resource.override_pipeline(override))
 
 

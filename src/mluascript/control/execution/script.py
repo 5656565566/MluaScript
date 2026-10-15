@@ -7,6 +7,7 @@ from typing import Any, Protocol
 from mluascript.control.devices import get_device_facade
 from mluascript.control.integration.facade import IntegrationFacade
 from mluascript.control.integration.models import RunStatus, ScriptRunContext
+from mluascript.control.integration.script_resources import release_script_resources
 from mluascript.maa.controllers.base import wait_for
 from mluascript.control.state.models import TaskInfo
 from mluascript.control.workspace.manager import WorkspaceManager, get_workspace_manager
@@ -170,37 +171,43 @@ class ScriptExecutionUseCase(BaseExecutionUseCase[ScriptRunContext]):
 
         def runner(cancel_event: Event) -> Any:
             _ = cancel_event
+            result = None
+            error = None
+            final_status = "success"
             try:
                 result = self._execute_script(context.runtime, request.code)
-                self.state_manager.update_task_info(
-                    task.task_id,
-                    print_buffer=context.print_buffer,
-                    log_buffer=context.log_buffer,
-                )
-                context.status = RunStatus.FINISHED
-                self.state_manager.finish_task(task.task_id, "success", result=result)
-                return result
             except LuaExitException:
-                self.state_manager.update_task_info(
-                    task.task_id,
-                    print_buffer=context.print_buffer,
-                    log_buffer=context.log_buffer,
-                )
-                context.status = RunStatus.STOPPED
-                self.state_manager.finish_task(task.task_id, "stopped")
-                return None
+                final_status = "stopped"
             except Exception as exc:
-                self.state_manager.update_task_info(
-                    task.task_id,
-                    print_buffer=context.print_buffer,
-                    log_buffer=context.log_buffer,
-                )
-                context.status = RunStatus.FAILED
-                self.state_manager.finish_task(task.task_id, "failed", error=str(exc))
-                raise
+                final_status, error = "failed", exc
             finally:
-                reset_script_controller_state(context)
-                cleanup_artifact_runtime_dir(context.locator.cleanup_dir)
+                try:
+                    shutdown = getattr(context.runtime, "shutdown_threads", None)
+                    if shutdown is not None and not shutdown(timeout=0.2):
+                        context.status = RunStatus.STOPPING
+                        logger.warning(f"Script {task.task_id} is waiting for native child tasks to exit")
+                        while not shutdown(timeout=0.1):
+                            pass
+                    reset_script_controller_state(context)
+                    while True:
+                        with context.lifecycle_lock:
+                            stop_job = context.maa.state.extras.pop("stop_job", None)
+                            if stop_job is None and release_script_resources(context.maa):
+                                break
+                        if stop_job is not None:
+                            wait_for(stop_job, operation="stop script")
+                        Event().wait(0.05)
+                    cleanup_artifact_runtime_dir(context.locator.cleanup_dir)
+                except Exception as exc:
+                    final_status, error = "failed", exc
+                if context.stopper.is_stop_requested and final_status == "success":
+                    final_status, result = "stopped", None
+                context.status = {"success": RunStatus.FINISHED, "stopped": RunStatus.STOPPED, "failed": RunStatus.FAILED}[final_status]
+                self.state_manager.update_task_info(task.task_id, print_buffer=context.print_buffer, log_buffer=context.log_buffer)
+                self.state_manager.finish_task(task.task_id, final_status, result=result, error=str(error) if error else None)
+            if error is not None:
+                raise error
+            return result
 
         self.thread_manager.cleanup()
         host_task = self.thread_manager.spawn(runner, name=f"script-run-{task.task_id[:8]}")
@@ -210,14 +217,19 @@ class ScriptExecutionUseCase(BaseExecutionUseCase[ScriptRunContext]):
             summary={"host_task_id": host_task.task_id}
         )
 
-    def do_stop(self, task: TaskInfo, context: ScriptRunContext) -> None:
+    def do_stop(self, task: TaskInfo, context: ScriptRunContext) -> bool:
         self.facade.cancel_script_run(context)
         host_task = context.host_task
         if host_task is not None:
             host_task.cancel()
-            host_task.join(0.2)
-        reset_script_controller_state(context)
-        cleanup_artifact_runtime_dir(context.locator.cleanup_dir)
+            if not host_task.join(0.2):
+                context.status = RunStatus.STOPPING
+                logger.warning(f"Script {task.task_id} stop requested; worker has not exited")
+                return False
+        if host_task is None or host_task.thread.ident is None:
+            reset_script_controller_state(context)
+            release_script_resources(context.maa)
+            cleanup_artifact_runtime_dir(context.locator.cleanup_dir)
         if context.status is not RunStatus.STOPPED:
             context.status = RunStatus.STOPPED
         self.state_manager.update_task_info(
@@ -226,6 +238,7 @@ class ScriptExecutionUseCase(BaseExecutionUseCase[ScriptRunContext]):
             log_buffer=context.log_buffer,
         )
         self.state_manager.finish_task(task.task_id, "stopped")
+        return True
 
     def _execute_script(self, runtime: ScriptRuntime, code: str) -> Any:
         return runtime.execute(code)
