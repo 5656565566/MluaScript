@@ -213,7 +213,9 @@ export function createTemplateActions({ state, templateApi, projectApi, artifact
           ? await actions.runArtifactTemplate(script.artifactId, payload)
         : await templateApi.runWorkflow(payload)
       await actions.loadState()
-      actions.setStatus(data.message || '模板任务已启动', 'success')
+      if (!script?.projectKey && !script?.artifactId) {
+        actions.setStatus(data.message || '模板任务已启动', 'success')
+      }
       return data
     },
 
