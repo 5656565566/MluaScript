@@ -3,12 +3,22 @@ from __future__ import annotations
 import os
 import socket
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import call
 
 import pytest
+import numpy as np
+from lupa.lua54 import LuaRuntime
 from playwright.sync_api import sync_playwright
 
+from mluascript.control.devices.facade import DeviceFacade
+from mluascript.control.devices.models import DeviceOverview
+from mluascript.maa.controllers.screen import screencap
 from mluascript.maa.extensions.browser.controller import BrowserController
+from mluascript.maa.lifecycle.runtime import MaaContext
+from mluascript.maa.lua_exports import build_maa_exports
+from mluascript.maa.recognition.service import run_recognition_direct
+from mluascript.maa.types import MaaPaths
 
 
 _EDGE = Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Microsoft/Edge/Application/msedge.exe"
@@ -207,3 +217,44 @@ def test_native_browser_repeated_connect_and_cdp_reconnect_preserve_page(native_
         for _, owned_worker in owners:
             owned_worker.join(timeout=5)
             assert not owned_worker.is_alive()
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(os.name != "nt" or not _EDGE.is_file(), reason="Requires installed Windows Edge")
+def test_native_screencap_failure_is_not_returned_as_black_or_cached_image(native_browser_controller, mocker) -> None:
+    controller = native_browser_controller
+    assert controller.post_screencap().wait().succeeded
+    assert controller.cached_image.size > 0
+    controller._submit_browser(lambda: controller.browser.close())
+
+    assert not controller.post_screencap().wait().succeeded
+    assert controller.last_error
+    context = MaaContext(paths=MaaPaths(library_dir=Path('.'), resource_dir=Path('.')), controller=controller)
+    assert screencap(context) is None
+    lua = LuaRuntime()
+    lua.globals()['capture'] = build_maa_exports(lua, context).screencap
+    assert lua.execute('return capture()') is None
+    context.tasker = mocker.Mock()
+    assert run_recognition_direct(context, 'failed-capture', 'OCR', {}) is None
+    context.tasker.post_recognition.assert_not_called()
+    facade = DeviceFacade.__new__(DeviceFacade)
+    facade._maa_facade = SimpleNamespace(context=context, get_current_session=lambda: object())
+    facade.get_overview = lambda: DeviceOverview()
+    result = facade.screencap_current()
+    assert result.ok is False
+    assert result.severity == 'error'
+    assert result.image_base64 is None
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(os.name != "nt" or not _EDGE.is_file(), reason="Requires installed Windows Edge")
+def test_native_screencap_accepts_an_actual_black_page(native_browser_controller) -> None:
+    controller = native_browser_controller
+    controller._submit_browser(lambda: controller._current_page().set_content(
+        '<style>html,body { background: black; margin: 0; }</style>'
+    ))
+    job = controller.post_screencap().wait()
+    assert job.succeeded, controller.last_error
+    image = job.get()
+    assert image.shape == (720, 1600, 3)
+    assert np.count_nonzero(image) == 0

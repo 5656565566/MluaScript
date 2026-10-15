@@ -326,20 +326,23 @@ class BrowserController(CustomController):
         return f"browser_{self.url}"
 
     def screencap(self) -> np.ndarray:
-        if not self._connected:
-            return np.zeros((720, 1280, 3), dtype=np.uint8)
-
         try:
+            if not self._connected:
+                raise RuntimeError("Browser is not connected")
+
             def capture() -> np.ndarray:
                 screenshot_bytes = self._current_page().screenshot()
                 image = Image.open(io.BytesIO(screenshot_bytes)).convert("RGB")
                 # Maa's native custom-controller callback requires contiguous BGR memory.
                 return np.ascontiguousarray(np.array(image)[:, :, ::-1])
 
-            return self._submit_browser(capture)
+            image = self._submit_browser(capture)
+            self.last_error = ""
+            return image
         except Exception as exc:
-            logger.error(f"Browser screencap failed: {exc}")
-            return np.zeros((720, 1280, 3), dtype=np.uint8)
+            self.last_error = str(exc) or exc.__class__.__name__
+            logger.error(f"Browser screencap failed: {self.last_error}")
+            raise RuntimeError(f"Browser screencap failed: {self.last_error}") from exc
 
     def click(self, x: int, y: int) -> bool:
         if not self._connected:
