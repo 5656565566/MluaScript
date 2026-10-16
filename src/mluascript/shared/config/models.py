@@ -31,6 +31,10 @@ class WebServerConfig(BaseModel):
     password: str = Field(default_factory=_random_config_secret, min_length=1, description="MluaScript Web 登录密码")
     session_secret: str = Field(default_factory=_random_config_secret, min_length=16, description="MluaScript Web 登录会话签名密钥")
     session_max_age_seconds: int = Field(default=604800, ge=60, description="MluaScript Web 登录有效期 秒")
+    cors_origins: list[str] = Field(
+        default_factory=list,
+        description="允许 CORS 的来源列表；空列表禁止跨源访问，['*'] 允许所有来源",
+    )
     project_roots: list[str] = Field(
         default_factory=lambda: ["./.mluascript_web/projects"],
         description="Web 项目管理允许访问的项目根目录列表",

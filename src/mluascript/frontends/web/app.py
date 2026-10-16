@@ -1912,13 +1912,15 @@ def create_web_app(
     app.state.preference_service = WebPreferenceService(
         preferences_path or (runtime_root / ".mluascript_web" / "settings" / "web" / "preferences.json")
     )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    cors_origins = getattr(_get_web_config(), "cors_origins", [])
+    if cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     app.include_router(auth_router)
     protected_dependencies = [Depends(require_authenticated_user)]

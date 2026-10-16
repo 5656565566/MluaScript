@@ -136,6 +136,7 @@ def test_load_config_generates_default_web_login_secret():
 
         web_cfg = registry.get(WebServerConfig)
         assert web_cfg.enabled is False
+        assert web_cfg.cors_origins == []
         assert web_cfg.username == "admin"
         assert len(web_cfg.password) == 16
         assert len(web_cfg.session_secret) == 16
@@ -145,6 +146,7 @@ def test_load_config_generates_default_web_login_secret():
 
         assert saved_data["WebServerConfig"]["username"] == "admin"
         assert saved_data["WebServerConfig"]["enabled"] is False
+        assert saved_data["WebServerConfig"]["cors_origins"] == []
         assert saved_data["WebServerConfig"]["password"] == web_cfg.password
         assert saved_data["WebServerConfig"]["session_secret"] == web_cfg.session_secret
 
@@ -160,6 +162,7 @@ def test_load_config_preserves_web_settings_while_forcing_missing_passwords():
                         "enabled": True,
                         "host": "0.0.0.0",
                         "port": 19090,
+                        "cors_origins": ["*"],
                         "username": "admin",
                         "password": "",
                         "session_secret": "",
@@ -175,6 +178,7 @@ def test_load_config_preserves_web_settings_while_forcing_missing_passwords():
         assert web_cfg.enabled is True
         assert web_cfg.host == "0.0.0.0"
         assert web_cfg.port == 19090
+        assert web_cfg.cors_origins == ["*"]
         assert web_cfg.username == "admin"
         assert len(web_cfg.password) == 16
         assert len(web_cfg.session_secret) == 16
