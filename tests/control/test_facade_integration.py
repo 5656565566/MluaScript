@@ -11,6 +11,7 @@ from mluascript.control.state.manager import StateManager
 from mluascript.control.workspace.manager import WorkspaceManager
 from mluascript.control.workspace.models import PipelineRunLocator, ScriptAsset, ScriptInfo, ScriptRunLocator, WorkspaceProject
 from mluascript.maa.config import MaaDeviceConfig
+from mluascript.maa.config.models import BrowserDeviceConfig
 from mluascript.maa.lifecycle.runtime import MaaContext
 from mluascript.maa.types import MaaContextState, MaaPaths
 from mluascript.runtime.output_buffer import TaskOutputBuffer
@@ -194,6 +195,10 @@ def build_facade(
     pipeline_tasker_factory: Callable[[], FakeTasker] | None = None,
 ) -> ControlFacade:
     facade = ControlFacade()
+    facade.device_facade._get_device_config = lambda: MaaDeviceConfig(browser_devices=[
+        BrowserDeviceConfig(name="Test Chrome", type="chrome", debug_url="http://127.0.0.1:9222"),
+        BrowserDeviceConfig(name="Test Edge", type="edge", debug_url="http://127.0.0.1:9223"),
+    ])
     facade.state_mgr = StateManager()
     facade.workspace_mgr = FakeWorkspaceManager()
     integration = FakeIntegrationFacade(
