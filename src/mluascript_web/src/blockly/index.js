@@ -8,7 +8,8 @@ import { findVariableItemByValue } from './variableContext'
 import { applyBlocklyZhCnLocale } from './locale'
 import { getBlocklyUiPalette } from '../app/theme'
 import { collectBlocklyDiagnostics, workspaceToLua } from './generator'
-import { migrateLegacyProjectModuleCallXml, restoreProjectModuleCallState } from './projectModuleCall.js'
+import { restoreProjectModuleCallState } from './projectModuleCall.js'
+import { loadBlocklyXml } from './xmlImport.js'
 import { restoreThreadTaskSelection } from './threadTaskSelection.js'
 import { restoreSerializedPickerLabel } from './pickerBlockState.js'
 import {
@@ -348,9 +349,7 @@ export function createBlocklyWorkspace(element, initialXml = '') {
   if (initialXml) {
     try {
       Blockly.Events.disable()
-      const dom = Blockly.utils.xml.textToDom(initialXml)
-      migrateLegacyProjectModuleCallXml(dom)
-      Blockly.Xml.domToWorkspace(dom, workspace)
+      loadBlocklyXml(initialXml, workspace)
     } catch (error) {
       console.warn('恢复 Blockly 工作区失败', error)
     } finally {
@@ -429,8 +428,7 @@ export function compileBlocklyXml(xmlText) {
   const workspace = new Blockly.Workspace()
   try {
     patchCoreVariableBlocks(workspace)
-    const dom = Blockly.utils.xml.textToDom(String(xmlText || ''))
-    Blockly.Xml.domToWorkspace(dom, workspace)
+    loadBlocklyXml(xmlText, workspace)
     patchCoreVariableBlocks(workspace)
     refreshFunctionReferenceDropdown(workspace)
     const diagnostics = collectBlocklyDiagnostics(workspace)

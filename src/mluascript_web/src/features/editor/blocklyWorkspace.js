@@ -1,12 +1,13 @@
+import { loadBlocklyXml } from '../../blockly/xmlImport.js'
+
 export async function replaceBlocklyWorkspace(editor, xml) {
   if (!editor) return
-  const { utils, Xml, Events } = await import('blockly')
+  const { Events } = await import('blockly')
   Events.disable()
   try {
     editor.clear()
     if (xml) {
-      const dom = utils.xml.textToDom(xml)
-      Xml.domToWorkspace(dom, editor)
+      loadBlocklyXml(xml, editor)
     }
   } finally {
     Events.enable()

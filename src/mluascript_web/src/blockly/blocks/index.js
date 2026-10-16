@@ -14,18 +14,9 @@ import { MaaPickerIcon, LuaVariableField } from '../fields'
 import { PICKER_ICON_TYPE } from '../constants'
 import { registerQuickInputBlocks } from '../quickInput.js'
 
-const unsupportedDeviceBlockTypes = new Set([
-  'maa_human_swipe',
-  'maa_human_swipe_preset_steady',
-  'maa_human_swipe_preset_natural',
-  'maa_human_swipe_preset_drag_precise',
-  'maa_human_swipe_preset_scroll_vertical',
-])
-
-
 export const dynamicBlockSpecs = [
   ...templateBlocks,
-  ...deviceBlocks.filter((block) => !unsupportedDeviceBlockTypes.has(block.type)),
+  ...deviceBlocks,
   ...visionBlocks,
   ...luaCoreBlocks,
   ...luaTableBlocks,

@@ -41,23 +41,6 @@ function initializeThreadTaskPicker(block) {
 
 export const luaThreadBlocks = [
   {
-    type: 'maa_run_pipeline',
-    category: '任务',
-    colour: '#10b981',
-    definition: {
-      message0: '执行流水线 %1',
-      args0: [{ type: 'input_value', name: 'ENTRY' }],
-      previousStatement: null,
-      nextStatement: null,
-      tooltip: '调用 maa.run_pipeline()。运行 maa pipeline。',
-      helpUrl: '',
-    },
-    generator(block, generator) {
-      const entry = generator.valueToCode(block, 'ENTRY', luaOrder) || "''"
-      return `maa.run_pipeline(${entry})\n`
-    },
-  },
-  {
     type: 'thread_spawn_selected_function',
     category: '任务',
     colour: '#10b981',
