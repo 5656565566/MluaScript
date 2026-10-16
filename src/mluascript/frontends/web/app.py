@@ -10,7 +10,9 @@ import json
 import mimetypes
 import secrets
 import time
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from threading import Lock
 from typing import Any, Iterable, Literal
 
 import numpy as np
@@ -250,6 +252,8 @@ def _create_empty_editor_session() -> dict[str, Any]:
 
 
 _EDITOR_SESSIONS: dict[str, dict[str, Any]] = {}
+_EDITOR_SESSIONS_LOCK = Lock()
+_EDITOR_SESSION_CLEANUP_INTERVAL_SECONDS = 5 * 60
 
 
 def _ok(data: Any, message: str = "", meta: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -299,6 +303,33 @@ def _decode_session_token(token: str, cfg: WebServerConfig) -> str | None:
     return username
 
 
+def _cleanup_expired_editor_sessions() -> None:
+    cfg = _get_web_config()
+    with _EDITOR_SESSIONS_LOCK:
+        for key in list(_EDITOR_SESSIONS):
+            # 与登录校验使用同一失效规则，保留仍可访问的编辑器草稿。
+            if _decode_session_token(key, cfg) is None:
+                del _EDITOR_SESSIONS[key]
+
+
+async def _cleanup_editor_sessions_periodically() -> None:
+    while True:
+        await asyncio.sleep(_EDITOR_SESSION_CLEANUP_INTERVAL_SECONDS)
+        _cleanup_expired_editor_sessions()
+
+
+@asynccontextmanager
+async def _web_lifespan(app: FastAPI):
+    _cleanup_expired_editor_sessions()
+    cleanup_task = asyncio.create_task(_cleanup_editor_sessions_periodically())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await cleanup_task
+
+
 def _get_authenticated_user(request: Request) -> str | None:
     token = request.cookies.get(_AUTH_COOKIE_NAME, "")
     if not token:
@@ -315,10 +346,11 @@ def _get_editor_session_key(request: Request) -> str:
 
 def _get_editor_session(request: Request) -> dict[str, Any]:
     key = _get_editor_session_key(request)
-    session = _EDITOR_SESSIONS.get(key)
-    if session is None:
-        session = _create_empty_editor_session()
-        _EDITOR_SESSIONS[key] = session
+    with _EDITOR_SESSIONS_LOCK:
+        session = _EDITOR_SESSIONS.get(key)
+        if session is None:
+            session = _create_empty_editor_session()
+            _EDITOR_SESSIONS[key] = session
     return session
 
 
@@ -367,7 +399,8 @@ def auth_login(payload: LoginPayload) -> JSONResponse:
 
 @auth_router.post("/logout")
 def auth_logout(request: Request) -> JSONResponse:
-    _EDITOR_SESSIONS.pop(_get_editor_session_key(request), None)
+    with _EDITOR_SESSIONS_LOCK:
+        _EDITOR_SESSIONS.pop(_get_editor_session_key(request), None)
     response = JSONResponse(_ok({"authenticated": False}, message="已退出登录"))
     _clear_auth_cookie(response)
     return response
@@ -1893,7 +1926,7 @@ def create_web_app(
     runtime_dir: Path | None = None,
     script_roots: Iterable[str | Path] | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="MluaScript Web", version="1.0.0")
+    app = FastAPI(title="MluaScript Web", version="1.0.0", lifespan=_web_lifespan)
     runtime_root = Path(runtime_dir or get_runtime_dir()).resolve()
     try:
         configured_roots = list(getattr(_get_web_config(), "project_roots", []) or [])
