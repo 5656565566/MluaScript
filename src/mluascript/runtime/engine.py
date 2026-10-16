@@ -84,6 +84,10 @@ class LuaEngine:
         """接收 Lua 侧日志并转交给宿主"""
         self.host_api.log(level, message)
 
+    def lua_write_handler(self, data: str) -> None:
+        """接收不自动换行的 Lua 输出片段"""
+        self.host_api.write(data)
+
     def _create_runtime(self) -> LuaRuntime:
         """创建底层 LuaRuntime 实例"""
         return LuaRuntime(unpack_returned_tuples=True)
@@ -94,6 +98,7 @@ class LuaEngine:
         globals_table["sleep"] = self.sleep_handler
         globals_table["path"] = self.path.as_posix()
         globals_table["print"] = self.lua_print_handler
+        globals_table["__mlua_write_output"] = self.lua_write_handler
         globals_table["log_message"] = self.lua_log_handler
         globals_table["stop"] = self.stop_handler
         globals_table["check_stop"] = self._check_stop

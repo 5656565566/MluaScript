@@ -14,6 +14,10 @@ class HostAPI(Protocol):
         """一个 lua 输出源"""
         ...
 
+    def write(self, data: str) -> None:
+        """追加 Lua 输出片段，不自动结束当前行"""
+        ...
+
     def log(self, level: str, message: str) -> None:
         """处理来自 Lua 的分级日志"""
         ...

@@ -170,6 +170,50 @@ def test_control_facade_run_script_executes_real_lua(tmp_path: Path) -> None:
     assert task.result == 42
 
 
+def test_io_output_and_os_exit_reach_the_task_view(tmp_path):
+    facade = _build_real_facade(tmp_path)
+    task_id = facade.run_script('io-exit.lua', '''
+        io.write("main")
+        function worker() io.write("-child") end
+        local child = thread.spawn("worker")
+        assert(child:join(2))
+        assert(child:error() == "", child:error())
+        print("-line")
+        io.write("tail")
+        os.exit("expected exit")
+        print("unreachable")
+    ''', 'io-exit-device')
+    assert _wait_for_terminal_status(facade, task_id) == 'stopped'
+    output = facade.get_task_output(task_id)
+    assert output.items == ['main-child-line', 'tail']
+    assert output.total_lines == 2
+    assert facade.get_task_info(task_id).error is None
+
+
+def test_partial_io_output_is_visible_before_the_script_finishes(tmp_path):
+    facade = _build_real_facade(tmp_path)
+    task_id = facade.run_script('io-live.lua', '''
+        io.write("progress")
+        while not shared.get_key("finish") do sleep(0.005) end
+        io.write("-done")
+    ''', 'io-live-device')
+    context = facade.state_mgr.get_run_context(task_id)
+    try:
+        deadline = time.monotonic() + 2
+        while not facade.get_task_output(task_id).items:
+            assert time.monotonic() < deadline
+            Event().wait(0.005)
+        before = facade.get_task_output(task_id)
+        assert before.items == ['progress']
+        assert facade.get_task_info(task_id).status == 'running'
+    finally:
+        context.runtime.global_shared_store.set_key('finish', True)
+    assert _wait_for_terminal_status(facade, task_id) == 'success'
+    after = facade.get_task_output(task_id)
+    assert after.items == ['progress-done']
+    assert after.version > before.version
+
+
 def test_control_facade_run_script_executes_unsaved_in_memory_lua(tmp_path: Path) -> None:
     editor_dir = tmp_path / ".mluascript_web" / "lua"
     editor_dir.mkdir(parents=True)

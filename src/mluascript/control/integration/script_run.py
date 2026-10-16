@@ -56,6 +56,9 @@ class RuntimeHostPlaceholder:
     def print(self, message: str) -> None:
         _ = message
 
+    def write(self, data: str) -> None:
+        _ = data
+
     def log(self, level: str, message: str) -> None:
         _ = (level, message)
 

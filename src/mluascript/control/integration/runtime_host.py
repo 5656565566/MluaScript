@@ -16,6 +16,9 @@ class RuntimeHost(HostAPI):
         text = str(message)
         self.context.print_buffer.append(text)
 
+    def write(self, data: str) -> None:
+        self.context.print_buffer.write(data)
+
     def log(self, level: str, message: str) -> None:
         text = str(message)
         level_name = str(level or "INFO").upper()

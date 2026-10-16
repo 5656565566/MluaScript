@@ -2,7 +2,7 @@ local original_io_write = io.write
 local original_io_output = io.output
 local original_default_output = original_io_output()
 
-os.exit = exit
+os.exit = stop
 
 function io.output(file)
     if file then
@@ -17,7 +17,7 @@ function io.write(...)
 
     if current_output == original_default_output then
         local data = table.concat({...})
-        python_buffer_file:write(data)
+        __mlua_write_output(data)
         return true
     else
         return original_io_write(...)
