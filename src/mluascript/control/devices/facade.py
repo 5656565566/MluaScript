@@ -6,9 +6,12 @@ import numpy as np
 import io
 import time
 import base64
+import re
 import shutil
 from math import ceil
 from pathlib import Path
+from threading import Lock
+from uuid import uuid4
 from PIL import Image
 from maa.define import MaaAdbInputMethodEnum, MaaAdbScreencapMethodEnum
 
@@ -43,6 +46,9 @@ from .models import (
 )
 
 PAGE_SIZE = 8
+_SCREENSHOT_LIMIT = 100
+_SCREENSHOT_NAME = re.compile(r"screenshot_\d{8}_\d{6}_[0-9a-f]{32}\.png")
+_SCREENSHOT_LOCK = Lock()
 ADB_INPUT_METHOD_MAATOUCH = int(MaaAdbInputMethodEnum.Maatouch)
 ADB_INPUT_METHOD_MINITOUCH = int(MaaAdbInputMethodEnum.MinitouchAndAdbKey)
 MANUAL_ADB_TOUCH_INPUT_METHODS = int(MaaAdbInputMethodEnum.Maatouch | MaaAdbInputMethodEnum.MinitouchAndAdbKey)
@@ -231,18 +237,41 @@ class DeviceFacade:
             )
 
     def screencap_current_and_save(self) -> DeviceActionResult:
+        """保存到 temp/screenshots，保留最近 100 张；不清理旧 temp 根目录文件。"""
         result = self._capture_current_screenshot_result()
         if not result.ok or not result.image_base64:
             return result
 
         try:
-            temp_dir = Path("temp")
-            temp_dir.mkdir(parents=True, exist_ok=True)
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            screenshot_path = temp_dir / f"screenshot_{timestamp}.png"
-            screenshot_path.write_bytes(base64.b64decode(result.image_base64))
-            result.message = f"截图成功，已保存到 {screenshot_path.as_posix()}"
-            result.saved_path = screenshot_path.as_posix()
+            with _SCREENSHOT_LOCK:
+                temp_dir = Path("temp") / "screenshots"
+                temp_dir.mkdir(parents=True, exist_ok=True)
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                screenshot_path = temp_dir / f"screenshot_{timestamp}_{uuid4().hex}.png"
+                try:
+                    screenshot_path.write_bytes(base64.b64decode(result.image_base64))
+                except Exception:
+                    screenshot_path.unlink(missing_ok=True)
+                    raise
+                result.message = f"截图成功，已保存到 {screenshot_path.as_posix()}"
+                result.saved_path = screenshot_path.as_posix()
+                try:
+                    previous = sorted(
+                        (
+                            path for path in temp_dir.iterdir()
+                            if path != screenshot_path and not path.is_symlink() and path.is_file()
+                            and _SCREENSHOT_NAME.fullmatch(path.name)
+                        ),
+                        key=lambda path: path.stat().st_mtime_ns,
+                        reverse=True,
+                    )
+                    # 始终保留刚写入的截图，其余名额按修改时间分配。
+                    for path in previous[_SCREENSHOT_LIMIT - 1:]:
+                        path.unlink()
+                except OSError as exc:
+                    logger.warning(f"Screenshot cleanup failed: {exc}")
+                    result.severity = "warning"
+                    result.message += f"，但旧截图清理失败: {exc}"
             return result
         except Exception as exc:
             logger.error(f"Device operation failed: {exc}", exc_info=True)
