@@ -33,6 +33,7 @@ from mluascript.control.workspace import (
     get_template_store,
 )
 from mluascript.frontends.web.preferences import WebPreferences, WebPreferenceService
+from mluascript.frontends.web.image_limits import MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, RecognitionImageLimitsMiddleware
 from mluascript.maa.lifecycle.runtime import initialize_maa_runtime
 from mluascript.maa.recognition import find_color, find_feature, find_nnd, find_ocr, find_template
 from mluascript.shared.config import WebServerConfig, config, resolve_configured_script_roots
@@ -1486,15 +1487,26 @@ def _recognition_image_array(service: ProjectService, project_key: str, payload:
     try:
         if payload.imageBase64:
             encoded = payload.imageBase64.split(",", 1)[-1]
+            if len(encoded) > ((MAX_IMAGE_BYTES + 2) // 3) * 4:
+                raise HTTPException(status_code=413, detail="测试图片数据不能超过 10 MiB")
             raw = base64.b64decode(encoded, validate=True)
         elif payload.imagePath:
             target = Path(_recognition_resource_path(service, project_key, payload.imagePath, "测试图片"))
-            raw = target.read_bytes()
+            if target.stat().st_size > MAX_IMAGE_BYTES:
+                raise HTTPException(status_code=413, detail="测试图片文件不能超过 10 MiB")
+            with target.open("rb") as source:
+                raw = source.read(MAX_IMAGE_BYTES + 1)
         else:
             raise ProjectServiceError("请选择识图测试图片")
+        if len(raw) > MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail="测试图片数据不能超过 10 MiB")
         with Image.open(io.BytesIO(raw)) as image:
+            if image.width * image.height > MAX_IMAGE_PIXELS:
+                raise HTTPException(status_code=413, detail="测试图片不能超过 2000 万像素")
             rgb = np.asarray(image.convert("RGB"))
         return rgb[:, :, ::-1].copy()
+    except Image.DecompressionBombError as exc:
+        raise HTTPException(status_code=413, detail="测试图片不能超过 2000 万像素") from exc
     except (OSError, ValueError, binascii.Error) as exc:
         raise ProjectServiceError(f"测试图片无效: {exc}") from exc
 
@@ -1555,6 +1567,8 @@ def recognize_project_image(
             model = _recognition_resource_path(service, project_key, payload.modelPath, "检测模型")
             targets = [item.strip() for item in payload.targets.split("|") if item.strip()] or None
             result = find_nnd(context, entry, model=model, targets=targets, roi=payload.roi, image=image)
+    except HTTPException:
+        raise
     except ProjectServiceError as exc:
         raise _project_error(exc) from exc
     except Exception as exc:
@@ -1912,6 +1926,7 @@ def create_web_app(
     app.state.preference_service = WebPreferenceService(
         preferences_path or (runtime_root / ".mluascript_web" / "settings" / "web" / "preferences.json")
     )
+    app.add_middleware(RecognitionImageLimitsMiddleware)
     cors_origins = getattr(_get_web_config(), "cors_origins", [])
     if cors_origins:
         app.add_middleware(

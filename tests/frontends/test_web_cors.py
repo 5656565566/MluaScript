@@ -58,6 +58,13 @@ def test_cors_allows_configured_origins_with_credentials(monkeypatch, tmp_path, 
     assert response.json()["data"]["authenticated"] is True
     assert response.headers["access-control-allow-origin"] == origin
 
+    oversized = client.post(
+        "/api/projects/test/recognize-image", content=b"{}",
+        headers={"Origin": origin, "content-length": str(16 * 1024 * 1024 + 1)},
+    )
+    assert oversized.status_code == 413
+    assert oversized.headers["access-control-allow-origin"] == origin
+
 
 def test_cors_rejects_origins_outside_the_allowlist(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path, ["https://allowed.example"])
