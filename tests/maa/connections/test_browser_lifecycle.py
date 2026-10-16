@@ -41,6 +41,7 @@ def browser(mocker, monkeypatch):
         owner = threading.get_ident()
         page = mocker.MagicMock()
         page.url = "https://test.invalid/"
+        page.is_closed.return_value = False
         transport = mocker.MagicMock()
         transport.contexts = [mocker.MagicMock(pages=[page])]
         transport.is_connected.return_value = True
@@ -192,3 +193,107 @@ def test_close_fails_queued_operations_and_allows_current_operation_to_finish(br
     assert controller._browser_tasks is None
     assert controller.connected() is False
     assert all(started == stopped for started, stopped in sessions)
+
+
+def test_start_app_navigates_the_controlled_page_on_its_owner_thread(browser):
+    controller, _, _ = browser
+    assert controller.connect()
+    page = controller.page
+    owners = []
+    page.goto.side_effect = lambda *args, **kwargs: owners.append(threading.get_ident())
+
+    assert controller.start_app("https://example.test/path") is True
+    assert page.goto.call_args.args == ("https://example.test/path",)
+    assert owners == [controller._browser_thread.ident]
+
+
+@pytest.mark.parametrize("intent", ["", "   "])
+def test_start_app_rejects_empty_urls_without_navigation(browser, intent):
+    controller, _, _ = browser
+    assert controller.connect()
+    page = controller.page
+    assert controller.start_app(intent) is False
+    page.goto.assert_not_called()
+
+
+@pytest.mark.parametrize("other_context", [False, True])
+def test_stop_app_closes_only_the_controlled_page_when_other_pages_exist(browser, mocker, other_context):
+    controller, _, _ = browser
+    assert controller.connect()
+    page, transport = controller.page, controller.browser
+    other = mocker.MagicMock()
+    other.is_closed.return_value = False
+    context = transport.contexts[0]
+    if other_context:
+        transport.contexts.append(mocker.MagicMock(pages=[other]))
+    else:
+        context.pages.append(other)
+    owners = []
+
+    def close():
+        owners.append(threading.get_ident())
+        context.pages.remove(page)
+
+    page.close.side_effect = close
+    assert controller.stop_app("ignored-by-browser") is True
+    assert owners == [controller._browser_thread.ident]
+    other.close.assert_not_called()
+    transport.new_browser_cdp_session.assert_not_called()
+    assert controller.page is other
+    assert controller.connected()
+
+
+@pytest.mark.parametrize("already_closed", [False, True])
+def test_stop_app_closes_the_browser_and_releases_its_worker_after_the_last_page(browser, already_closed):
+    controller, _, sessions = browser
+    assert controller.connect()
+    worker, page, transport = controller._browser_thread, controller.page, controller.browser
+    context = transport.contexts[0]
+    page.is_closed.return_value = already_closed
+    if already_closed:
+        context.pages.clear()
+    else:
+        page.close.side_effect = context.pages.clear
+
+    assert controller.stop_app("") is True
+    transport.new_browser_cdp_session.return_value.send.assert_called_once_with("Browser.close")
+    context.new_page.assert_not_called()
+    if already_closed:
+        page.close.assert_not_called()
+    assert not worker.is_alive()
+    assert controller._browser_thread is None
+    assert not controller.connected()
+    assert sessions == [(worker.ident, worker.ident)]
+
+
+@pytest.mark.parametrize("operation", ["start_app", "stop_app"])
+def test_browser_app_operations_report_errors_without_claiming_success(browser, operation):
+    controller, _, _ = browser
+    assert controller.connect()
+    if operation == "start_app":
+        controller.page.goto.side_effect = RuntimeError("navigation failed")
+    else:
+        controller.page.close.side_effect = RuntimeError("page close failed")
+    assert getattr(controller, operation)("https://example.test/") is False
+    assert "failed" in controller.last_error
+
+
+def test_stop_app_reports_cdp_close_failure_instead_of_claiming_browser_exit(browser):
+    controller, _, _ = browser
+    assert controller.connect()
+    transport = controller.browser
+    controller.page.close.side_effect = transport.contexts[0].pages.clear
+    transport.new_browser_cdp_session.return_value.send.side_effect = RuntimeError("CDP close failed")
+    assert controller.stop_app("") is False
+    assert controller.connected()
+    assert controller._browser_thread.is_alive()
+    assert controller.last_error == "CDP close failed"
+
+
+@pytest.mark.parametrize("browser_type", ["chrome", "edge", "brave", "vivaldi"])
+def test_compatibility_layer_relaunch_is_disabled_only_for_edge(browser, monkeypatch, tmp_path, browser_type):
+    controller, _, _ = browser
+    controller.browser_type = browser_type
+    monkeypatch.setattr(controller, "_default_profile_dir", lambda _port: tmp_path / "profile")
+    args = controller._default_launch_args()
+    assert ("--edge-skip-compat-layer-relaunch" in args) is (browser_type == "edge")

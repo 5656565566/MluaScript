@@ -20,6 +20,7 @@ from mluascript.shared.logging import logger
 
 # Desktop contacts select mouse buttons; pressure has no mouse equivalent.
 _MOUSE_BUTTON_MAP = {0: "left", 1: "right", 2: "middle"}
+_NAVIGATION_TIMEOUT_MS = 25000  # 留出时间在工作线程调用的 30 秒超时内返回导航错误。
 
 
 _KEYCODE_MAP = {
@@ -288,6 +289,9 @@ class BrowserController(CustomController):
         args.append(f"--user-data-dir={profile_path}")
         if self.browser_type in {"chrome", "edge", "brave", "vivaldi"}:
             args.extend(["--no-first-run", "--no-default-browser-check"])
+        if self.browser_type == "edge":
+            # 与 Playwright 一致，避免兼容层重启导致 Popen 句柄提前退出。
+            args.append("--edge-skip-compat-layer-relaunch")
         return args
 
     def _default_profile_dir(self, port: int) -> Path:
@@ -321,6 +325,64 @@ class BrowserController(CustomController):
 
     def connected(self) -> bool:
         return self._connected
+
+    def start_app(self, intent: str) -> bool:
+        """在当前受控页面打开网址。"""
+        with self._connection_lock:
+            try:
+                url = intent.strip()
+                if not url:
+                    raise ValueError("Browser URL must not be empty")
+                self._submit_browser(lambda: self._current_page().goto(
+                    url, wait_until="domcontentloaded", timeout=_NAVIGATION_TIMEOUT_MS,
+                ))
+                self.last_error = ""
+                return True
+            except Exception as exc:
+                self.last_error = str(exc) or exc.__class__.__name__
+                logger.error(f"Browser navigation failed: {self.last_error}")
+                return False
+
+    def stop_app(self, intent: str) -> bool:
+        """关闭当前受控页面，所有上下文均无页面时关闭浏览器。
+
+        intent 保留 Maa 签名，不用于选择其他页面。
+        """
+        with self._connection_lock:
+            try:
+                def close_page() -> bool:
+                    if self.page is not None and not self.page.is_closed():
+                        self.page.close()
+                    self.page = None
+                    remaining = [
+                        page for context in self.browser.contexts for page in context.pages
+                        if not page.is_closed()
+                    ]
+                    if remaining:
+                        self.page = next(
+                            (page for page in reversed(remaining) if page.url != "about:blank"), remaining[-1],
+                        )
+                        return False
+                    if self.browser.is_connected():
+                        session = self.browser.new_browser_cdp_session()
+                        try:
+                            session.send("Browser.close")
+                        except Exception:
+                            # 最后一页关闭时浏览器可能先断开，再返回 CDP 结果。
+                            if self.browser.is_connected():
+                                raise
+                    return True
+
+                if self._submit_browser(close_page):
+                    self._close_transport()
+                    if self._browser_thread is not None or self.process is not None:
+                        return False
+                self.last_error = ""
+                return True
+            except Exception as exc:
+                self.last_error = str(exc) or exc.__class__.__name__
+                logger.error(f"Browser page close failed: {self.last_error}")
+                return False
 
     def request_uuid(self) -> str:
         return f"browser_{self.url}"
