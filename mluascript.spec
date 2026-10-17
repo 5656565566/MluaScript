@@ -123,7 +123,7 @@ a = Analysis(
     pathex=['src'],
     binaries=[],
     datas=[
-        (maa_bin_path, '.'),
+        # 与冻结运行时的 maa/bin 查找路径一致，避免在根目录重复打包。
         (maa_bin_path, 'maa/bin'),
         (webui_dist_path, 'mluascript_web/dist'),
         ('src/mluascript/runtime/inject_lua/*.lua', 'mluascript/runtime/inject_lua'),
