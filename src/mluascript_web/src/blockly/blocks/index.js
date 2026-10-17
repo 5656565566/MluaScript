@@ -8,6 +8,7 @@ import { luaTableBlocks } from './lua_table'
 import { luaStringBlocks } from './lua_string'
 import { luaThreadBlocks } from './lua_thread'
 import { luaCoroutineBlocks } from './lua_coroutine'
+import { luaReflectionBlocks } from './lua_reflection.js'
 import { functionBlocks } from './function'
 import { getProcedurePickerItems, getProcedureDefinitionByName, applyProcedureSelectionToPickerBlock } from '../utils'
 import { MaaPickerIcon, LuaVariableField } from '../fields'
@@ -23,6 +24,7 @@ export const dynamicBlockSpecs = [
   ...luaStringBlocks,
   ...luaThreadBlocks,
   ...luaCoroutineBlocks,
+  ...luaReflectionBlocks,
   ...functionBlocks,
 ]
 
